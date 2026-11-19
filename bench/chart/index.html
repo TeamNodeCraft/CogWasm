@@ -301,7 +301,12 @@
         }
       });
     });
-    return values.length ? Math.max.apply(null, values) * 1.06 : 1;
+    var high = values.length ? Math.max.apply(null, values) * 1.06 : 1;
+    if (panel === state.data.reference.panel) {
+      // Keep the parity line on the panel once the ratios drop below 1.0.
+      high = Math.max(high, state.data.reference.value * 1.05);
+    }
+    return high;
   }
 
   function xPositions(count, left, right) {
