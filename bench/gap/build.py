@@ -120,6 +120,7 @@ def main() -> int:
             None,
             run.extern_args(program, deps, "clif"),
             run.dependency_search_paths(deps["clif"]),
+            False,
         )
         llvm_out = out / "llvm_o2" / f"{name}.wasm"
         llvm = run.compile_llvm(
