@@ -66,7 +66,11 @@ which values are whole structs. Those are exactly what inlining and SROA need,
 and MIR still has them. The final CLIF → wasm → CLIF round trip through Wasmtime
 costs little on its own (Wasmtime's Cranelift re-runs value numbering, hoisting
 and register allocation); what it cannot recover is what we put in linear
-memory. Step 5a measures both places before we build either.
+memory. Step 5a measured both places: a narrow MIR field-hoist cut nbody's
+executed instructions by 10.6%, while the Cranelift stack-load prototype was
+unsound without full escape/alias analysis and its sound slice found no
+opportunity. **Step 5b therefore builds the optimiser in MIR.** See
+[`step-5a.md`](../experiments/cranelift-wasm/stage-c/notes/step-5a.md).
 
 Techniques we expect to use: SSA construction directly from MIR (Braun et al.,
 2013, "Simple and Efficient Construction of SSA Form"); inlining then SROA in a
@@ -87,8 +91,8 @@ next starts.
 | **done** | 2. Lower constant and small `memcpy`/`memmove`/`memset` (the real memory gap; A.2 (e) is software `libm`, not a missing wasm `sqrt`): address read-only constant aggregates in place, inline constant copies up to 64 bytes, use wasm bulk-memory for larger or runtime lengths, and omit all-zero data segments in Wild | `sha256` 12.33× → 1.50×, `sort` 12.22× → 3.51×; no software `copy_forward` in their hot functions; difftest green |
 | **open** | 3. Turn up rustc's own pure-Rust MIR optimisations (`-Zmir-opt-level`, `-Zinline-mir`: MIR inlining, SROA, GVN, copy propagation) for the optimising tier. **Measured no win:** 0.997× / 1.012× execution geomean, +1% compile, −0.4% size, outputs green; rustc's existing MIR passes are too conservative (little inlining; SROA gives up on aggregates whose address is passed on). Our own MIR passes are step 5a's other candidate | Speed and compile-time change measured per benchmark; difftest green |
 | **done** | 4. Tidy loads and stores: fold constant offsets into wasm's load/store offset, drop redundant extends and address arithmetic where the 32-bit wrap cannot change the address | `strings` 111.2M → 107.2M and `miniz_driver` 216.4M → 216.1M executed instructions, no program regressed; suite geomean unchanged at 2.49× |
-| **open** | 5a. Decide where optimisation lives: prototype inlining + SROA on `nbody` both as our own MIR passes (patched into rustc, using Rust's no-alias and type information) and as stack-slot → SSA promotion on Cranelift IR; compare executed instructions, speed, compile-time cost and the effort to generalise | A written comparison with numbers, and a decision recorded here |
-| **open** | 5b. Build the winner of 5a in full: a cost-model inliner, then SROA/mem2reg, repeated (inline, promote non-escaping locals, repeat) | Iterator-heavy benchmarks within 1.2× of LLVM `-O2` |
+| **done** | 5a. Decide where optimisation lives: prototype inlining + SROA on `nbody` both as our own MIR passes (patched into rustc, using Rust's no-alias and type information) and as stack-slot → SSA promotion on Cranelift IR; compare executed instructions, speed, compile-time cost and the effort to generalise. **Decision: MIR.** The MIR field-hoist cut nbody 6.20G → 5.55G executed instructions (−10.6%) for +4.9% warm compile; the CLIF stack-load prototype moved 120 loads but miscompiled nbody, and its sound slice moved none. [Notes](../experiments/cranelift-wasm/stage-c/notes/step-5a.md) | A written comparison with numbers, and a decision recorded here |
+| **open** | 5b. Build the MIR winner of 5a: a cost-model inliner, then SROA/mem2reg, repeated (inline, promote non-escaping locals, repeat) | Iterator-heavy benchmarks within 1.2× of LLVM `-O2` |
 | **open** | 6. Bounds-check removal from simple range facts (loop indices against slice lengths) | Measured on the benchmarks that index slices in loops |
 | **open** | Tier 2: run steps 3–6 in a background optimising build and swap the result in when ready, keeping the fast tier for the edit loop | Scalar parity (within 1.1× of LLVM `-O2`, `simd128` off) with edit-to-result unchanged |
 | **open** | Explicit SIMD (wasm `simd128`) supported end to end through clif-to-wasm, with SDK helpers | A `simd128` program in the difftest corpus; measured speed-up |
