@@ -100,7 +100,7 @@ jobs:
             experiments/cranelift-wasm/toolchain/playground
             experiments/cranelift-wasm/toolchain/clif-to-wasm
             experiments/cranelift-wasm/toolchain/wild
-          key: cranelift-wasm-src-${{ runner.os }}-${{ hashFiles('experiments/cranelift-wasm/stage-c/patches/**') }}-f5298630-0e4e0458-fd79578-v1
+          key: cranelift-wasm-src-${{ runner.os }}-${{ hashFiles('experiments/cranelift-wasm/stage-c/patches/**') }}-f5298630-0e4e0458-fd79578-v2
 
       - name: restore wasi-sdk
         id: cache-wasi-sdk
@@ -230,7 +230,7 @@ jobs:
             experiments/cranelift-wasm/toolchain/playground
             experiments/cranelift-wasm/toolchain/clif-to-wasm
             experiments/cranelift-wasm/toolchain/wild
-          key: cranelift-wasm-src-${{ runner.os }}-${{ hashFiles('experiments/cranelift-wasm/stage-c/patches/**') }}-f5298630-0e4e0458-fd79578-v1
+          key: cranelift-wasm-src-${{ runner.os }}-${{ hashFiles('experiments/cranelift-wasm/stage-c/patches/**') }}-f5298630-0e4e0458-fd79578-v2
 
       - name: save wasi-sdk
         if: success() && steps.cache-wasi-sdk.outputs.cache-hit != 'true'
