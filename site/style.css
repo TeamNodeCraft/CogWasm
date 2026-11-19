@@ -1,6 +1,6 @@
 /* CogWasm site
  *
- * One stylesheet for the site and the benchmark page. No web fonts, no
+ * One stylesheet for the site. No web fonts, no
  * external assets. Colours come from the artwork: gear orange is the accent,
  * WebAssembly purple is used only in the pipeline diagram, and everything else
  * is neutral.
@@ -11,6 +11,9 @@
  */
 
 :root {
+  /* Each colour is written once as light-dark(light, dark). The page follows
+     the system theme until the header's theme button picks one; that choice
+     sets data-theme on <html> (see the head script and script.js). */
   color-scheme: light dark;
 
   --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
@@ -18,59 +21,40 @@
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
     "Liberation Mono", monospace;
 
-  --bg: #fbfaf9;
-  --surface: #ffffff;
-  --surface-soft: #f3eee8;
-  --ink: #1d1a24;
-  --muted: #5a5566;
-  --rule: #e3dbd2;
-  --rule-strong: #cfc4b7;
+  --bg: light-dark(#fbfaf9, #0c0b10);
+  --surface: light-dark(#ffffff, #16131c);
+  --surface-soft: light-dark(#f3eee8, #1d1a24);
+  --ink: light-dark(#1d1a24, #f0ece6);
+  --muted: light-dark(#5a5566, #b3acbc);
+  --rule: light-dark(#e3dbd2, #332d3d);
+  --rule-strong: light-dark(#cfc4b7, #4a4257);
 
   --accent: #f27412;
-  --accent-text: #a84800;
-  --wasm: #6c2fec;
-  --focus: #a84800;
+  --accent-text: light-dark(#a84800, #f27412);
+  --wasm: light-dark(#6c2fec, #bc9dff);
+  --focus: light-dark(#a84800, #f27412);
 
-  --code-bg: #f2ede7;
-  --shadow: 0 8px 24px rgba(29, 26, 36, 0.12);
-  --tooltip: #ffffff;
+  --code-bg: light-dark(#f2ede7, #1d1a24);
+  --shadow: 0 8px 24px light-dark(rgba(29, 26, 36, 0.12), rgba(0, 0, 0, 0.55));
+  --tooltip: light-dark(#ffffff, #1d1a24);
 
-  /* Kept for the benchmark page's chart styles. */
+  /* Used by the benchmark chart (bench/chart/chart.css and chart.js). */
   --panel: var(--surface);
   --border: var(--rule);
   --grid: var(--rule);
-  --s-exec: #0072b2;
-  --s-size: #d55e00;
-  --s-warm: #009e73;
-  --s-inc: #cc79a7;
-  --s-pre: #e69f00;
+  --s-exec: light-dark(#0072b2, #56b4e9);
+  --s-size: light-dark(#d55e00, #ff8c5a);
+  --s-warm: light-dark(#009e73, #34d399);
+  --s-inc: light-dark(#cc79a7, #f0a6d0);
+  --s-pre: light-dark(#e69f00, #f5c542);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0c0b10;
-    --surface: #16131c;
-    --surface-soft: #1d1a24;
-    --ink: #f0ece6;
-    --muted: #b3acbc;
-    --rule: #332d3d;
-    --rule-strong: #4a4257;
+:root[data-theme="light"] {
+  color-scheme: light;
+}
 
-    --accent: #f27412;
-    --accent-text: #f27412;
-    --wasm: #bc9dff;
-    --focus: #f27412;
-
-    --code-bg: #1d1a24;
-    --shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
-    --tooltip: #1d1a24;
-
-    --s-exec: #56b4e9;
-    --s-size: #ff8c5a;
-    --s-warm: #34d399;
-    --s-inc: #f0a6d0;
-    --s-pre: #f5c542;
-  }
+:root[data-theme="dark"] {
+  color-scheme: dark;
 }
 
 *,
@@ -314,6 +298,39 @@ pre code {
 
 .github-mark {
   flex: none;
+}
+
+.theme-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+html.js .theme-toggle {
+  display: inline-flex;
+}
+
+.theme-toggle:hover {
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+/* Show the theme the button switches to: a moon in light, a sun in dark. */
+.theme-icon {
+  display: block;
+}
+
+:root[data-theme="dark"] .theme-icon-moon,
+:root:not([data-theme="dark"]) .theme-icon-sun {
+  display: none;
 }
 
 .menu-toggle {
@@ -867,16 +884,35 @@ pre code {
   }
 }
 
-@media (max-width: 420px) {
+/* Narrow phones: the logo, theme, Menu and GitHub must share one row, so the
+   GitHub link becomes an icon button like the theme button. Its text stays in
+   the page (clipped, not removed), so it is still the link's accessible name. */
+@media (max-width: 480px) {
   .header-inner {
     gap: 0.75rem;
+  }
+
+  .header-actions {
+    gap: 0.4rem;
   }
 
   .brand-name {
     font-size: 1rem;
   }
 
+  .github-link {
+    justify-content: center;
+    width: 2.5rem;
+    padding: 0;
+  }
+
   .github-link span {
-    font-size: 0.9rem;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 }

@@ -1,14 +1,62 @@
 /* CogWasm site enhancements.
  *
- * Two small things only: the phone menu and the live benchmark headline.
- * Without JavaScript the navigation stays visible and the benchmark section
- * keeps its static "see the chart" text and image. Nothing else depends on
- * this file.
+ * Three small things only: the light/dark theme button, the phone menu and the
+ * live benchmark headline. Without JavaScript the page follows the system
+ * theme, the navigation stays visible and the benchmark section keeps its
+ * static "see the chart" text and image. Nothing else depends on this file.
  */
 (function () {
   "use strict";
 
   document.documentElement.classList.add("js");
+
+  // Theme: the head script already set data-theme from the saved choice or the
+  // system setting. The button saves an explicit choice; without one, the page
+  // keeps following the system as it changes.
+  var THEME_KEY = "cogwasm-theme";
+  var root = document.documentElement;
+  var themeButton = document.querySelector(".theme-toggle");
+  var systemDark = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+
+  function savedTheme() {
+    try {
+      var value = localStorage.getItem(THEME_KEY);
+      return value === "light" || value === "dark" ? value : null;
+    } catch (error) {
+      return null; // storage blocked: fall back to the system theme
+    }
+  }
+
+  function applyTheme(theme) {
+    root.setAttribute("data-theme", theme);
+    if (themeButton) {
+      var label = theme === "dark" ? "Switch to light theme" : "Switch to dark theme";
+      themeButton.setAttribute("aria-label", label);
+      themeButton.setAttribute("title", label);
+    }
+  }
+
+  applyTheme(savedTheme() || (systemDark && systemDark.matches ? "dark" : "light"));
+
+  if (themeButton) {
+    themeButton.addEventListener("click", function () {
+      var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      applyTheme(next);
+      try {
+        localStorage.setItem(THEME_KEY, next);
+      } catch (error) {
+        // Storage blocked: the choice lasts for this page view only.
+      }
+    });
+  }
+
+  if (systemDark && systemDark.addEventListener) {
+    systemDark.addEventListener("change", function (event) {
+      if (!savedTheme()) {
+        applyTheme(event.matches ? "dark" : "light");
+      }
+    });
+  }
 
   var toggle = document.querySelector(".menu-toggle");
   var nav = document.getElementById("site-nav");
