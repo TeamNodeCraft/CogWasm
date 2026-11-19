@@ -857,12 +857,19 @@ pre code {
     display: inline-flex;
   }
 
+  /* Keep the copy beside the icon; only narrow phones stack (below). */
   .intro {
-    grid-template-columns: 1fr;
+    grid-template-columns: auto minmax(0, 1fr);
   }
 
   .intro-mark img {
-    width: 138px;
+    width: clamp(96px, 20vw, 138px);
+  }
+}
+
+@media (max-width: 480px) {
+  .intro {
+    grid-template-columns: 1fr;
   }
 }
 
