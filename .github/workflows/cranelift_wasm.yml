@@ -21,10 +21,12 @@ permissions:
 
 jobs:
   build:
-    # The job publishes the full log to the ci-logs release, so it needs write;
-    # the workflow default above stays read-only.
+    # The job publishes the full log and bench-history to releases, so it
+    # needs write; backfill also reads the Actions runs API, so it needs
+    # actions read. The workflow default above stays read-only.
     permissions:
       contents: write
+      actions: read
     runs-on: ubuntu-latest
     timeout-minutes: 330
     env:
