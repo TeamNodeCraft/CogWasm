@@ -14,3 +14,8 @@ bench/chart/chart.svg
 bench/chart/data.json
 __pycache__/
 *.pyc
+
+# Assembled GitHub Pages output (site + chart page + release mirrors).
+# deploy_pages.yml builds it in CI; local builds should use a temp directory or
+# this ignored one.
+/public/

@@ -32,6 +32,8 @@ use wasmtime_wasi::{FsPerms, I32Exit, WasiCtxBuilder};
 
 const PAGE_SIZE: u64 = 65_536;
 const STDERR_CAPACITY: usize = 8 << 20;
+/// Enough fuel for a compile so it never traps; rustc.wasm uses far less.
+const FUEL_LIMIT: u64 = 1_000_000_000_000_000;
 
 // ---------------------------------------------------------------------------
 // CLI
@@ -138,6 +140,15 @@ struct CompileArgs {
     incremental: bool,
     #[arg(long)]
     incremental_dir: Option<PathBuf>,
+    /// Measure deterministic compiler work with Wasmtime fuel after the timed
+    /// runs. Fuel runs use a separate engine, so they never affect the wall
+    /// clock samples above.
+    #[arg(long)]
+    fuel: bool,
+    /// Fuel measurement compiles per program. Values are compared with each
+    /// other, so fewer than two cannot show determinism.
+    #[arg(long, default_value_t = 2)]
+    fuel_runs: usize,
     #[arg(long)]
     json: Option<PathBuf>,
 }
@@ -238,7 +249,12 @@ struct SpawnSummary {
     status: i32,
 }
 
-fn new_store(engine: &Engine, args: &[String], stderr: &MemoryOutputPipe) -> Result<HostStore> {
+fn new_store(
+    engine: &Engine,
+    args: &[String],
+    stderr: &MemoryOutputPipe,
+    deterministic_random: bool,
+) -> Result<HostStore> {
     let mut builder = WasiCtxBuilder::new();
     builder
         .inherit_stdout()
@@ -246,6 +262,18 @@ fn new_store(engine: &Engine, args: &[String], stderr: &MemoryOutputPipe) -> Res
         .args(args)
         .env("RUST_MIN_STACK", "16777216")
         .env("RUST_BACKTRACE", "1");
+    if deterministic_random {
+        // rustc's std hash seeds come from WASI `random_get`. A fresh random
+        // seed per compile changes a few hash-table probes (and therefore the
+        // fuel count), so the fuel samples pin the generator. The timed runs
+        // keep the product's real random source.
+        builder
+            .secure_random(wasmtime_wasi::Deterministic::new((0..=255_u8).collect()))
+            .insecure_random(wasmtime_wasi::Deterministic::new(
+                (0..=255_u8).rev().collect(),
+            ))
+            .insecure_random_seed(0);
+    }
     if let Ok(value) = std::env::var("CG_CLIF_WASM_STRICT") {
         builder.env("CG_CLIF_WASM_STRICT", value);
     }
@@ -367,6 +395,8 @@ fn prepare_instance(
     module: &Module,
     args: &[String],
     linker_path: &Path,
+    fuel_limit: Option<u64>,
+    deterministic_random: bool,
 ) -> Result<(HostStore, Instance, MemoryOutputPipe)> {
     let stderr = MemoryOutputPipe::new(STDERR_CAPACITY);
     let mut linker: Linker<HostState> = Linker::new(engine);
@@ -375,7 +405,10 @@ fn prepare_instance(
     })
     .wt("adding WASI p1 imports")?;
     add_playground_spawn(&mut linker, linker_path)?;
-    let mut store = new_store(engine, args, &stderr)?;
+    let mut store = new_store(engine, args, &stderr, deterministic_random)?;
+    if let Some(fuel) = fuel_limit {
+        store.set_fuel(fuel).wt("setting fuel")?;
+    }
     store.limiter(|state| &mut state.limits);
     let instance = linker
         .instantiate(&mut store, module)
@@ -507,6 +540,8 @@ fn startup_once(args: &StartupOnceArgs) -> Result<()> {
         &module,
         &["rustc".to_owned()],
         Path::new("/bin/false"),
+        None,
+        false,
     )?;
     let instantiate_ms = elapsed_ms(started);
     println!(
@@ -707,6 +742,16 @@ struct CompileRun {
     peak_memory_bytes: u64,
     rc: i32,
     phases: BTreeMap<String, f64>,
+    /// Wasmtime fuel consumed by `_start` when this run had fuel enabled.
+    /// Instantiation fuel is subtracted so only compiler work is counted.
+    fuel: Option<u64>,
+}
+
+/// One deterministic compiler-work sample.
+#[derive(Serialize, Clone)]
+struct FuelRun {
+    run: usize,
+    fuel: u64,
 }
 
 #[derive(Serialize)]
@@ -733,6 +778,10 @@ struct CompileResult {
     /// A normal (non-incremental) rebuild after the incremental runs, so the
     /// `out` module used for execution and size is the product's normal build.
     final_build: Option<CompileRun>,
+    /// Deterministic compiler work samples, when `--fuel` was requested.
+    fuel_runs: Vec<FuelRun>,
+    /// Median fuel across `fuel_runs`; exact because every sample must agree.
+    compiler_fuel: Option<u64>,
     medians: BTreeMap<String, f64>,
     ok: bool,
 }
@@ -816,7 +865,15 @@ fn run_phases(
     };
     let mut runs = Vec::with_capacity(count);
     for index in 0..count {
-        runs.push(compile_once(engine, module, &phase_options, linker, index)?);
+        runs.push(compile_once(
+            engine,
+            module,
+            &phase_options,
+            linker,
+            index,
+            None,
+            false,
+        )?);
     }
     Ok(runs)
 }
@@ -854,10 +911,12 @@ fn compile_with(
         extra_args: args.rustc_args.clone(),
     };
 
-    let warmup = compile_once(engine, module, &options, &linker, 0)?;
+    let warmup = compile_once(engine, module, &options, &linker, 0, None, false)?;
     let mut runs = Vec::with_capacity(args.runs);
     for index in 0..args.runs {
-        runs.push(compile_once(engine, module, &options, &linker, index)?);
+        runs.push(compile_once(
+            engine, module, &options, &linker, index, None, false,
+        )?);
     }
     let phase_runs = run_phases(engine, module, &options, &linker, args.phase_runs)?;
     let incremental = if args.incremental {
@@ -882,7 +941,9 @@ fn compile_with(
     };
 
     let final_build = if incremental.is_some() {
-        Some(compile_once(engine, module, &options, &linker, 0)?)
+        Some(compile_once(
+            engine, module, &options, &linker, 0, None, false,
+        )?)
     } else {
         None
     };
@@ -906,6 +967,8 @@ fn compile_with(
         phase_runs,
         incremental,
         final_build,
+        fuel_runs: Vec::new(),
+        compiler_fuel: None,
         medians,
         ok: true,
     };
@@ -916,6 +979,9 @@ fn compile_with(
 fn compile_command(args: &CompileArgs) -> Result<()> {
     if args.runs == 0 {
         bail!("--runs must be at least 1");
+    }
+    if args.fuel && args.fuel_runs < 2 {
+        bail!("--fuel needs --fuel-runs of at least 2 to compare two samples");
     }
     let rustc = absolute_arg(&args.rustc)?;
     let src = absolute_arg(&args.src)?;
@@ -949,13 +1015,92 @@ fn compile_command(args: &CompileArgs) -> Result<()> {
     // compile failed so an error is reported promptly.
     std::mem::forget(module);
     std::mem::forget(engine);
-    let result = outcome?;
+    let mut result = outcome?;
+    if args.fuel {
+        let (fuel_runs, compiler_fuel) =
+            measure_compiler_fuel(args, &rustc, &crate_source, &out, cache_dir.as_deref())?;
+        result
+            .medians
+            .insert("compiler_fuel".to_owned(), as_f64(compiler_fuel));
+        result.fuel_runs = fuel_runs;
+        result.compiler_fuel = Some(compiler_fuel);
+    }
     let text = serde_json::to_string_pretty(&result)?;
     if let Some(path) = &args.json {
         std::fs::write(path, &text)?;
     }
     println!("{text}");
     Ok(())
+}
+
+/// Compile the same program on a fuel-enabled engine and require every sample
+/// to consume the same number of fuel units.
+///
+/// Fuel is charged per wasm operator from a fixed cost table, so it counts
+/// compiler work rather than host time. The engine is separate from the timed
+/// one because enabling fuel instruments the generated code; using it for the
+/// timed samples would change what the chart's compile line measures.
+fn measure_compiler_fuel(
+    args: &CompileArgs,
+    rustc: &Path,
+    crate_source: &Path,
+    out: &Path,
+    cache_dir: Option<&Path>,
+) -> Result<(Vec<FuelRun>, u64)> {
+    let mut config = stage_c_host::engine_config(cache_dir)?;
+    config.consume_fuel(true);
+    let engine = Engine::new(&config).wt("creating the fuel engine")?;
+    let loaded = load_rustc_module(&engine, rustc, None, false)
+        .context("loading rustc.wasm on the fuel engine")?;
+    // Keep the benchmark's own module from the timed builds: the fuel runs
+    // must not replace the artifact that execution and size measure.
+    let fuel_out = out.with_file_name(format!("{}.fuel.wasm", args.crate_name));
+    let options = CompileOptions {
+        sysroot: absolute_arg(&args.sysroot)?,
+        linker: absolute_arg(&args.linker)?,
+        src: crate_source.to_path_buf(),
+        out: fuel_out,
+        crate_name: args.crate_name.clone(),
+        externs: args.externs.clone(),
+        search_paths: args.search_paths.clone(),
+        incremental: None,
+        time_passes: false,
+        extra_args: args.rustc_args.clone(),
+    };
+    let linker = options.linker.clone();
+    let mut runs = Vec::with_capacity(args.fuel_runs);
+    for index in 0..args.fuel_runs {
+        // Start every sample from the same state: rustc does slightly
+        // different work when its output path already exists.
+        if options.out.exists() {
+            std::fs::remove_file(&options.out)
+                .with_context(|| format!("removing {}", options.out.display()))?;
+        }
+        let run = compile_once(
+            &engine,
+            &loaded.module,
+            &options,
+            &linker,
+            index,
+            Some(FUEL_LIMIT),
+            true,
+        )?;
+        let fuel = run
+            .fuel
+            .context("a fuel-enabled compile did not report its fuel")?;
+        runs.push(FuelRun { run: index, fuel });
+    }
+    let first = runs.first().context("no fuel runs were requested")?.fuel;
+    if let Some(different) = runs.iter().find(|run| run.fuel != first) {
+        bail!(
+            "compiler fuel is not deterministic for {}: run 0 used {first}, \
+             run {} used {}",
+            options.src.display(),
+            different.run,
+            different.fuel
+        );
+    }
+    Ok((runs, first))
 }
 
 fn load_compiler(
@@ -1071,9 +1216,9 @@ fn run_incremental(
     };
     // The first compile populates the incremental directory; edits after it
     // reuse the cached work products.
-    let cold = compile_once(engine, module, &incremental_options, linker, 0)?;
+    let cold = compile_once(engine, module, &incremental_options, linker, 0, None, false)?;
     toggle_edit(&incremental_options.src)?;
-    let first_edit = compile_once(engine, module, &incremental_options, linker, 1)?;
+    let first_edit = compile_once(engine, module, &incremental_options, linker, 1, None, false)?;
     toggle_edit(&incremental_options.src)?;
     let mut measured = Vec::with_capacity(runs);
     for index in 0..runs {
@@ -1084,6 +1229,8 @@ fn run_incremental(
             &incremental_options,
             linker,
             index,
+            None,
+            false,
         )?);
     }
     incremental_options.time_passes = true;
@@ -1096,6 +1243,8 @@ fn run_incremental(
             &incremental_options,
             linker,
             index,
+            None,
+            false,
         )?);
     }
     let mut medians = BTreeMap::new();
@@ -1124,17 +1273,38 @@ fn compile_once(
     options: &CompileOptions,
     linker: &Path,
     index: usize,
+    fuel_limit: Option<u64>,
+    deterministic_random: bool,
 ) -> Result<CompileRun> {
     let args = options.rustc_args();
     let started = Instant::now();
-    let (mut store, instance, stderr) = prepare_instance(engine, module, &args, linker)?;
+    let (mut store, instance, stderr) = prepare_instance(
+        engine,
+        module,
+        &args,
+        linker,
+        fuel_limit,
+        deterministic_random,
+    )?;
     let instantiate_ms = elapsed_ms(started);
+    // Read the counter after instantiation so data-segment setup is not part
+    // of the compiler-work number.
+    let fuel_before = match fuel_limit {
+        Some(_) => Some(store.get_fuel().wt("reading fuel after instantiation")?),
+        None => None,
+    };
     let start = instance
         .get_typed_func::<(), ()>(&mut store, "_start")
         .wt("rustc.wasm _start export")?;
     let started = Instant::now();
     let call = start.call(&mut store, ());
     let rustc_total_ms = elapsed_ms(started);
+    let fuel = match fuel_before {
+        Some(before) => {
+            Some(before.saturating_sub(store.get_fuel().wt("reading fuel after _start")?))
+        }
+        None => None,
+    };
     let spawns = store
         .data()
         .spawns
@@ -1199,6 +1369,7 @@ fn compile_once(
         peak_memory_bytes: peak_pages * PAGE_SIZE,
         rc,
         phases,
+        fuel,
     })
 }
 

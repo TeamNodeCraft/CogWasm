@@ -7,6 +7,7 @@
 #   bench/run.sh --programs a_add,expr,sha256 --runs 5
 #   bench/run.sh --no-incremental        # for a compiler without the incremental patches
 #   bench/run.sh --cold-runs 1            # fewer 38 s cold module compiles
+#   bench/run.sh --fuel                   # also count compiler work with Wasmtime fuel
 #
 # Toolchain overrides (used by the baseline run in bench/README.md):
 #   BENCH_TOOLCHAIN      experiments/cranelift-wasm/toolchain to measure
@@ -29,9 +30,10 @@ COLD_RUNS=
 OUT=
 PREPARE_PRECOMPILED=1
 NO_INCREMENTAL=0
+FUEL=0
 
 usage() {
-    sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 while [ $# -gt 0 ]; do
@@ -48,6 +50,7 @@ while [ $# -gt 0 ]; do
         --out=*) OUT=${1#--out=} ;;
         --no-precompiled) PREPARE_PRECOMPILED=0 ;;
         --no-incremental) NO_INCREMENTAL=1 ;;
+        --fuel) FUEL=1 ;;
         -h|--help) usage; exit 0 ;;
         *) printf 'unknown argument: %s (try --help)\n' "$1" >&2; exit 2 ;;
     esac
@@ -190,6 +193,9 @@ if [ -n "$STARTUP_PRECOMPILED" ]; then
 fi
 if [ "$NO_INCREMENTAL" = 1 ]; then
     ARGS+=(--no-incremental)
+fi
+if [ "$FUEL" = 1 ]; then
+    ARGS+=(--fuel)
 fi
 
 # A baseline run points BENCH_TOOLCHAIN at a detached worktree; record that

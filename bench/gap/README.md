@@ -10,12 +10,14 @@ bench/gap/run.sh sha256 sort     # a subset
 bench/gap/run.sh --no-mir        # counts and analysis only
 bench/gap/build.py               # rebuild the analysed modules only
 bench/gap/gc_test.sh             # Wild --gc-sections size experiment
+bench/gap/count-quick.sh RESULT.json
+                                  # add counts to one quick CI result, reusing
+                                  # the modules bench/run.sh already built
 ```
 
 `run.sh` builds `gap-tool` (Rust, pinned crates in `Cargo.lock`), builds the
 suite modules through `bench/run.py`, instruments every basic block with an
 exported counter, runs the suite seeds, and writes:
-
 - `results/analysis.json` — per-program totals, per-function counts, category
   counts, cause attribution, section and function sizes. This is the raw data
   behind the report.
@@ -26,6 +28,12 @@ exported counter, runs the suite seeds, and writes:
   `diff-topN.md` / `diff-inlined.md` where LLVM kept a matching body.
 - `results/mir.json`, `results/MIR.md` — rustc MIR-level experiment.
 - `results/SUMMARY.md` — compact tables.
+
+`count-quick.sh` is the CI-sized variant: it takes one quick result JSON, uses
+the modules already under `bench/work/wasm/`, measures each module twice, and
+writes per-program totals plus the geomean (same 0.1 ms floor as the time
+ratio) back into that JSON. It also folds in the compiler-work median that
+`bench/run.sh --fuel` recorded.
 
 The per-seed counts and the raw per-program size files are git-ignored; the
 compact `results/analysis.json`, the MIR results and the hot-function WAT are

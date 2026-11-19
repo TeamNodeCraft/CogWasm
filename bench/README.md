@@ -17,11 +17,16 @@ the final CogWasm in-wasm compile time and execution?*
 | **B. Compile inside `rustc.wasm`** | warm compile (module resident, fresh compiler instance), incremental compile with a one-line edit, instantiation, linker time, peak guest memory. Phases come from `-Ztime-passes`: frontend = total − codegen − link, plus the raw phase map. |
 | **C. Execution** | `run(seed)` in Wasmtime for the Cranelift pipeline and for LLVM `-O0` and `-O2` builds of the same source. |
 | **D. Output size** | total, code and data bytes for every build. |
+| **E. Deterministic counts** | executed wasm instructions per program and the geomean over LLVM `-O2`; compiler work per compile as Wasmtime fuel, median across programs. |
 
 Compile time is the `_start` call inside `rustc.wasm` minus the native Wild
 subprocess time; module load and instantiation are reported separately. Peak
 memory is the largest linear-memory size requested, tracked by a Wasmtime
 `ResourceLimiter`, so it includes the compiler's own heap and stack.
+
+The wall-clock rows are noisy on shared CI runners. Group E adds two counters
+that are deterministic by construction; see
+[Deterministic instruction counts](#deterministic-instruction-counts).
 
 ## Programs
 
@@ -75,9 +80,10 @@ bench/run.sh --programs a_add,expr,sha256 --runs 7 --out bench/results/local.jso
 `matmul`, `math_e`, `hostcall_f`) with 3 runs; `--full` is all 21 programs with
 5 runs and five cold module compiles. Quick runs also measure the precompiled
 `.cwasm` compiler load, but keep the program compiles on the cached path so
-quick points stay comparable across the change that added it. `--programs`
-accepts a name or `class/name`. Other switches: `--runs N`, `--out FILE`,
-`--no-precompiled`.
+quick points stay comparable across the change that added it. `--fuel` also
+measures deterministic compiler work (two fuel runs per program) and is what
+the CI quick job uses. `--programs` accepts a name or `class/name`. Other
+switches: `--runs N`, `--out FILE`, `--no-precompiled`.
 
 Requirements: the stage-C artifacts must already exist under
 `experiments/cranelift-wasm/toolchain/` (`rustc.wasm`, `sysroot-pure`, Wild,
@@ -106,6 +112,79 @@ does not publish a JSON file. This is the same ABI and comparison rule as
 The incremental metric edits a constant added by the harness from `0u64` to
 `0x0_u64` (both zero) between runs, so it measures a real source edit and a
 real incremental recompile without changing the answer.
+
+## Deterministic instruction counts
+
+Wall-clock numbers move on shared runners even when the compiler did not: six
+no-op commits shifted the execution ratio between 2.2x and 2.7x and warm
+compile between 200 and 340 ms. The quick CI job therefore also records two
+counters, which have no clock in them.
+
+**Executed instructions.** `bench/gap` instruments every basic block of the
+linked program with a counter, runs the suite seeds, and sums
+`executions x instructions in the block`. The quick job runs that step on the
+modules the quick suite just built, for ours and LLVM `-O2`'s, and stores
+per-program totals under `programs.<name>.instructions` in the history point
+(`clif`, `llvm_o2`, and their ratio). The geomean ratio uses the same
+`0.1 ms` LLVM `-O2` execution-time floor as the time ratio, so both ratios are
+over exactly the same programs.
+
+The two ratios measure different things and should not be expected to match.
+Instructions say how much work the program executes; time also includes the
+cost of each instruction. For example, `mandelbrot` executes **1.44x** LLVM
+`-O2`'s instructions while taking only **1.06x** its time: our instructions are
+cheaper per operation on that kernel. Conversely, a small instruction gap can
+hide a large time gap when one side has expensive calls. Showing both makes
+that distinction visible instead of forcing one number to stand for both.
+
+**Compiler work.** Compiling inside `rustc.wasm` is measured with Wasmtime
+fuel on a separate, fuel-enabled engine. Fuel is charged per wasm operator
+from a fixed cost table, so it is compiler work, not host time. The host
+subtracts the fuel used by instantiation and reports the `_start` call; each
+quick program gets two fuel samples, and the host fails the run if they
+differ. The history point stores the per-program median under
+`programs.<name>.clif.compiler_fuel` and the median across programs under
+`deterministic.compiler_fuel_median`.
+
+Determinism evidence and variation found:
+
+* Two independent processes with the same fixed work path produced identical
+  fuel for `a_add` (405,448,969) and `b_alloc` (806,451,911), and every
+  per-program pair of samples inside a process was identical too.
+* The first check did **not** agree: changing the work/output path between
+  runs moved `a_add` by a few hundred fuel units (405,525,972 vs 405,448,969).
+  rustc hashes the input path into its metadata, so path bytes are part of the
+  input. The harness already uses the stable
+  `bench/work/compile/<program>` and `bench/work/wasm/...` paths; the fuel
+  measurement now relies on that stability instead of creating a new directory
+  per sample.
+* rustc's standard-library hash seeds come from WASI `random_get`, and fresh
+  per-context entropy made two samples in one process differ by 84 fuel units.
+  Fuel measurement now installs a deterministic WASI random source; the timed
+  runs keep the product's real entropy.
+* A compile that finds its output file already present does a few units less
+  work than one that creates it. Fuel runs write a separate
+  `<program>.fuel.wasm` and remove it before every sample, so both samples
+  start from the same state and the benchmark's own module is never replaced
+  by a fuel-run build.
+* No allocator or clock dependence was observed after those fixes.
+* Fuel is a fixed per-operator cost charged by the interpreter instrumentation,
+  not a native instruction count, so it does not depend on the CPU or on
+  Cranelift's register allocation. We verified repeated runs on the development
+  machine; the first CI point on the Linux runner is the cross-runner check.
+
+Counts are exact for the seed list and module that produced them, and two
+measurements of the same instrumented module are compared before publishing.
+Older history points have no counts and simply show no value for the two lines.
+We did not backfill them: the same commits' linked modules are not retained, so
+a backfill would not have been exact. Counts start with the next CI point.
+
+CI cost: the count step itself is seconds for the 12 quick programs (two
+measurements each). The one-time cost is compiling `rustc.wasm` once on the
+fuel-enabled engine, because fuel instrumentation changes the compiled code:
+about 39 s on the development machine and roughly 1-2 minutes on the CI runner,
+then about 0.4 s per program from the Wasmtime cache. It reuses the quick
+modules and never rebuilds the compiler.
 
 ## Results and comparison
 
@@ -202,10 +281,11 @@ backend SROA/inliner and the memory-intrinsic lowering above roadmap step 3.
 
 ## CI
 
-* `.github/workflows/cranelift_wasm.yml` runs `bench/run.sh --quick` after the
-  compiler build, uploads the JSON, writes the table to the job summary and
-  publishes both files on the rolling `ci-logs` release. It uses the artifacts
-  that job already built.
+* `.github/workflows/cranelift_wasm.yml` runs `bench/run.sh --quick --fuel`
+  after the compiler build, then `bench/gap/count-quick.sh` on the same quick
+  modules, uploads the JSON, writes the table to the job summary and publishes
+  both files on the rolling `ci-logs` release. It uses the artifacts that job
+  already built and never rebuilds the compiler.
 * On a successful main run, the same job appends the quick result to the
   dedicated, append-only `bench-history` release as
   `<commit-date>-<sha7>.json` (the quick JSON plus commit sha, subject, date,
@@ -213,10 +293,11 @@ backend SROA/inliner and the memory-intrinsic lowering above roadmap step 3.
   script never deletes one. It also backfills quick results that only exist on
   `ci-logs` (starting with `8476eeb`), then rebuilds
   [`chart.svg`](chart/chart.py) and `data.json` from every point and uploads
-  them with stable names. `deploy_pages.yml` copies the static
-  [`bench/chart/index.html`](chart/index.html) plus those two assets to
-  `/bench/` on the repository's GitHub Pages site; the README image links
-  there for the interactive version.
+  them with stable names. The interactive chart is part of the project
+  site's Benchmarks section: [`bench/chart/chart.js`](chart/chart.js) and
+  [`chart.css`](chart/chart.css), copied by `site/build.py`, read
+  `data.json`, which `deploy_pages.yml` downloads next to them. The README
+  image links to that section.
 * `.github/workflows/bench.yml` runs `--full` on a weekly schedule and on
   `workflow_dispatch` (optional `base` commit and `record_history` switch). It
   publishes the JSON + Markdown as one asset per run on the `bench-results`
@@ -229,11 +310,20 @@ backend SROA/inliner and the memory-intrinsic lowering above roadmap step 3.
 writes `chart.svg` (the 800x420 README image) and `data.json` (the interactive
 page). Both plots are per-commit, not per-time. Panel 1 is the geometric mean
 of our execution time over LLVM `-O2` (programs whose LLVM time is under
-0.1 ms excluded, the same floor for every commit) and the geometric mean of
-module size over LLVM `-O2`. Panel 2 is the median warm compile, median
-incremental compile when present, and precompiled compiler load when present.
-A dashed vertical rule marks a commit whose quick program subset differs from
-the previous one, so changed subsets are visible instead of silently mixed.
+0.1 ms excluded, the same floor for every commit), the geometric mean of
+executed instructions over LLVM `-O2` on that same subset, and the geometric
+mean of module size over LLVM `-O2`. Panel 2 is the median warm compile, median
+incremental compile when present, precompiled compiler load when present, and
+the median compiler instructions (Wasmtime fuel) on a right-hand axis. The
+right axis keeps the compile story in one panel; a third small panel would
+have made the fixed 800x420 README image cramped. The interactive chart uses
+the same layout and shows the exact count in its tooltip.
+
+Deterministic instruction lines are **solid**; wall-clock lines are **dotted**.
+The legend says so once. Points without counts (everything published before
+this change) simply have no value for those lines. A dashed vertical rule
+marks a commit whose quick program subset differs from the previous one, so
+changed subsets are visible instead of silently mixed.
 
 Local check:
 

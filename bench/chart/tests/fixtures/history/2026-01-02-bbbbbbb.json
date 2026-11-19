@@ -112,6 +112,15 @@
         "llvm_o2": {
           "total_bytes": 500
         }
+      },
+      "instructions": {
+        "clif": {
+          "total": 200
+        },
+        "llvm_o2": {
+          "total": 100
+        },
+        "ratio": 2.0
       }
     },
     "b_alloc": {
@@ -158,6 +167,15 @@
         "llvm_o2": {
           "total_bytes": 1000
         }
+      },
+      "instructions": {
+        "clif": {
+          "total": 300
+        },
+        "llvm_o2": {
+          "total": 200
+        },
+        "ratio": 1.5
       }
     },
     "expr": {
@@ -204,6 +222,15 @@
         "llvm_o2": {
           "total_bytes": 1000
         }
+      },
+      "instructions": {
+        "clif": {
+          "total": 120
+        },
+        "llvm_o2": {
+          "total": 100
+        },
+        "ratio": 1.2
       }
     }
   },

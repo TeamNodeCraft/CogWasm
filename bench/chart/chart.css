@@ -1,0 +1,84 @@
+/* Interactive benchmark trend chart (bench/chart/chart.js), shown in the site's
+   Benchmarks section. Colours and fonts come from the site palette in
+   site/style.css (--panel, --border, --tooltip, --shadow, --s-*). */
+
+.bench-trend { margin-top: 1.5rem; font-size: 14px; line-height: 1.45; }
+.bench-trend-intro { max-width: 72ch; margin: 0 0 12px; color: var(--muted); }
+.bench-trend .legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+.bench-trend .legend button,
+.bench-trend .legend .reference {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+.bench-trend .legend button { cursor: pointer; }
+.bench-trend .legend button:hover { border-color: var(--muted); }
+.bench-trend .legend button[aria-pressed="false"] { opacity: 0.42; }
+.bench-trend .legend button:disabled { cursor: default; opacity: 0.38; }
+.bench-trend .legend .reference { color: var(--muted); }
+.bench-trend .legend .legend-note {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.bench-trend .legend svg { display: block; flex: none; }
+.bench-trend .chart { position: relative; width: 100%; margin: 0; }
+.bench-trend .chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.bench-trend .chart img { display: block; width: 100%; height: auto; }
+.bench-trend .message {
+  padding: 28px 16px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  color: var(--muted);
+  text-align: center;
+}
+html:not(.js) .bench-trend .message.loading { display: none; }
+.bench-trend .footnote { margin: 14px 0 0; color: var(--muted); font-size: 12px; }
+.bench-trend .footnote a { color: inherit; }
+.bench-trend .tooltip {
+  position: fixed;
+  z-index: 10;
+  width: max-content;
+  max-width: min(340px, calc(100vw - 24px));
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--tooltip);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+  font-size: 12px;
+  pointer-events: none;
+}
+.bench-trend .tooltip[hidden] { display: none; }
+.bench-trend .tooltip .head { display: flex; gap: 8px; align-items: baseline; }
+.bench-trend .tooltip .sha { font-weight: 700; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.bench-trend .tooltip .date { color: var(--muted); }
+.bench-trend .tooltip .subject { margin: 3px 0 5px; overflow-wrap: anywhere; }
+.bench-trend .tooltip .meta { color: var(--muted); margin-bottom: 7px; }
+.bench-trend .tooltip table { border-collapse: collapse; width: 100%; }
+.bench-trend .tooltip td { padding: 1px 0; vertical-align: baseline; }
+.bench-trend .tooltip td.value { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bench-trend .tooltip .swatch { display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 2px; }
+.bench-trend .tooltip .note { margin-top: 7px; color: var(--muted); }
+.bench-trend .tooltip .note.subset { color: var(--accent-text); }
+.bench-trend .tooltip a { color: var(--accent-text); }
+@media (max-width: 680px) {
+  .bench-trend .legend { gap: 5px; }
+  .bench-trend .legend button,
+  .bench-trend .legend .reference { font-size: 12px; padding: 3px 8px; }
+}

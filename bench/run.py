@@ -347,6 +347,7 @@ def compile_clif(
     precompiled: Path | None,
     externs: list[str],
     search_paths: list[str],
+    fuel: bool,
 ) -> dict:
     out.parent.mkdir(parents=True, exist_ok=True)
     program_work = work / "compile" / program["name"]
@@ -383,6 +384,10 @@ def compile_clif(
     ]
     if precompiled is not None:
         command.extend(["--precompiled", str(precompiled)])
+    if fuel:
+        # Two samples per program: the host fails if they disagree, so a
+        # non-deterministic compiler work count stops the run.
+        command.extend(["--fuel", "--fuel-runs", "2"])
     if program.get("incremental", True):
         command.extend(
             [
@@ -480,6 +485,7 @@ def run_program(
     phase_runs: int,
     load: str,
     precompiled: Path | None,
+    fuel: bool,
 ) -> dict:
     name = program["name"]
     print(f"== {program['class']}/{name}", file=sys.stderr)
@@ -503,6 +509,7 @@ def run_program(
         precompiled,
         clif_externs,
         clif_search,
+        fuel,
     )
 
     llvm_o0 = compile_llvm(
@@ -572,6 +579,14 @@ def run_program(
                 [float(item["peak_memory_bytes"]) for item in clif["runs"]]
             ),
             "phases": phases,
+            "compiler_fuel": (
+                {
+                    "median": clif["compiler_fuel"],
+                    "runs": [item["fuel"] for item in clif.get("fuel_runs", [])],
+                }
+                if clif.get("compiler_fuel") is not None
+                else None
+            ),
             "wasm_bytes": clif["wasm_bytes"],
             "wasm_sha256": clif["wasm_sha256"],
         },
@@ -619,8 +634,8 @@ def markdown_report(result: dict) -> str:
         "",
         "## Compile",
         "",
-        "| program | class | lines | clif warm (ms) | clif incr. (ms) | frontend | codegen | link | LLVM O0 (ms) | LLVM O2 (ms) | peak MiB |",
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| program | class | lines | clif warm (ms) | clif incr. (ms) | frontend | codegen | link | LLVM O0 (ms) | LLVM O2 (ms) | compiler fuel | peak MiB |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for program in result["programs"].values():
         clif = program["clif"]
@@ -628,9 +643,10 @@ def markdown_report(result: dict) -> str:
         incremental = clif["compile_incremental"]
         phases = clif["phases"]
         peak = clif["peak_memory_bytes"]["median"]
+        fuel = clif.get("compiler_fuel")
         lines.append(
             "| {name} | {class} | {lines} | {warm} | {incr} | {frontend} | {codegen} | "
-            "{link} | {o0} | {o2} | {peak} |".format(
+            "{link} | {o0} | {o2} | {fuel} | {peak} |".format(
                 name=program["name"],
                 **{"class": program["class"]},
                 lines=program["source_lines"],
@@ -641,6 +657,7 @@ def markdown_report(result: dict) -> str:
                 link=fmt(phases["link_ms"]),
                 o0=fmt(program["llvm"]["compile_o0"]["median"]),
                 o2=fmt(program["llvm"]["compile_o2"]["median"]),
+                fuel=f"{(fuel or {}).get('median', 0):,}" if fuel else "—",
                 peak=fmt(None if peak is None else peak / (1 << 20)),
             )
         )
@@ -708,6 +725,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--out", type=Path)
     parser.add_argument("--no-incremental", action="store_true")
+    parser.add_argument(
+        "--fuel",
+        action="store_true",
+        help="also measure deterministic compiler work with Wasmtime fuel",
+    )
     return parser.parse_args(argv)
 
 
@@ -808,7 +830,6 @@ def main(argv: list[str]) -> int:
     if startup_artifact is not None:
         startup_command.extend(["--precompiled", str(startup_artifact)])
     startup = run_json(startup_command)
-    rustc_wasm = toolchain / "stage-c" / "artifacts" / "rustc.wasm"
 
     measured = {}
     for program in selected:
@@ -825,7 +846,18 @@ def main(argv: list[str]) -> int:
             args.phase_runs,
             load,
             precompiled,
+            args.fuel,
         )
+
+    fuel_values = [
+        float(program["clif"]["compiler_fuel"]["median"])
+        for program in measured.values()
+        if program["clif"].get("compiler_fuel") is not None
+    ]
+    deterministic = {
+        "compiler_fuel_median": median(fuel_values),
+        "compiler_fuel_programs": len(fuel_values),
+    }
 
     rustc_version = run([str(llvm_rustc), "--version"], quiet=True).strip()
     result = {
@@ -852,10 +884,12 @@ def main(argv: list[str]) -> int:
             "programs": list(measured),
             "load": load,
             "startup_precompiled": startup_artifact is not None,
+            "fuel": args.fuel,
             "rustc_wasm_bytes": startup["rustc_bytes"],
             "rustc_wasm_sha256": startup["rustc_sha256"],
         },
         "startup": startup["modes"],
+        "deterministic": deterministic,
         "programs": measured,
         "ok": True,
     }

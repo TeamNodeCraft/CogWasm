@@ -1,0 +1,920 @@
+/* CogWasm site
+ *
+ * One stylesheet for the site. No web fonts, no
+ * external assets. Colours come from the artwork: gear orange is the accent,
+ * WebAssembly purple is used only in the pipeline diagram, and everything else
+ * is neutral.
+ *
+ * The light-theme link and focus colour is a darker shade of the gear orange:
+ * #f27412 on a light background is 2.9:1, below WCAG AA for text. #a84800 keeps
+ * the same hue at 5.6:1 on the page background and 5.9:1 on white.
+ */
+
+:root {
+  /* Each colour is written once as light-dark(light, dark). The page follows
+     the system theme until the header's theme button picks one; that choice
+     sets data-theme on <html> (see the head script and script.js). */
+  color-scheme: light dark;
+
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+
+  --bg: light-dark(#fbfaf9, #0c0b10);
+  --surface: light-dark(#ffffff, #16131c);
+  --surface-soft: light-dark(#f3eee8, #1d1a24);
+  --ink: light-dark(#1d1a24, #f0ece6);
+  --muted: light-dark(#5a5566, #b3acbc);
+  --rule: light-dark(#e3dbd2, #332d3d);
+  --rule-strong: light-dark(#cfc4b7, #4a4257);
+
+  --accent: #f27412;
+  --accent-text: light-dark(#a84800, #f27412);
+  --wasm: light-dark(#6c2fec, #bc9dff);
+  --focus: light-dark(#a84800, #f27412);
+
+  --code-bg: light-dark(#f2ede7, #1d1a24);
+  --shadow: 0 8px 24px light-dark(rgba(29, 26, 36, 0.12), rgba(0, 0, 0, 0.55));
+  --tooltip: light-dark(#ffffff, #1d1a24);
+
+  /* Used by the benchmark chart (bench/chart/chart.css and chart.js). */
+  --panel: var(--surface);
+  --border: var(--rule);
+  --grid: var(--rule);
+  --s-exec: light-dark(#0072b2, #56b4e9);
+  --s-instr: light-dark(#2b8cbe, #8fd3ff);
+  --s-size: light-dark(#d55e00, #ff8c5a);
+  --s-warm: light-dark(#009e73, #34d399);
+  --s-inc: light-dark(#cc79a7, #f0a6d0);
+  --s-pre: light-dark(#e69f00, #f5c542);
+  --s-fuel: light-dark(#5b3a8e, #c4a7f7);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  scroll-behavior: smooth;
+  /* Anchor jumps land below the sticky header (about 4.3rem tall). */
+  scroll-padding-top: 5rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 1.0625rem;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+img,
+svg {
+  max-width: 100%;
+}
+
+img {
+  height: auto;
+}
+
+a {
+  color: var(--accent-text);
+  text-decoration-thickness: 0.08em;
+  text-underline-offset: 0.16em;
+}
+
+a:hover {
+  text-decoration-thickness: 0.15em;
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+::selection {
+  background: var(--accent);
+  color: #1d1a24;
+}
+
+h1,
+h2,
+h3 {
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+
+code,
+pre {
+  font-family: var(--font-mono);
+}
+
+code {
+  font-size: 0.92em;
+}
+
+p code,
+li code,
+td code,
+th code {
+  padding: 0.08em 0.28em;
+  border-radius: 0.25em;
+  background: var(--code-bg);
+}
+
+pre {
+  margin: 1rem 0;
+  padding: 0.9rem 1rem;
+  overflow-x: auto;
+  border: 1px solid var(--rule);
+  border-radius: 0.45rem;
+  background: var(--code-bg);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+pre code {
+  padding: 0;
+  background: none;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.container {
+  width: min(72rem, 100% - 2.5rem);
+  margin-inline: auto;
+}
+
+/* Skip link ------------------------------------------------------------- */
+
+.skip-link {
+  position: absolute;
+  z-index: 30; /* above the sticky header when focused */
+  left: 1rem;
+  top: -5rem;
+  padding: 0.6rem 0.9rem;
+  border: 2px solid var(--accent);
+  border-radius: 0.4rem;
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.skip-link:focus {
+  top: 1rem;
+}
+
+/* Header ---------------------------------------------------------------- */
+
+.site-header {
+  /* Stays at the top while the page scrolls; opaque so content never shows
+     through, and above the chart tooltip and other positioned content. */
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  border-bottom: 1px solid var(--rule);
+  background: var(--bg);
+}
+
+.header-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem 1.5rem;
+  min-height: 4.25rem;
+}
+
+.brand {
+  display: inline-flex;
+  order: 1;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--ink);
+  font-size: 1.1rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+}
+
+.brand-mark {
+  display: block;
+  width: 30px;
+  height: 30px;
+  flex: none;
+}
+
+.brand:hover .brand-name {
+  text-decoration: underline;
+  text-decoration-thickness: 0.08em;
+  text-underline-offset: 0.18em;
+}
+
+.site-nav {
+  order: 2;
+  margin-left: auto;
+}
+
+.site-nav ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.15rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.site-nav a {
+  display: inline-block;
+  padding: 0.35rem 0;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font-size: 0.95rem;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.site-nav a:hover,
+.site-nav a:focus-visible {
+  border-bottom-color: var(--accent);
+  color: var(--ink);
+}
+
+.header-actions {
+  display: flex;
+  order: 3;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.github-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2.5rem;
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  color: var(--ink);
+  font-size: 0.95rem;
+  font-weight: 550;
+  text-decoration: none;
+}
+
+.github-link:hover {
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.github-mark {
+  flex: none;
+}
+
+.theme-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+html.js .theme-toggle {
+  display: inline-flex;
+}
+
+.theme-toggle:hover {
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+/* Show the theme the button switches to: a moon in light, a sun in dark. */
+.theme-icon {
+  display: block;
+}
+
+:root[data-theme="dark"] .theme-icon-moon,
+:root:not([data-theme="dark"]) .theme-icon-sun {
+  display: none;
+}
+
+.menu-toggle {
+  display: none;
+  align-items: center;
+  min-height: 2.5rem;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.menu-toggle:hover {
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+/* Intro ----------------------------------------------------------------- */
+
+.intro {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 2fr);
+  gap: clamp(1.5rem, 4vw, 3.5rem);
+  align-items: center;
+  padding-block: clamp(3rem, 8vw, 5.5rem) clamp(2.5rem, 6vw, 4rem);
+}
+
+.intro-mark img {
+  display: block;
+  width: clamp(132px, 18vw, 190px);
+  height: auto;
+}
+
+.eyebrow {
+  margin: 0 0 0.75rem;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.18rem 0.55rem;
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.intro h1 {
+  margin: 0;
+  font-size: clamp(2.6rem, 7vw, 4rem);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+}
+
+.lede {
+  max-width: 52ch;
+  margin: 0.9rem 0 0;
+  font-size: clamp(1.15rem, 2.2vw, 1.35rem);
+  line-height: 1.5;
+}
+
+.intro-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: 1.6rem 0 0;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.75rem;
+  padding: 0.5rem 1.05rem;
+  border: 1px solid var(--accent);
+  border-radius: 0.45rem;
+  background: var(--accent);
+  color: #1d1a24;
+  font-size: 0.98rem;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.button:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.button-quiet {
+  border-color: var(--rule-strong);
+  background: transparent;
+  color: var(--ink);
+}
+
+.button-quiet:hover {
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+/* Sections -------------------------------------------------------------- */
+
+.section {
+  padding-block: clamp(2.25rem, 5vw, 3.5rem);
+  border-top: 1px solid var(--rule);
+}
+
+.section > h2 {
+  margin: 0 0 0.8rem;
+  font-size: clamp(1.5rem, 3vw, 1.9rem);
+  font-weight: 650;
+}
+
+.section > h3 {
+  margin: 2rem 0 0.55rem;
+  font-size: 1.15rem;
+  font-weight: 650;
+}
+
+.section > p,
+.section > ul:not(.components),
+.section > ol:not(.pipeline),
+.section > h2,
+.section > h3,
+.section > .as-of,
+.section > .note,
+.section > .bench-live {
+  max-width: 70ch;
+}
+
+.section > p {
+  margin: 0 0 1rem;
+}
+
+.section > .note {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.4rem 1rem;
+  margin-bottom: 0.8rem;
+}
+
+.section-head h2 {
+  margin: 0;
+  font-size: clamp(1.5rem, 3vw, 1.9rem);
+  font-weight: 650;
+}
+
+.section-link {
+  font-size: 0.92rem;
+}
+
+.use-cases,
+.priorities,
+.limits,
+.links {
+  padding-left: 1.25rem;
+}
+
+.use-cases li,
+.priorities li,
+.limits li,
+.links li {
+  margin: 0.55rem 0;
+}
+
+.use-cases strong,
+.priorities strong {
+  color: var(--ink);
+}
+
+/* Pipeline -------------------------------------------------------------- */
+
+.pipeline {
+  display: flex;
+  gap: 1.4rem;
+  margin: 1.75rem 0 1rem;
+  padding: 0;
+  list-style: none;
+}
+
+.pipeline li {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.12rem;
+  min-width: 0;
+  padding: 0.7rem 0.75rem;
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--rule-strong);
+  border-radius: 0.45rem;
+  background: var(--surface);
+}
+
+.pipeline li:nth-child(2) {
+  border-left-color: var(--accent);
+}
+
+.pipeline li:nth-child(5),
+.pipeline li:nth-child(7) {
+  border-left-color: var(--wasm);
+}
+
+.pipeline li:not(:last-child)::after {
+  position: absolute;
+  top: 50%;
+  left: 100%;
+  width: 1.4rem;
+  color: var(--muted);
+  content: "\2192";
+  text-align: center;
+  transform: translateY(-50%);
+}
+
+.pipeline .step-name {
+  font-size: 0.94rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.pipeline .step-note {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.3;
+}
+
+@media (max-width: 900px) {
+  .pipeline {
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+
+  .pipeline li:not(:last-child)::after {
+    top: 100%;
+    left: 50%;
+    width: auto;
+    height: 1.5rem;
+    content: "\2193";
+    line-height: 1.5rem;
+    transform: translateX(-50%);
+  }
+}
+
+.components {
+  max-width: 70ch;
+  margin: 1.5rem 0 0;
+  padding: 0;
+  border-top: 1px solid var(--rule);
+  list-style: none;
+}
+
+.components li {
+  padding: 0.8rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+/* Status ---------------------------------------------------------------- */
+
+.as-of {
+  margin: 0 0 1.25rem;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.status-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+}
+
+.status-table th,
+.status-table td {
+  padding: 0.7rem 0.75rem;
+  border-bottom: 1px solid var(--rule);
+  text-align: left;
+  vertical-align: top;
+}
+
+.status-table thead th {
+  border-bottom: 1px solid var(--rule-strong);
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.status-table tbody th {
+  white-space: nowrap;
+}
+
+.status-table td:last-child {
+  white-space: nowrap;
+}
+
+@media (max-width: 680px) {
+  .status-table,
+  .status-table tbody,
+  .status-table tr,
+  .status-table th,
+  .status-table td {
+    display: block;
+  }
+
+  .status-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .status-table tr {
+    padding: 0.85rem 0;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .status-table th,
+  .status-table td {
+    padding: 0;
+    border: 0;
+  }
+
+  .status-table tbody th {
+    color: var(--muted);
+    font-size: 0.78rem;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    white-space: normal;
+  }
+
+  .status-table td:last-child {
+    margin-top: 0.15rem;
+    white-space: normal;
+  }
+}
+
+/* Benchmarks ------------------------------------------------------------ */
+
+.bench-live {
+  margin: 1.5rem 0;
+  padding: 1.1rem 1.2rem;
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--accent);
+  border-radius: 0.45rem;
+  background: var(--surface);
+}
+
+.bench-fallback {
+  margin: 0;
+}
+
+.live-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.live-label {
+  display: block;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.live-value {
+  display: block;
+  font-size: 1.55rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+}
+
+.live-note {
+  display: block;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.live-meta {
+  margin: 0.9rem 0 0;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--rule);
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+@media (max-width: 620px) {
+  .live-grid {
+    grid-template-columns: 1fr;
+    gap: 0.8rem;
+  }
+}
+
+/* Roadmap --------------------------------------------------------------- */
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 1rem;
+  margin-top: 1.25rem;
+}
+
+.card {
+  padding: 1.1rem 1.15rem;
+  border: 1px solid var(--rule);
+  border-radius: 0.55rem;
+  background: var(--surface);
+}
+
+.card h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 650;
+}
+
+.card p {
+  margin: 0.5rem 0 0;
+  color: var(--muted);
+  font-size: 0.94rem;
+  line-height: 1.55;
+}
+
+.card .today {
+  margin-top: 0.8rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--rule);
+  color: var(--ink);
+  font-size: 0.9rem;
+}
+
+/* Contribute ------------------------------------------------------------ */
+
+.ai-rule {
+  max-width: 70ch;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+/* Footer ---------------------------------------------------------------- */
+
+.site-footer {
+  margin-top: 2rem;
+  padding-block: 2rem 3rem;
+  border-top: 1px solid var(--rule);
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.footer-inner {
+  max-width: 70ch;
+}
+
+.site-footer p {
+  margin: 0.6rem 0;
+}
+
+.footer-repo {
+  margin-top: 1.1rem;
+}
+
+/* Header at phone and tablet widths ------------------------------------- */
+
+@media (max-width: 800px) {
+  .container {
+    width: min(72rem, 100% - 2rem);
+  }
+
+  .site-nav {
+    order: 3;
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+
+  .site-nav ul {
+    gap: 0.3rem 1.1rem;
+    padding-bottom: 0.4rem;
+  }
+
+  .header-actions {
+    order: 2;
+    margin-left: auto;
+  }
+
+  html.js .site-nav {
+    display: none;
+  }
+
+  html.js .site-nav.is-open {
+    display: block;
+  }
+
+  html.js .site-nav.is-open ul {
+    flex-direction: column;
+    gap: 0;
+    padding: 0.3rem 0 0.8rem;
+  }
+
+  html.js .site-nav.is-open a {
+    display: block;
+    padding: 0.6rem 0;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  html.js .menu-toggle {
+    display: inline-flex;
+  }
+
+  /* Keep the copy beside the icon; only narrow phones stack (below). */
+  .intro {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .intro-mark img {
+    width: clamp(96px, 20vw, 138px);
+  }
+}
+
+@media (max-width: 480px) {
+  .intro {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 600px) {
+  pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+}
+
+/* Narrow phones: the logo, theme, Menu and GitHub must share one row, so the
+   GitHub link becomes an icon button like the theme button. Its text stays in
+   the page (clipped, not removed), so it is still the link's accessible name. */
+@media (max-width: 480px) {
+  .header-inner {
+    gap: 0.75rem;
+  }
+
+  .header-actions {
+    gap: 0.4rem;
+  }
+
+  .brand-name {
+    font-size: 1rem;
+  }
+
+  .github-link {
+    justify-content: center;
+    width: 2.5rem;
+    padding: 0;
+  }
+
+  .github-link span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}

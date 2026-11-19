@@ -73,6 +73,13 @@
           "min": 60,
           "max": 60,
           "runs": 3
+        },
+        "compiler_fuel": {
+          "median": 1000000,
+          "runs": [
+            1000000,
+            1000000
+          ]
         }
       },
       "llvm": {},
@@ -101,6 +108,15 @@
         "llvm_o2": {
           "total_bytes": 500
         }
+      },
+      "instructions": {
+        "clif": {
+          "total": 200
+        },
+        "llvm_o2": {
+          "total": 100
+        },
+        "ratio": 2.0
       }
     },
     "b_alloc": {
@@ -119,6 +135,13 @@
           "min": 70,
           "max": 70,
           "runs": 3
+        },
+        "compiler_fuel": {
+          "median": 2000000,
+          "runs": [
+            2000000,
+            2000000
+          ]
         }
       },
       "llvm": {},
@@ -165,6 +188,13 @@
           "min": 180,
           "max": 180,
           "runs": 3
+        },
+        "compiler_fuel": {
+          "median": 3000000,
+          "runs": [
+            3000000,
+            3000000
+          ]
         }
       },
       "llvm": {},
@@ -193,6 +223,15 @@
         "llvm_o2": {
           "total_bytes": 1000
         }
+      },
+      "instructions": {
+        "clif": {
+          "total": 600
+        },
+        "llvm_o2": {
+          "total": 200
+        },
+        "ratio": 3.0
       }
     }
   },
