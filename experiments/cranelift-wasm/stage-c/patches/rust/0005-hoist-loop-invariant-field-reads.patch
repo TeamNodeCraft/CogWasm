@@ -1,0 +1,409 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Stage C <stage-c@example.invalid>
+Date: Thu, 20 Nov 2026 09:30:00 +1030
+Subject: [PATCH] hoist loop-invariant aggregate field reads
+
+sroa promotes a local only when its address is never taken, so a `Vec`
+local that was written before a loop stays in its stack slot and every
+field read inside the loop goes to memory. This pass reads such a field
+once in the preheader into a fresh local and replaces the in-loop read
+with a copy of that local. The original destination assignment stays in
+the loop, so a zero-trip loop leaves it untouched.
+
+It relies on MIR being borrow-checked: a direct read of `base.field`
+cannot coexist with a live unique borrow of `base`, a shared borrow
+cannot write a `Freeze` base, and functions that create raw pointers are
+skipped because raw pointers fall outside those guarantees. Borrows,
+moves, discriminant writes and storage changes inside the loop reject
+the base.
+
+This is the first SROA increment from Goal 1 step 5b. It runs at
+`-Zmir-opt-level=2` (the default for optimised builds); the cost-model
+inliner is what will remove the calls that keep `Vec`'s address escaping
+until then. It is a local experiment for the CogWasm pipeline, not an
+upstream contribution; its code and comments are LLM-generated under the
+personal-use exemption and a human must review and own it.
+
+---
+diff --git a/compiler/rustc_mir_transform/src/lib.rs b/compiler/rustc_mir_transform/src/lib.rs
+--- a/compiler/rustc_mir_transform/src/lib.rs
++++ b/compiler/rustc_mir_transform/src/lib.rs
+@@ -153,6 +153,7 @@
+     mod elaborate_drops : ElaborateDrops;
+     mod function_item_references : FunctionItemReferences;
+     mod gvn : GVN;
++    mod loop_field_hoist : LoopFieldHoist;
+     // Made public so that `mir_drops_elaborated_and_const_checked` can be overridden
+     // by custom rustc drivers, running all the steps by themselves. See #114628.
+     pub mod inline : Inline, ForceInline;
+@@ -750,6 +751,7 @@
+             &simplify::SimplifyLocals::BeforeConstProp,
+             &dead_store_elimination::DeadStoreElimination::Initial,
+             &gvn::GVN,
++            &loop_field_hoist::LoopFieldHoist,
+             &simplify::SimplifyLocals::AfterGVN,
+             // This pass does attempt to track assignments.
+             // Keep it close to GVN which merges identical values into the same local.
+diff --git a/compiler/rustc_mir_transform/src/loop_field_hoist.rs b/compiler/rustc_mir_transform/src/loop_field_hoist.rs
+new file mode 100644
+--- /dev/null
++++ b/compiler/rustc_mir_transform/src/loop_field_hoist.rs
+@@ -0,0 +1,358 @@
++//! Hoist loop-invariant field reads out of loops.
++//!
++//! `sroa` only promotes a local whose address is never taken, so a `Vec` local
++//! that was pushed to before a loop stays in its stack slot and every
++//! `vec[i]` reloads its pointer and length. This pass finds reads of scalar
++//! fields of a local that is not written and not mutably borrowed *inside the
++//! loop*, evaluates the read once in the loop preheader into a fresh local,
++//! and replaces the in-loop read with a copy of that local.
++//!
++//! The destination of the original assignment is left in place: the preheader
++//! writes the new temporary, not the destination, so a loop that runs zero
++//! times leaves the destination exactly as it was.
++//!
++//! Soundness relies on MIR having been borrow-checked:
++//!
++//! - A direct read of `base.field` cannot coexist with a live unique borrow of
++//!   `base`, so a borrow taken before the loop cannot mutate that field while
++//!   the loop reads it directly.
++//! - A shared borrow cannot mutate a `Freeze` base, which we require.
++//! - Raw pointers are not covered by borrow checking, so any function that
++//!   creates one is skipped. This is coarse but keeps the pass independent of
++//!   a points-to analysis; they can be admitted once one exists.
++//! - Any borrow of `base` created inside the loop, any move out of it, and any
++//!   direct, discriminant or storage write rejects the base, because those
++//!   change the value between iterations without a borrow conflict.
++//!
++//! This is deliberately conservative: the calls that keep `Vec`'s address
++//! escaping limit what it can see until the cost-model inliner from Goal 1
++//! step 5b removes them.
++
++use rustc_data_structures::graph::dominators::Dominators;
++use rustc_index::bit_set::DenseBitSet;
++use rustc_middle::mir::*;
++use rustc_middle::ty::{self, TyCtxt};
++
++use crate::PassPolicy;
++use crate::patch::MirPatch;
++
++pub(super) struct LoopFieldHoist;
++
++impl<'tcx> crate::MirPass<'tcx> for LoopFieldHoist {
++    fn policy(&self, ctx: &crate::PassCtx<'_>) -> PassPolicy {
++        PassPolicy::optional(ctx.mir_opt_level() >= 2)
++    }
++
++    fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
++        use rustc_hir::def::DefKind;
++        if body.source.promoted.is_some()
++            || matches!(
++                tcx.def_kind(body.source.def_id()),
++                DefKind::Const | DefKind::Static { .. } | DefKind::AnonConst
++            )
++        {
++            return;
++        }
++
++        let reachable = reachable_blocks(body);
++        // A raw pointer can alias `base` without any borrow-checker fact that
++        // would stop us. Without a points-to analysis, leave such functions
++        // alone; they are rare in the safe code this pass is aimed at.
++        if creates_raw_pointer(body, &reachable) {
++            return;
++        }
++        let typing_env = ty::TypingEnv::post_analysis(tcx, body.source.def_id());
++        let dominators = body.basic_blocks.dominators().clone();
++        for header in loop_headers(body, &dominators, &reachable) {
++            hoist_loop(tcx, body, typing_env, &dominators, &reachable, header);
++        }
++    }
++}
++
++fn reachable_blocks(body: &Body<'_>) -> DenseBitSet<BasicBlock> {
++    let mut reachable = DenseBitSet::new_empty(body.basic_blocks.len());
++    for bb in body.basic_blocks.reverse_postorder() {
++        reachable.insert(*bb);
++    }
++    reachable
++}
++
++fn creates_raw_pointer(body: &Body<'_>, reachable: &DenseBitSet<BasicBlock>) -> bool {
++    for bb in body.basic_blocks.indices() {
++        if !reachable.contains(bb) {
++            continue;
++        }
++        for statement in &body[bb].statements {
++            let StatementKind::Assign(assign) = &statement.kind else {
++                continue;
++            };
++            match &assign.1 {
++                Rvalue::RawPtr(..) => return true,
++                Rvalue::Cast(_, _, target) if target.is_raw_ptr() => return true,
++                _ => {}
++            }
++        }
++    }
++    false
++}
++
++/// Loop headers with a backedge: a successor that dominates the block pointing
++/// at it.
++fn loop_headers(
++    body: &Body<'_>,
++    dominators: &Dominators<BasicBlock>,
++    reachable: &DenseBitSet<BasicBlock>,
++) -> Vec<BasicBlock> {
++    let mut headers = Vec::new();
++    for bb in body.basic_blocks.indices() {
++        if !reachable.contains(bb) {
++            continue;
++        }
++        for successor in body[bb].terminator().successors() {
++            if dominators.dominates(successor, bb) && !headers.contains(&successor) {
++                headers.push(successor);
++            }
++        }
++    }
++    headers
++}
++
++/// Blocks of the natural loop with `header`.
++fn loop_blocks(
++    body: &Body<'_>,
++    dominators: &Dominators<BasicBlock>,
++    reachable: &DenseBitSet<BasicBlock>,
++    header: BasicBlock,
++) -> Vec<BasicBlock> {
++    let mut in_loop: DenseBitSet<BasicBlock> = DenseBitSet::new_empty(body.basic_blocks.len());
++    in_loop.insert(header);
++    let mut stack = Vec::new();
++    for bb in body.basic_blocks.indices() {
++        if !reachable.contains(bb) {
++            continue;
++        }
++        for successor in body[bb].terminator().successors() {
++            if successor == header && dominators.dominates(header, bb) {
++                stack.push(bb);
++            }
++        }
++    }
++    while let Some(bb) = stack.pop() {
++        if in_loop.contains(bb) {
++            continue;
++        }
++        in_loop.insert(bb);
++        for predecessor in body.basic_blocks.predecessors()[bb].iter() {
++            if *predecessor != header
++                && reachable.contains(*predecessor)
++                && !in_loop.contains(*predecessor)
++                && dominators.dominates(header, *predecessor)
++            {
++                stack.push(*predecessor);
++            }
++        }
++    }
++    body.basic_blocks
++        .indices()
++        .filter(|bb| in_loop.contains(*bb))
++        .collect()
++}
++
++fn hoist_loop<'tcx>(
++    tcx: TyCtxt<'tcx>,
++    body: &mut Body<'tcx>,
++    typing_env: ty::TypingEnv<'tcx>,
++    dominators: &Dominators<BasicBlock>,
++    reachable: &DenseBitSet<BasicBlock>,
++    header: BasicBlock,
++) {
++    let blocks = loop_blocks(body, dominators, reachable, header);
++    if blocks.len() < 2 {
++        return;
++    }
++    let Some(preheader) = unique_preheader(body, &blocks, header) else {
++        return;
++    };
++    let (written, escaped, has_inline_asm) = loop_effects(body, &blocks);
++    if has_inline_asm {
++        return;
++    }
++    let initialized = initialized_before(body, dominators, reachable, preheader);
++    let preheader_end = Location {
++        block: preheader,
++        statement_index: body[preheader].statements.len(),
++    };
++
++    let mut patch = MirPatch::new(body);
++    let mut moved = 0;
++    for bb in blocks {
++        if body[bb].is_cleanup {
++            continue;
++        }
++        for (index, statement) in body[bb].statements.iter().enumerate() {
++            let StatementKind::Assign(assign) = &statement.kind else {
++                continue;
++            };
++            let (destination, rvalue) = &**assign;
++            let Rvalue::Use(Operand::Copy(place), with_retag) = rvalue else {
++                continue;
++            };
++            if !destination.projection.is_empty() || place.projection.is_empty() {
++                continue;
++            }
++            if place
++                .projection
++                .iter()
++                .any(|element| !matches!(element, PlaceElem::Field(..)))
++            {
++                continue;
++            }
++            let base = place.local;
++            if written.contains(base)
++                || escaped.contains(base)
++                || !initialized.contains(base)
++                || !body.local_decls[base].ty.is_freeze(tcx, typing_env)
++            {
++                continue;
++            }
++            if !body.local_decls[destination.local].ty.is_scalar() {
++                continue;
++            }
++            let temporary = patch.new_temp(
++                body.local_decls[destination.local].ty,
++                statement.source_info.span,
++            );
++            patch.add_assign(
++                preheader_end,
++                temporary.into(),
++                Rvalue::Use(Operand::Copy(*place), WithRetag::No),
++            );
++            patch.add_statement(
++                Location {
++                    block: bb,
++                    statement_index: index,
++                },
++                StatementKind::Assign(Box::new((
++                    *destination,
++                    Rvalue::Use(Operand::Copy(temporary.into()), *with_retag),
++                ))),
++            );
++            patch.nop_statement(Location {
++                block: bb,
++                statement_index: index,
++            });
++            moved += 1;
++        }
++    }
++    if moved > 0 {
++        patch.apply(body);
++    }
++}
++
++fn unique_preheader(
++    body: &Body<'_>,
++    blocks: &[BasicBlock],
++    header: BasicBlock,
++) -> Option<BasicBlock> {
++    let outside: Vec<BasicBlock> = body.basic_blocks.predecessors()[header]
++        .iter()
++        .copied()
++        .filter(|bb| !blocks.contains(bb))
++        .collect();
++    let [preheader] = outside[..] else {
++        return None;
++    };
++    let TerminatorKind::Goto { target, .. } = &body[preheader].terminator().kind else {
++        return None;
++    };
++    (*target == header).then_some(preheader)
++}
++
++/// Locals written, moved out of or mutably borrowed inside the loop, and
++/// whether the loop contains inline asm (whose operands we do not analyse).
++fn loop_effects(
++    body: &Body<'_>,
++    blocks: &[BasicBlock],
++) -> (DenseBitSet<Local>, DenseBitSet<Local>, bool) {
++    let mut written: DenseBitSet<Local> = DenseBitSet::new_empty(body.local_decls.len());
++    let mut escaped: DenseBitSet<Local> = DenseBitSet::new_empty(body.local_decls.len());
++    let mut has_inline_asm = false;
++    for bb in blocks {
++        for statement in &body[*bb].statements {
++            match &statement.kind {
++                StatementKind::Assign(assign) => {
++                    let (place, rvalue) = &**assign;
++                    if !place.projection.is_empty() {
++                        written.insert(place.local);
++                    }
++                    match rvalue {
++                        Rvalue::Ref(_, _, referenced) | Rvalue::RawPtr(_, referenced) => {
++                            escaped.insert(referenced.local);
++                        }
++                        Rvalue::Use(Operand::Move(moved), _) => {
++                            written.insert(moved.local);
++                        }
++                        _ => {}
++                    }
++                }
++                StatementKind::SetDiscriminant { place, .. } => {
++                    written.insert(place.local);
++                }
++                StatementKind::StorageLive(local) | StatementKind::StorageDead(local) => {
++                    // Storage going in or out of scope inside the loop means
++                    // the preheader cannot see the same live value.
++                    written.insert(*local);
++                }
++                _ => {}
++            }
++        }
++        match &body[*bb].terminator().kind {
++            TerminatorKind::Call { args, .. } | TerminatorKind::TailCall { args, .. } => {
++                for argument in &**args {
++                    match &argument.node {
++                        Operand::Copy(place) if place.projection.is_empty() => {
++                            escaped.insert(place.local);
++                        }
++                        Operand::Move(place) => {
++                            written.insert(place.local);
++                        }
++                        _ => {}
++                    }
++                }
++            }
++            TerminatorKind::Drop { place, .. } => {
++                written.insert(place.local);
++            }
++            TerminatorKind::InlineAsm { .. } => has_inline_asm = true,
++            _ => {}
++        }
++    }
++    (written, escaped, has_inline_asm)
++}
++
++/// Locals with an assignment (or a function argument) in a block that
++/// dominates the preheader.
++fn initialized_before(
++    body: &Body<'_>,
++    dominators: &Dominators<BasicBlock>,
++    reachable: &DenseBitSet<BasicBlock>,
++    preheader: BasicBlock,
++) -> DenseBitSet<Local> {
++    let mut initialized: DenseBitSet<Local> = DenseBitSet::new_empty(body.local_decls.len());
++    for argument in body.args_iter() {
++        initialized.insert(argument);
++    }
++    for bb in body.basic_blocks.indices() {
++        if !reachable.contains(bb) || !dominators.dominates(bb, preheader) {
++            continue;
++        }
++        for statement in &body[bb].statements {
++            if let StatementKind::Assign(assign) = &statement.kind
++                && assign.0.projection.is_empty()
++            {
++                initialized.insert(assign.0.local);
++            }
++        }
++    }
++    initialized
++}

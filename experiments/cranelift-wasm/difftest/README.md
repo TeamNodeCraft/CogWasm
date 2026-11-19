@@ -26,7 +26,7 @@ difftest/
 ├── corpus/
 │   ├── prelude.rs            # shared ABI, allocator, panic handler, output
 │   ├── expect_trap.txt       # programs expected to trap in both backends
-│   └── *.rs                  # 48 handwritten programs (one category each)
+│   └── *.rs                  # 49 handwritten programs (one category each)
 ├── host/
 │   ├── Cargo.toml            # wasmtime =50.0.2, two bins
 │   ├── src/main.rs           # difftest-host: compare two module sets
@@ -89,7 +89,7 @@ Compile flags are the same for both paths:
 -Zcodegen-backend=cranelift -Clinker=<wild> -Clinker-flavor=wasm-ld   # Cranelift only
 ```
 
-## Handwritten corpus (48 programs)
+## Handwritten corpus (49 programs)
 
 | Category | Programs |
 |---|---|
@@ -98,6 +98,7 @@ Compile flags are the same for both paths:
 | Bits and shifts | `int_bits`, `int_shifts` |
 | Floats | `float_bits`, `float_arith`, `float_convert`, `float_round`, `float_sqrt`, `float_nan_props`, `float_sum` |
 | Slices, arrays, memory | `slices`, `arrays`, `memcpy_large`, `ptr_ops`, `struct_layout` |
+| In-memory field loops | `loop_field_reads` (step 5b's loop hoist) |
 | Allocation | `alloc_growth`, `alloc_patterns`, `box_rc` |
 | Collections and strings | `vec_ops`, `string_ops`, `format_specs`, `btreemap`, `collections_extra` |
 | Algorithms | `sort_impl`, `hash_fnv`, `matrix`, `checksum`, `fixed_point` |
@@ -226,7 +227,7 @@ Local macOS arm64 (Apple silicon, 14 CPUs), 2026-11-19, existing artifacts:
 | default (24 generated, 4 run seeds) | 72 | 288 | **56.6 s** |
 | `--seeds 32` (32 generated, 4 run seeds) | 80 | 320 | **62 s** |
 
-Breakdown for the default run: 48 handwritten programs compiled in 36–38 s,
+Breakdown for the default run: 49 handwritten programs compiled in 36–38 s,
 24 generated in 18 s, the Wasmtime comparison itself ~1 s; the rest is the
 tiny runner build (Wasmtime was already compiled for the stage-C host).
 All runs above were green: `value_matches` + `trap_matches` = `calls`,
