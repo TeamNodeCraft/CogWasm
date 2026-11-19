@@ -187,6 +187,16 @@ LLVM builds. The numbers above are therefore not a speed-up from a wrong
 answer. Run-to-run spreads are in the JSON; `bench/compare.py` prints only the
 changes larger than that spread.
 
+## Gap attribution
+
+[`gap/REPORT.md`](gap/REPORT.md) explains, per program, why our wasm is slower
+and larger than LLVM `-O2`'s. `bench/gap/run.sh` reproduces it: it builds the
+same modules as this suite, instruments every basic block with a counter,
+executes the suite seeds, and writes `bench/gap/results/analysis.json` plus the
+hot-function WAT. The MIR-optimisation experiment is included by default
+(`--no-mir` skips it); it measured no execution win, so the report ranks the
+backend SROA/inliner and the memory-intrinsic lowering above roadmap step 3.
+
 ## CI
 
 * `.github/workflows/cranelift_wasm.yml` runs `bench/run.sh --quick` after the
