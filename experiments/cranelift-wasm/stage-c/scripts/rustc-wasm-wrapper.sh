@@ -34,8 +34,18 @@ fi
 wasm=0
 has_sysroot=0
 mapped=()
+skip_value=0
 for a in "$@"; do
+    # The value after --crate-name is a name, not a path; a crate whose name
+    # matches a directory (e.g. adler2 in a vendored workspace) must not be
+    # rewritten into an absolute path.
+    if [ "$skip_value" = 1 ]; then
+        mapped+=("$a")
+        skip_value=0
+        continue
+    fi
     case "$a" in
+        --crate-name) mapped+=("$a"); skip_value=1; continue ;;
         wasm32-unknown-unknown|--target=wasm32-unknown-unknown) wasm=1 ;;
         --sysroot|--sysroot=*) has_sysroot=1 ;;
     esac
