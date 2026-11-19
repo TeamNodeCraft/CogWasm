@@ -25,6 +25,21 @@ export RUSTUP_TOOLCHAIN=nightly-2026-10-19
 WASI_SDK="$WORK/wasi-sdk"
 OUT="$TOOL/stage-c/artifacts/rustc.wasm"
 LOG="$ROOT/stage-c/results/build-rustc-wasm.log"
+# Patch files are applied in order, and a later patch can change the context
+# of an earlier one. Once a patch has been applied successfully, record its
+# hash so a rerun in the same checkout skips it instead of trying (and
+# failing) to reverse-check a context that later patches have moved. A fresh
+# checkout has no state file and applies the whole series.
+PATCH_STATE="$WORK/.stage-c-applied-patches"
+sha256_file() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | cut -d' ' -f1
+    else
+        shasum -a 256 "$1" | cut -d' ' -f1
+    fi
+}
+patch_recorded() { [ -f "$PATCH_STATE" ] && grep -qx "$1" "$PATCH_STATE"; }
+record_patch() { printf '%s\n' "$1" >> "$PATCH_STATE"; }
 
 jobs() {
     if [ -n "${BUILD_JOBS:-}" ]; then
@@ -51,6 +66,11 @@ RUST_PATCHES=("$ROOT"/stage-c/patches/rust/*.patch)
 [ "${#RUST_PATCHES[@]}" -gt 0 ] || {
     echo "no rust patches found under $ROOT/stage-c/patches/rust" >&2; exit 1; }
 for p in "${RUST_PATCHES[@]}"; do
+    hash=$(sha256_file "$p")
+    if patch_recorded "$hash"; then
+        echo "$(basename "$p") already applied (recorded)"
+        continue
+    fi
     if git -C "$SRC" apply --reverse --check "$p" 2>/dev/null; then
         echo "$(basename "$p") already applied"
     else
@@ -59,6 +79,7 @@ for p in "${RUST_PATCHES[@]}"; do
     fi
     git -C "$SRC" apply --reverse --check "$p" || {
         echo "$(basename "$p") is not present after apply" >&2; exit 1; }
+    record_patch "$hash"
 done
 
 # clif-to-wasm patches (this checkout is the repository root, so the patches'
@@ -67,6 +88,11 @@ CLIF_PATCHES=("$ROOT"/stage-c/patches/clif-to-wasm/*.patch)
 [ "${#CLIF_PATCHES[@]}" -gt 0 ] || {
     echo "no clif-to-wasm patches found under $ROOT/stage-c/patches/clif-to-wasm" >&2; exit 1; }
 for p in "${CLIF_PATCHES[@]}"; do
+    hash=$(sha256_file "$p")
+    if patch_recorded "$hash"; then
+        echo "$(basename "$p") already applied (recorded)"
+        continue
+    fi
     if git -C "$CLIF" apply --reverse --check "$p" 2>/dev/null; then
         echo "$(basename "$p") already applied"
     else
@@ -75,6 +101,7 @@ for p in "${CLIF_PATCHES[@]}"; do
     fi
     git -C "$CLIF" apply --reverse --check "$p" || {
         echo "$(basename "$p") is not present after apply" >&2; exit 1; }
+    record_patch "$hash"
 done
 
 # cg_clif patches (in-tree copy; stage A's wasm patch is already applied there).
@@ -88,6 +115,11 @@ CG_PATCHES=("$ROOT"/stage-c/patches/cg_clif/*.patch)
 [ "${#CG_PATCHES[@]}" -gt 0 ] || {
     echo "no cg_clif patches found under $ROOT/stage-c/patches/cg_clif" >&2; exit 1; }
 for p in "${CG_PATCHES[@]}"; do
+    hash=$(sha256_file "$p")
+    if patch_recorded "$hash"; then
+        echo "$(basename "$p") already applied (recorded)"
+        continue
+    fi
     if git -C "$SRC" apply --reverse --check --directory="$CG_PREFIX" "$p" 2>/dev/null; then
         echo "$(basename "$p") already applied"
     else
@@ -96,6 +128,7 @@ for p in "${CG_PATCHES[@]}"; do
     fi
     git -C "$SRC" apply --reverse --check --directory="$CG_PREFIX" "$p" || {
         echo "$(basename "$p") is not present after apply" >&2; exit 1; }
+    record_patch "$hash"
 done
 grep -q 'llvm.wasm.memory.grow.i32' "$CG/src/intrinsics/llvm.rs" || {
     echo "cg_clif memory.grow lowering missing from $CG/src/intrinsics/llvm.rs" >&2; exit 1; }
