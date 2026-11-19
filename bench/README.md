@@ -161,8 +161,13 @@ Determinism evidence and variation found:
 * rustc's standard-library hash seeds come from WASI `random_get`, and fresh
   per-context entropy made two samples in one process differ by 84 fuel units.
   Fuel measurement now installs a deterministic WASI random source; the timed
-  runs keep the product's real entropy. No allocator or clock dependence was
-  observed after those two fixes.
+  runs keep the product's real entropy.
+* A compile that finds its output file already present does a few units less
+  work than one that creates it. Fuel runs write a separate
+  `<program>.fuel.wasm` and remove it before every sample, so both samples
+  start from the same state and the benchmark's own module is never replaced
+  by a fuel-run build.
+* No allocator or clock dependence was observed after those fixes.
 * Fuel is a fixed per-operator cost charged by the interpreter instrumentation,
   not a native instruction count, so it does not depend on the CPU or on
   Cranelift's register allocation. We verified repeated runs on the development

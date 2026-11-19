@@ -1052,11 +1052,14 @@ fn measure_compiler_fuel(
     let engine = Engine::new(&config).wt("creating the fuel engine")?;
     let loaded = load_rustc_module(&engine, rustc, None, false)
         .context("loading rustc.wasm on the fuel engine")?;
+    // Keep the benchmark's own module from the timed builds: the fuel runs
+    // must not replace the artifact that execution and size measure.
+    let fuel_out = out.with_file_name(format!("{}.fuel.wasm", args.crate_name));
     let options = CompileOptions {
         sysroot: absolute_arg(&args.sysroot)?,
         linker: absolute_arg(&args.linker)?,
         src: crate_source.to_path_buf(),
-        out: out.to_path_buf(),
+        out: fuel_out,
         crate_name: args.crate_name.clone(),
         externs: args.externs.clone(),
         search_paths: args.search_paths.clone(),
@@ -1067,6 +1070,12 @@ fn measure_compiler_fuel(
     let linker = options.linker.clone();
     let mut runs = Vec::with_capacity(args.fuel_runs);
     for index in 0..args.fuel_runs {
+        // Start every sample from the same state: rustc does slightly
+        // different work when its output path already exists.
+        if options.out.exists() {
+            std::fs::remove_file(&options.out)
+                .with_context(|| format!("removing {}", options.out.display()))?;
+        }
         let run = compile_once(
             &engine,
             &loaded.module,
