@@ -64,6 +64,20 @@ The SVGs are generated, not hand-edited. Change the parameters at the top of
 python3 make_cog_logo.py
 ```
 
+### Optional WA lettering
+
+```bash
+python3 make_cog_logo.py --wa-inset
+```
+
+engraves the WebAssembly "WA" lettering into the square and writes the same
+four files as `logo-*-wa-inset.svg`, leaving the plain marks alone. The
+letters are the WebAssembly icon's own outlines (copied as path data from
+`dist/icon/web-assembly-icon.svg`, CC0), at the same size and place on the
+square. In colour they are cut `INSET` deep, with a floor and lit inner
+walls; in the silhouettes they are punched out of the top face and filled at
+the walls' 40 %. The plain mark, without lettering, stays the main logo.
+
 Useful parameters: `TEETH`, `R_HOLE` (ring thickness), `PIECE_HALF` (square
 size), `TAG_R` (tag size), `GAP` (clearance around the spoke), `DEPTH`, `YAW`,
 `PITCH`, `ROLL`, `CAMERA` (perspective), `LIGHT`, `SQUIRCLE_N` (icon corner

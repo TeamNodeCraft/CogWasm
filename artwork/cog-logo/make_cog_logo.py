@@ -8,22 +8,28 @@ WebAssembly logo by Carlos Baraza).
 
 The mark is built as real 3D geometry and
 projected to clean SVG:
-- 2D outlines (gear ring with teeth and four claws; a puzzle piece with four
-  claw slots), sharp corners softened,
+- 2D outlines (a gear ring with teeth and one spoke; the WebAssembly square
+  with its tag cut into the top edge), sharp corners softened,
 - extruded to a slab, rotated and viewed in perspective,
 - every side wall culled if it faces away, sorted back to front and lit by its
   own normal; top faces get a gradient, a sheen and a light bevel rim.
 
 Writes, next to this script:
   logo-colour.svg            full colour, transparent background
-  logo-colour-dark.svg       full colour on a dark rounded square with a glow
+  logo-colour-dark.svg       full colour on a dark squircle with a glow
   logo-silhouette-black.svg  two-tone black: top faces solid, walls at 40 %
   logo-silhouette-white.svg  the same in white, for dark backgrounds
 
-Run: python3 make_cog_logo.py
+With --wa-inset, the WebAssembly "WA" lettering is engraved into the square
+and the files are written as logo-*-wa-inset.svg instead, leaving the plain
+marks untouched.
+
+Run: python3 make_cog_logo.py [--wa-inset]
 """
 
+import argparse
 import math
+import re
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -213,15 +219,17 @@ def unit(v):
 LIGHT_U = unit(LIGHT)
 
 
-def walls_of(loops, tag):
-    """Visible side walls of the extruded loops: (depth, screen quad, light, tag)."""
+def walls_of(loops, tag, bottom=-DEPTH):
+    """Visible side walls of the loops extruded from z=0 down to `bottom`:
+    (depth, screen quad, light, tag). Loops are CCW for solid outlines and CW
+    for holes, so each wall's normal points out of the material."""
     out = []
     for loop in loops:
         n = len(loop)
         for i in range(n):
             a2, b2 = loop[i], loop[(i + 1) % n]
             ta, tb = rot((a2[0], a2[1], 0.0)), rot((b2[0], b2[1], 0.0))
-            ba, bb = rot((a2[0], a2[1], -DEPTH)), rot((b2[0], b2[1], -DEPTH))
+            ba, bb = rot((a2[0], a2[1], bottom)), rot((b2[0], b2[1], bottom))
             u = [tb[k] - ta[k] for k in range(3)]
             v = [ba[k] - ta[k] for k in range(3)]
             # outward normal: loops are CCW (outer) / CW (holes) in the top plane
@@ -239,8 +247,8 @@ def poly(pts):
     return "M" + " L".join(f"{x:.2f},{y:.2f}" for x, y in pts) + " Z"
 
 
-def top_d(loops):
-    return " ".join(poly([project((x, y, 0.0)) for x, y in loop]) for loop in loops)
+def top_d(loops, z=0.0):
+    return " ".join(poly([project((x, y, z)) for x, y in loop]) for loop in loops)
 
 
 def _spoke_screen_angle(spin):
@@ -269,6 +277,55 @@ def _solve_spin():
 SPIN = _solve_spin()
 GEAR = [gear_outer(), gear_inner()]
 PIECE = [piece_outline()]
+
+
+# ---- optional "WA" lettering (--wa-inset) ------------------------------------
+# The exact letters of the WebAssembly icon (carlosbaraza/web-assembly-logo,
+# dist/icon/web-assembly-icon.svg, CC0): straight-line outlines on its
+# 107.62-unit square, kept at the same size and place on our square.
+WASM_SQUARE = 107.62
+WASM_W = ("M51.38,96.1,46.14,70.17H46L40.39,96.1H33.18L25,58h7.13L37,83.93h.09L42.94,58h6.67"
+          "L54.9,84.25H55L60.55,58h7L58.46,96.1Z")
+WASM_A = "M90.64,96.1l-2.43-8.48H75.4L73.53,96.1H66.36L75.59,58H86.83L98,96.1Z"
+WASM_A_COUNTER = "M79.87,67.39L76.76,81.37H86.44L82.87,67.39Z"
+INSET = 0.035         # engraving depth, model units (DEPTH is the slab)
+
+
+def line_path_points(d):
+    """Points of a straight-line SVG path (M, L, H, V, Z; absolute or relative)."""
+    tokens = re.findall(r"[MLHVZmlhvz]|-?(?:\d+\.?\d*|\.\d+)", d)
+    pts, cmd, i, x, y = [], "M", 0, 0.0, 0.0
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok.isalpha():
+            cmd, i = tok, i + 1
+            continue
+        rel, kind = cmd.islower(), cmd.upper()
+        if kind in "ML":
+            dx, dy = float(tok), float(tokens[i + 1])
+            x, y = (x + dx, y + dy) if rel else (dx, dy)
+            i += 2
+            if kind == "M":            # further pairs after a move are line-tos
+                cmd = "l" if rel else "L"
+        elif kind == "H":
+            x, i = (x if rel else 0.0) + float(tok), i + 1
+        elif kind == "V":
+            y, i = (y if rel else 0.0) + float(tok), i + 1
+        else:
+            raise ValueError(f"unsupported path command {cmd!r} in lettering path")
+        pts.append((x, y))
+    return dedupe(pts)
+
+
+def wasm_to_model(pts):
+    """The WebAssembly icon's square onto ours (both y down, tag at the top)."""
+    h = PIECE_HALF
+    return [((u / WASM_SQUARE * 2 - 1) * h, (v / WASM_SQUARE * 2 - 1) * h) for u, v in pts]
+
+
+LETTERS = [orient(wasm_to_model(line_path_points(WASM_W)), True),
+           orient(wasm_to_model(line_path_points(WASM_A)), True),
+           orient(wasm_to_model(line_path_points(WASM_A_COUNTER)), False)]
 
 
 def mix(c1, c2, t):
@@ -324,7 +381,23 @@ def fit_view(margin):
     CENTRE = (CENTRE[0] + SIZE / 2 - (x0 + x1) / 2, CENTRE[1] + SIZE / 2 - (y0 + y1) / 2)
 
 
-def colour_svg(background):
+def engraving(defs, body):
+    """The WA letters cut INSET deep into the square's top face: a floor and the
+    lit inner walls, clipped to the letter outlines on the top face."""
+    p = PAL["piece"]
+    # reversed loops: the walls belong to the material around each cut, facing into it
+    walls = walls_of([loop[::-1] for loop in LETTERS], "piece", bottom=-INSET)
+    walls.sort(key=lambda w: w[0])
+    parts = [f'<path d="{top_d(LETTERS, -INSET)}" fill="{mix(p["dark"], p["lit"], 0.38)}" '
+             f'fill-rule="evenodd"/>']
+    for _, quad, light, _ in walls:
+        c = mix(p["dark"], p["lit"], 0.12 + 0.88 * light ** 0.9)
+        parts.append(f'<path d="{poly(quad)}" fill="{c}" stroke="{c}" stroke-width="0.5"/>')
+    defs.append(f'<clipPath id="wa-cut"><path d="{top_d(LETTERS)}" clip-rule="evenodd"/></clipPath>')
+    body.append(f'<g clip-path="url(#wa-cut)">{"".join(parts)}</g>')
+
+
+def colour_svg(background, wa_inset=False):
     defs, body = [], []
     if background:
         defs.append(f'<linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" '
@@ -351,6 +424,8 @@ def colour_svg(background):
         body.append(f'<path d="{d}" fill="url(#{tag}-top)" fill-rule="evenodd"/>')
         body.append(f'<path d="{d}" fill="none" stroke="{p["rim"]}" stroke-opacity="0.9" '
                     f'stroke-width="3" stroke-linejoin="round" clip-path="url(#{tag}-clip)"/>')
+    if wa_inset:
+        engraving(defs, body)
     defs.append('<radialGradient id="sheen" gradientUnits="userSpaceOnUse" cx="190" cy="140" r="300">'
                 '<stop offset="0" stop-color="#ffffff" stop-opacity="0.30"/>'
                 '<stop offset="0.6" stop-color="#ffffff" stop-opacity="0"/></radialGradient>')
@@ -359,24 +434,37 @@ def colour_svg(background):
     return wrap("".join(defs), "".join(body))
 
 
-def silhouette_svg(ink):
+def silhouette_svg(ink, wa_inset=False):
     def walls(tag):
         return "".join(f'<path d="{poly(q)}" stroke="{ink}" stroke-width="0.7" stroke-linejoin="round"/>'
                        for _, q, _, t in all_walls() if t == tag)
     gear_top = top_d(GEAR)
-    # In one ink the claws and the piece would merge, so cut a channel around
-    # the gear's top face out of everything drawn after it (the piece).
-    channel = (f'<mask id="channel" maskUnits="userSpaceOnUse" x="0" y="0" width="{SIZE}" height="{SIZE}">'
-               f'<rect width="{SIZE}" height="{SIZE}" fill="white"/>'
-               f'<path d="{gear_top}" fill="black" fill-rule="evenodd" stroke="black" stroke-width="9" '
-               f'stroke-linejoin="round"/></mask>')
+
+    def channel_mask(mask_id, extra=""):
+        # In one ink the spoke and the piece would merge, so cut a channel around
+        # the gear's top face out of everything drawn after it (the piece).
+        return (f'<mask id="{mask_id}" maskUnits="userSpaceOnUse" x="0" y="0" width="{SIZE}" '
+                f'height="{SIZE}"><rect width="{SIZE}" height="{SIZE}" fill="white"/>'
+                f'<path d="{gear_top}" fill="black" fill-rule="evenodd" stroke="black" stroke-width="9" '
+                f'stroke-linejoin="round"/>{extra}</mask>')
+
+    cut = channel_mask("channel")
+    piece_mask = "channel"
+    letters = ""
+    if wa_inset:
+        # the engraved letters read as the walls do: punched out of the solid
+        # top face and filled at the walls' 40 %
+        letters_top = top_d(LETTERS)
+        cut += channel_mask("channel-wa", f'<path d="{letters_top}" fill="black" fill-rule="evenodd"/>')
+        piece_mask = "channel-wa"
+        letters = f'<path d="{letters_top}" fill-rule="evenodd"/>'
     tops = (f'<path d="{gear_top}" fill-rule="evenodd"/>'
-            f'<path d="{top_d(PIECE)}" mask="url(#channel)"/>')
-    # one ink, so wall order doesn't matter: composite all walls once at 40 %
-    # (only the piece's walls get the channel), then the solid top faces
-    return wrap(channel, f'<g fill="{ink}" opacity="0.4">{walls("gear")}'
-                         f'<g mask="url(#channel)">{walls("piece")}</g></g>'
-                         f'<g fill="{ink}">{tops}</g>')
+            f'<path d="{top_d(PIECE)}" mask="url(#{piece_mask})"/>')
+    # one ink, so wall order doesn't matter: composite all walls (and any
+    # engraved letters) once at 40 %, then the solid top faces
+    return wrap(cut, f'<g fill="{ink}" opacity="0.4">{walls("gear")}'
+                     f'<g mask="url(#channel)">{walls("piece")}</g>{letters}</g>'
+                     f'<g fill="{ink}">{tops}</g>')
 
 
 NOTICE = ('Copyright (c) 2026 AlexMitchellMus. All rights reserved. CogWasm logo; '
@@ -390,14 +478,21 @@ def wrap(defs, body):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Generate the CogWasm logo SVGs.")
+    parser.add_argument("--wa-inset", action="store_true",
+                        help='engrave the WebAssembly "WA" lettering into the square; '
+                             "writes logo-*-wa-inset.svg instead of the plain marks")
+    wa = parser.parse_args().wa_inset
+    suffix = "-wa-inset" if wa else ""
     outputs = {}
     fit_view(0.04)           # bare marks: nearly edge to edge
-    outputs["logo-colour.svg"] = colour_svg(None)
-    outputs["logo-silhouette-black.svg"] = silhouette_svg("#000000")
-    outputs["logo-silhouette-white.svg"] = silhouette_svg("#ffffff")
+    outputs["logo-colour"] = colour_svg(None, wa)
+    outputs["logo-silhouette-black"] = silhouette_svg("#000000", wa)
+    outputs["logo-silhouette-white"] = silhouette_svg("#ffffff", wa)
     fit_view(0.095)          # app icon: large in the squircle, clear of its curved corners
-    outputs["logo-colour-dark.svg"] = colour_svg("#0c0b10")
-    for name, text in outputs.items():
+    outputs["logo-colour-dark"] = colour_svg("#0c0b10", wa)
+    for stem, text in outputs.items():
+        name = f"{stem}{suffix}.svg"
         (HERE / name).write_text(text)
         print(name, len(text), "bytes")
 
