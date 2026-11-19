@@ -31,9 +31,11 @@ about aliases. This version fixes the destination and is conservative:
   `base` in borrow-checked MIR, so a borrow taken before the loop cannot mutate
   the field while the loop reads it directly;
 - a shared borrow cannot write a `Freeze` base, which is required;
-- raw pointers are outside those guarantees, so any function that creates one
-  is skipped entirely. This is deliberately coarse; a points-to analysis can
-  admit them later;
+- raw pointers are outside those guarantees. A raw pointer to a local (not
+  through a dereference), a cast to a raw pointer from a reference, or an
+  integer-to-pointer cast skips the function; pointers into a buffer the local
+  points at do not alias its own fields and are allowed. This is deliberately
+  coarse; a points-to analysis can admit more later;
 - borrows of `base`, moves out of it, discriminant writes and storage changes
   inside the loop reject the base;
 - any borrow created inside the loop rejects it, because it can mutate between
@@ -61,10 +63,17 @@ So the field read moved out of the loop and the loop reuses the hoisted local.
 The patch applies cleanly to a pristine pre-change tree and reproduces the
 working tree byte-for-byte.
 
-The pass has **not** been measured on the suite yet. `rustc.wasm` cannot be run
-in this environment (only paths outside the checkout work inside its WASI
-sandbox), so the benchmark run must happen on a normal machine or in CI. Until
-then this is an implementation increment, not a speed result.
+The first version of the guard skipped every function containing any raw
+pointer. It built and passed difftest in CI, but the quick suite's executed
+instruction counts were identical to the pre-pass run: nbody's `body` contains
+raw pointers into its buffers, so the whole function was skipped. Narrowing the
+guard to pointers that can alias a local makes the pass hoist 95 reads in
+`body` (native MIR dump); that is the version in the patch now.
+
+The current version has **not** been measured on the suite yet. `rustc.wasm`
+cannot be run in this environment (only paths outside the checkout work inside
+its WASI sandbox), so the benchmark run must happen on a normal machine or in
+CI. Until then this is an implementation increment, not a speed result.
 
 ## Reproduce
 

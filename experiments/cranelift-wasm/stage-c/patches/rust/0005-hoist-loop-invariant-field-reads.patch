@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Stage C <stage-c@example.invalid>
-Date: Thu, 20 Nov 2026 09:30:00 +1030
+Date: Thu, 20 Nov 2026 10:30:00 +1030
 Subject: [PATCH] hoist loop-invariant aggregate field reads
 
 sroa promotes a local only when its address is never taken, so a `Vec`
@@ -11,11 +11,13 @@ with a copy of that local. The original destination assignment stays in
 the loop, so a zero-trip loop leaves it untouched.
 
 It relies on MIR being borrow-checked: a direct read of `base.field`
-cannot coexist with a live unique borrow of `base`, a shared borrow
-cannot write a `Freeze` base, and functions that create raw pointers are
-skipped because raw pointers fall outside those guarantees. Borrows,
-moves, discriminant writes and storage changes inside the loop reject
-the base.
+cannot coexist with a live unique borrow of `base`, and a shared borrow
+cannot write a `Freeze` base. Raw pointers are outside those guarantees,
+so a raw pointer to a local (not through a dereference), a cast to a raw
+pointer from a reference, or an integer-to-pointer cast skips the
+function; pointers into a buffer the local points at do not alias its own
+fields and are allowed. Borrows, moves, discriminant writes and storage
+changes inside the loop reject the base.
 
 This is the first SROA increment from Goal 1 step 5b. It runs at
 `-Zmir-opt-level=2` (the default for optimised builds); the cost-model
@@ -48,7 +50,7 @@ diff --git a/compiler/rustc_mir_transform/src/loop_field_hoist.rs b/compiler/rus
 new file mode 100644
 --- /dev/null
 +++ b/compiler/rustc_mir_transform/src/loop_field_hoist.rs
-@@ -0,0 +1,358 @@
+@@ -0,0 +1,380 @@
 +//! Hoist loop-invariant field reads out of loops.
 +//!
 +//! `sroa` only promotes a local whose address is never taken, so a `Vec` local
@@ -68,9 +70,11 @@ new file mode 100644
 +//!   `base`, so a borrow taken before the loop cannot mutate that field while
 +//!   the loop reads it directly.
 +//! - A shared borrow cannot mutate a `Freeze` base, which we require.
-+//! - Raw pointers are not covered by borrow checking, so any function that
-+//!   creates one is skipped. This is coarse but keeps the pass independent of
-+//!   a points-to analysis; they can be admitted once one exists.
++//! - Raw pointers are not covered by borrow checking. A raw pointer to a local
++//!   (not through a dereference), a cast to a raw pointer from a reference,
++//!   and an integer-to-pointer cast can alias the fields we would hoist, so
++//!   any of those skips the function. Raw pointers into memory the local
++//!   points at do not alias its own fields and are allowed.
 +//! - Any borrow of `base` created inside the loop, any move out of it, and any
 +//!   direct, discriminant or storage write rejects the base, because those
 +//!   change the value between iterations without a borrow conflict.
@@ -106,10 +110,11 @@ new file mode 100644
 +        }
 +
 +        let reachable = reachable_blocks(body);
-+        // A raw pointer can alias `base` without any borrow-checker fact that
-+        // would stop us. Without a points-to analysis, leave such functions
-+        // alone; they are rare in the safe code this pass is aimed at.
-+        if creates_raw_pointer(body, &reachable) {
++        // A raw pointer to a local can alias `base` without any borrow-checker
++        // fact that would stop us. Without a points-to analysis, leave such
++        // functions alone; pointers into a buffer are not covered and do not
++        // alias a local's own fields.
++        if creates_aliasing_raw_pointer(body, &reachable) {
 +            return;
 +        }
 +        let typing_env = ty::TypingEnv::post_analysis(tcx, body.source.def_id());
@@ -128,7 +133,10 @@ new file mode 100644
 +    reachable
 +}
 +
-+fn creates_raw_pointer(body: &Body<'_>, reachable: &DenseBitSet<BasicBlock>) -> bool {
++fn creates_aliasing_raw_pointer(
++    body: &Body<'_>,
++    reachable: &DenseBitSet<BasicBlock>,
++) -> bool {
 +    for bb in body.basic_blocks.indices() {
 +        if !reachable.contains(bb) {
 +            continue;
@@ -138,8 +146,24 @@ new file mode 100644
 +                continue;
 +            };
 +            match &assign.1 {
-+                Rvalue::RawPtr(..) => return true,
-+                Rvalue::Cast(_, _, target) if target.is_raw_ptr() => return true,
++                Rvalue::RawPtr(_, place) => {
++                    if !place
++                        .projection
++                        .iter()
++                        .any(|element| matches!(element, PlaceElem::Deref))
++                    {
++                        return true;
++                    }
++                }
++                Rvalue::Cast(_, operand, target) if target.is_raw_ptr() => {
++                    let (Operand::Copy(place) | Operand::Move(place)) = operand else {
++                        continue;
++                    };
++                    let ty = body.local_decls[place.local].ty;
++                    if ty.is_ref() || ty.is_integral() {
++                        return true;
++                    }
++                }
 +                _ => {}
 +            }
 +        }
