@@ -29,8 +29,9 @@ exported counter, runs the suite seeds, and writes:
 
 The per-seed counts and the raw per-program size files are git-ignored; the
 compact `results/analysis.json`, the MIR results and the hot-function WAT are
-committed so the published report is readable without a rerun. The code is
-split by job: `src/instrument.rs` rewrites wasm, `src/measure.rs`
+committed so the published report is readable without a rerun. The full
+instruction-level history is in `results/analysis.json`; every number in the
+report can be checked against it. The code is split by job: `src/instrument.rs` rewrites wasm, `src/measure.rs`
 runs it in Wasmtime, `src/sizes.rs` reports static bytes, and `analyze.py`
 turns counts into the attribution. The instrumenter is deliberately
 conservative: it re-encodes the original operator stream unchanged and inserts
