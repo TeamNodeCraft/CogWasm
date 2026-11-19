@@ -62,7 +62,7 @@ next starts.
 | --- | --- | --- |
 | **done** | First code-generation wins in clif-to-wasm (tiny-leaf inlining; 1.25× on A.2 (e), LLVM gap 3.76× → 3.00×) | Measured improvement on the A.2 maths benchmark; difftest green |
 | **in progress** | A benchmark suite against LLVM `-O0` and `-O2` (small, medium and large programs plus compute kernels), run in CI, results published | A table in the README updated by CI |
-| **open** | 1. Gap attribution: for each benchmark's hot loops, diff our wasm against LLVM's and assign every extra instruction to one of the five causes above | A published per-benchmark breakdown that names the next fix |
+| **done** | 1. Gap attribution: for each benchmark's hot loops, diff our wasm against LLVM's and assign every extra instruction to one of the five causes above | A published per-benchmark breakdown that names the next fix |
 | **open** | 2. Map built-in operations 1:1 to wasm instructions (`sqrt` first, then the rest of the list in point 1) | No software routine where wasm has an instruction; A.2 (e) gap measured |
 | **open** | 3. Turn up rustc's own pure-Rust MIR optimisations (`-Zmir-opt-level`, `-Zinline-mir`: MIR inlining, SROA, GVN, copy propagation) for the optimising tier | Speed and compile-time change measured per benchmark; difftest green |
 | **open** | 4. Tidy loads and stores: fold constant offsets into wasm's load/store offset, drop redundant extends and address arithmetic | Instruction counts in hot loops measured before/after |
@@ -74,6 +74,8 @@ next starts.
 | **research** | Profile-guided recompilation from live profiles | Measured win over the static tier-2 build |
 | **research** | Specialisation of hot functions on runtime-constant inputs | Measured win, with a fallback when inputs change |
 | **research** | Bulk maths offloaded to the GPU (host-compiled kernels via wgpu) | Beats LLVM-built wasm by an order of magnitude on large arrays |
+
+Step 1 is done: [bench/gap/REPORT.md](../bench/gap/REPORT.md) attributes every program over 0.1 ms, with dynamic counts, hot-function WAT and the size breakdown. The next fix it names is small/constant `memcpy`/`memmove` lowering (84% of sort's and 91% of sha256's extra instructions), then SROA/mem2reg plus a cost-model inliner.
 
 ## Goal 2 — Near-instant compiler start
 
