@@ -13,13 +13,13 @@ import re
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 CHART_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(CHART_DIR))
 
-import chart  # noqa: E402  (the test adds the script directory to sys.path)
+import chart
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
@@ -316,7 +316,7 @@ class PanelScaleTest(unittest.TestCase):
         point = chart.Point(
             sha="a" * 40,
             subject="faster than LLVM",
-            date=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            date=datetime(2026, 1, 1, tzinfo=UTC),
             run_id="1",
             runner="test",
             programs=["a_add"],

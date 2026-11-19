@@ -24,7 +24,7 @@ import statistics
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 STAGE_A = Path(__file__).resolve().parents[3]  # .../experiments/cranelift-wasm
@@ -177,7 +177,9 @@ def build(cfg, prog, target_dir, timed=True, strict=False, timeout=900):
         env["CG_CLIF_WASM_STRICT"] = "1"
     cwd = A2 / prog
     t = time.perf_counter()
-    r = subprocess.run(cargo_cmd(cfg), cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout)
+    r = subprocess.run(
+        cargo_cmd(cfg), cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout, check=False
+    )
     dt = time.perf_counter() - t
     wasm = find_wasm(target_dir, prog)
     return {
@@ -210,7 +212,9 @@ def sha256(path):
 
 
 def harness(*args):
-    r = subprocess.run([str(HARNESS), *map(str, args)], capture_output=True, text=True, timeout=300)
+    r = subprocess.run(
+        [str(HARNESS), *map(str, args)], capture_output=True, text=True, timeout=300, check=False
+    )
     if r.returncode != 0:
         raise RuntimeError(f"harness {args} failed rc={r.returncode}:\n{r.stdout}\n{r.stderr}")
     return r.stdout
@@ -272,7 +276,7 @@ def measure_artifact(wasm, prog):
         for line in run_out.splitlines():
             if not line.startswith("MATH_RUN "):
                 continue
-            _, idx, ms, rc, val, ns = line.split()
+            _, _idx, ms, _rc, val, ns = line.split()
             runs_ms.append(float(ms))
             ns_runs.append(float(ns))
             results.append(float(val))
@@ -304,7 +308,7 @@ def measure_artifact(wasm, prog):
         for line in run_out.splitlines():
             if not line.startswith("GEOM_RUN "):
                 continue
-            _, idx, ms, val, ns = line.split()
+            _, _idx, ms, val, ns = line.split()
             runs_ms.append(float(ms))
             ns_runs.append(float(ns))
             results.append(float(val))
@@ -776,9 +780,11 @@ def main():
     RESULTS_JSON.parent.mkdir(parents=True, exist_ok=True)
     TARGET.mkdir(parents=True, exist_ok=True)
 
-    rustc_v = subprocess.run(["rustc", "-Vv"], env=BASE_ENV, capture_output=True, text=True).stdout.strip()
+    rustc_v = subprocess.run(
+        ["rustc", "-Vv"], env=BASE_ENV, capture_output=True, text=True, check=False
+    ).stdout.strip()
     meta = {
-        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "stage_a": str(STAGE_A),
         "rustc": rustc_v,
         "harness": str(HARNESS),

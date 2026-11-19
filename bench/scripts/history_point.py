@@ -17,7 +17,7 @@ import argparse
 import json
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -29,12 +29,12 @@ class PointError(Exception):
 def parse_date(value: str) -> datetime:
     """Parse an ISO-8601 date or datetime into an aware UTC datetime."""
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value)
     except ValueError as error:
         raise PointError(f"invalid commit date {value!r}: {error}") from error
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def enrich(raw: dict[str, Any], run_id: str, date: str, repo: str) -> tuple[dict[str, Any], str]:

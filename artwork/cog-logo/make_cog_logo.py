@@ -388,8 +388,12 @@ def engraving(defs, body):
     # reversed loops: the walls belong to the material around each cut, facing into it
     walls = walls_of([loop[::-1] for loop in LETTERS], "piece", bottom=-INSET)
     walls.sort(key=lambda w: w[0])
-    parts = [f'<path d="{top_d(LETTERS, -INSET)}" fill="{mix(p["dark"], p["lit"], 0.38)}" '
-             f'fill-rule="evenodd"/>']
+    parts = [
+        (
+            f'<path d="{top_d(LETTERS, -INSET)}" fill="{mix(p["dark"], p["lit"], 0.38)}" '
+            f'fill-rule="evenodd"/>'
+        )
+    ]
     for _, quad, light, _ in walls:
         c = mix(p["dark"], p["lit"], 0.12 + 0.88 * light ** 0.9)
         parts.append(f'<path d="{poly(quad)}" fill="{c}" stroke="{c}" stroke-width="0.5"/>')

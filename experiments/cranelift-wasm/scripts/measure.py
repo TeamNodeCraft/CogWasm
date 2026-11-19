@@ -39,7 +39,7 @@ CONFIGS = [
 
 
 def env_for(cfg):
-    _, backend, linker, opt, build_std = cfg
+    _, backend, linker, opt, _build_std = cfg
     env = BASE_ENV.copy()
     flags = ["-Cpanic=abort"]
     if opt != 2:
@@ -66,7 +66,7 @@ def build(cfg, prog, target_dir, cold, runs=1):
         if cfg[4]:
             cmd += ["-Zbuild-std=core,alloc,compiler_builtins"]
         t = time.perf_counter()
-        r = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True)
+        r = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, check=False)
         dt = time.perf_counter() - t
         if r.returncode != 0:
             print(r.stdout[-4000:])
@@ -81,7 +81,7 @@ def artifact(target_dir, prog):
 
 
 def host(*args, expect_ok=True):
-    r = subprocess.run([str(HOST), *map(str, args)], capture_output=True, text=True)
+    r = subprocess.run([str(HOST), *map(str, args)], capture_output=True, text=True, check=False)
     if expect_ok and r.returncode != 0:
         raise SystemExit(f"host {args} failed:\n{r.stdout}\n{r.stderr}")
     return r

@@ -125,14 +125,16 @@ def run_metadata(cargo: str, root: Path, manifest: Path) -> dict:
     # Prefer the local registry. If a dependency graph was never built on this
     # machine, retry once with the network so the notices still cover it;
     # crates.io is the only source allowed here.
-    result = subprocess.run([*base, "--offline"], cwd=root, capture_output=True, text=True)
+    result = subprocess.run(
+        [*base, "--offline"], cwd=root, capture_output=True, text=True, check=False
+    )
     if result.returncode != 0:
         print(
             f"warning: offline cargo metadata failed for {manifest.relative_to(root)}; "
             "retrying with the network",
             file=sys.stderr,
         )
-        result = subprocess.run(base, cwd=root, capture_output=True, text=True)
+        result = subprocess.run(base, cwd=root, capture_output=True, text=True, check=False)
     if result.returncode != 0:
         raise SystemExit(
             f"error: cargo metadata failed for {manifest.relative_to(root)}:\n{result.stderr}"
@@ -317,7 +319,7 @@ def git_revision(path: Path) -> str:
     if not (path / ".git").exists():
         return "pinned checkout not present"
     result = subprocess.run(
-        ["git", "-C", str(path), "rev-parse", "HEAD"], capture_output=True, text=True
+        ["git", "-C", str(path), "rev-parse", "HEAD"], capture_output=True, text=True, check=False
     )
     return result.stdout.strip() if result.returncode == 0 else "unknown revision"
 
@@ -401,8 +403,10 @@ def main() -> None:
         [
             "Provenance",
             "----------",
-            f"rustc source: {git_revision(experiment / 'toolchain/stage-b/rust')} "
-            "(nightly-2026-10-19 plus stage-c patches)",
+            (
+                f"rustc source: {git_revision(experiment / 'toolchain/stage-b/rust')} "
+                "(nightly-2026-10-19 plus stage-c patches)"
+            ),
             f"clif-to-wasm: {git_revision(experiment / 'toolchain/clif-to-wasm')}",
             f"Wild: {git_revision(experiment / 'toolchain/wild')}",
             f"rust-playground-inbrowser: {git_revision(experiment / 'toolchain/playground')}",

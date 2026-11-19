@@ -18,7 +18,7 @@ import shutil
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -624,12 +624,18 @@ def markdown_report(result: dict) -> str:
         f"# CogWasm benchmark ({result['kind']})",
         "",
         f"- commit: `{result['commit']['sha'][:12]}` {result['commit']['subject']}",
-        f"- machine: {result['machine']['kind']} — {result['machine']['cpu']} "
-        f"({result['machine']['cores']} cores, {result['machine']['os']})",
-        f"- runs: {result['settings']['runs']} (median, after a warm-up); "
-        f"seeds: {', '.join(str(seed) for seed in result['settings']['seeds'])}",
-        f"- rustc.wasm: {result['settings']['rustc_wasm_bytes']:,} bytes, "
-        f"sha256 `{result['settings']['rustc_wasm_sha256'][:16]}…`",
+        (
+            f"- machine: {result['machine']['kind']} — {result['machine']['cpu']} "
+            f"({result['machine']['cores']} cores, {result['machine']['os']})"
+        ),
+        (
+            f"- runs: {result['settings']['runs']} (median, after a warm-up); "
+            f"seeds: {', '.join(str(seed) for seed in result['settings']['seeds'])}"
+        ),
+        (
+            f"- rustc.wasm: {result['settings']['rustc_wasm_bytes']:,} bytes, "
+            f"sha256 `{result['settings']['rustc_wasm_sha256'][:16]}…`"
+        ),
         f"- wasmtime: {result['pins']['wasmtime']}",
         "",
         "## Compile",
@@ -742,7 +748,7 @@ def main(argv: list[str]) -> int:
     result_path = args.out or (
         RESULTS
         / f"{args.mode}-{git_commit()['sha'][:12]}-"
-        f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json"
+        f"{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.json"
     )
     result_path.parent.mkdir(parents=True, exist_ok=True)
     WORK.mkdir(parents=True, exist_ok=True)
@@ -863,7 +869,7 @@ def main(argv: list[str]) -> int:
     result = {
         "schema": 1,
         "kind": args.mode,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "machine": machine_info(),
         "commit": git_commit(),
         "pins": {

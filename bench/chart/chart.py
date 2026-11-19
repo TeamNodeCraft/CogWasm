@@ -52,10 +52,11 @@ import os
 import re
 import statistics
 import sys
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 EXEC_MIN_LLVM_MS = 0.1
 SHORT_SHA_LENGTH = 7
@@ -332,12 +333,12 @@ def parse_datetime(value: Any) -> datetime | None:
     if not isinstance(value, str):
         return None
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value)
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def _program_names(raw: dict[str, Any]) -> list[str]:
@@ -491,7 +492,7 @@ def build_data(
     """Build the JSON document shared by the static SVG and the web page."""
     return {
         "schema": 1,
-        "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "generated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "repo": repo,
         "page_url": page_url,
         "exec_min_llvm_ms": EXEC_MIN_LLVM_MS,
@@ -538,7 +539,7 @@ def _nice_ticks(high: float, intervals: int = 5) -> tuple[float, list[float]]:
     else:
         step = 10.0 * (10**exponent)
     top = math.ceil(high / step - 1e-9) * step
-    count = int(round(top / step))
+    count = round(top / step)
     return top, [index * step for index in range(count + 1)]
 
 
@@ -709,7 +710,7 @@ def render_svg(data: dict[str, Any], width: int = SVG_WIDTH, height: int = SVG_H
         Point(
             sha=item["sha"],
             subject=item["subject"],
-            date=parse_datetime(item["date"]) or datetime.min.replace(tzinfo=timezone.utc),
+            date=parse_datetime(item["date"]) or datetime.min.replace(tzinfo=UTC),
             run_id=item["run_id"],
             runner=item["runner"],
             programs=list(item["programs"]),
@@ -738,9 +739,11 @@ def render_svg(data: dict[str, Any], width: int = SVG_WIDTH, height: int = SVG_H
         label_indices.add(count - 1)
 
     out = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" '
-        f'height="{height}" viewBox="0 0 {width} {height}" role="img" '
-        f'aria-labelledby="chart-title chart-desc">',
+        (
+            f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" '
+            f'height="{height}" viewBox="0 0 {width} {height}" role="img" '
+            f'aria-labelledby="chart-title chart-desc">'
+        ),
         "<title id=\"chart-title\">CogWasm benchmark trend by commit</title>",
         (
             '<desc id="chart-desc">Execution time, executed instructions and module '
@@ -750,10 +753,14 @@ def render_svg(data: dict[str, Any], width: int = SVG_WIDTH, height: int = SVG_H
         ),
         f'<rect width="{width}" height="{height}" fill="#ffffff"/>',
         f'<g font-family="{FONT}" fill="{INK}">',
-        f'<text x="{margin}" y="24" font-size="16" font-weight="650">'
-        "CogWasm benchmark trend</text>",
-        f'<text x="{margin}" y="42" font-size="10" fill="{MUTED}">'
-        "Each point is one CI commit on main &#183; lower is better</text>",
+        (
+            f'<text x="{margin}" y="24" font-size="16" font-weight="650">'
+            "CogWasm benchmark trend</text>"
+        ),
+        (
+            f'<text x="{margin}" y="42" font-size="10" fill="{MUTED}">'
+            "Each point is one CI commit on main &#183; lower is better</text>"
+        ),
     ]
     if any(point.subset_changed for point in points):
         out.append(
@@ -826,7 +833,7 @@ def render_svg(data: dict[str, Any], width: int = SVG_WIDTH, height: int = SVG_H
         if right_series is not None:
             out.append(
                 f'<text x="{plot_right + 6:.1f}" y="{plot_top - 8:.1f}" '
-                f'font-size="8" fill="{str(right_series["color"])}" '
+                f'font-size="8" fill="{right_series["color"]!s}" '
                 'text-anchor="start">instructions</text>'
             )
         out.append(

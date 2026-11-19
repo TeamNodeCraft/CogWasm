@@ -123,7 +123,7 @@ def main() -> int:
             False,
         )
         llvm_out = out / "llvm_o2" / f"{name}.wasm"
-        llvm = run.compile_llvm(
+        run.compile_llvm(
             llvm_rustc,
             program,
             source,
