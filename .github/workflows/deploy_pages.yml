@@ -1,6 +1,14 @@
 name: deploy pages
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'site/**'
+      - 'artwork/**'
+      - 'README.md'
+      - '.github/workflows/deploy_pages.yml'
   workflow_run:
     # "create release" mirrors the release assets as before; cranelift_wasm
     # rebuilds bench-history (point + chart.svg + data.json), so its successful
@@ -22,6 +30,7 @@ jobs:
     # never deploy.
     if: >-
       github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
       (github.event.workflow_run.conclusion == 'success' &&
        (github.event.workflow_run.name != 'cranelift_wasm' ||
         github.event.workflow_run.head_branch == 'main'))
@@ -33,6 +42,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # Build the project site at the root. build.py fills in the commit and
+      # date and copies the artwork from artwork/cog-logo/, so those SVGs stay
+      # single-sourced in git.
+      - name: Build the project site
+        run: python3 site/build.py --output public
 
       - name: Download all release assets
         env:
