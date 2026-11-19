@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="artwork/cog-logo/logo-colour-dark.svg" width="180" alt="CogWasm icon: an orange gear whose spoke reaches into the WebAssembly tag square">
+  <img src="artwork/cog-logo/logo-colour-dark-wa-inset.svg" width="180" alt="CogWasm icon: an orange gear whose spoke reaches into the WebAssembly tag square, engraved with WA">
 </p>
 
 <h1 align="center">CogWasm</h1>

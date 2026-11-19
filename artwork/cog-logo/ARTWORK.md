@@ -76,7 +76,8 @@ letters are the WebAssembly icon's own outlines (copied as path data from
 `dist/icon/web-assembly-icon.svg`, CC0), at the same size and place on the
 square. In colour they are cut `INSET` deep, with a floor and lit inner
 walls; in the silhouettes they are punched out of the top face and filled at
-the walls' 40 %. The plain mark, without lettering, stays the main logo.
+the walls' 40 %. The README header uses the engraved app icon,
+`logo-colour-dark-wa-inset.svg`.
 
 Useful parameters: `TEETH`, `R_HOLE` (ring thickness), `PIECE_HALF` (square
 size), `TAG_R` (tag size), `GAP` (clearance around the spoke), `DEPTH`, `YAW`,
