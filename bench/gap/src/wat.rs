@@ -1,6 +1,6 @@
 //! Print a module as WAT, optionally only one function's text.
 
-use crate::{option, required_option};
+use crate::{option, required_option, write_output};
 use anyhow::{Context, Result};
 
 pub fn run(rest: &[String]) -> Result<()> {
@@ -10,9 +10,9 @@ pub fn run(rest: &[String]) -> Result<()> {
     if let Some(name) = option(rest, "--function")? {
         let body = extract_function(&text, &name)
             .with_context(|| format!("function {name} not found in {wasm}"))?;
-        std::fs::write(&output, body)?;
+        write_output(&output, body.as_bytes())?;
     } else {
-        std::fs::write(&output, text)?;
+        write_output(&output, text.as_bytes())?;
     }
     Ok(())
 }

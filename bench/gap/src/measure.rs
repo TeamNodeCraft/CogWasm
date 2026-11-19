@@ -1,7 +1,7 @@
 //! Execute an instrumented module and read its per-block counters.
 
 use crate::instrument::Meta;
-use crate::{option, required_option};
+use crate::{option, required_option, write_output};
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use std::path::Path;
@@ -143,7 +143,7 @@ pub fn run(rest: &[String]) -> Result<()> {
     };
     let text = serde_json::to_string_pretty(&report)?;
     if let Some(path) = out {
-        std::fs::write(path, &text)?;
+        write_output(&path, text.as_bytes())?;
     } else {
         println!("{text}");
     }

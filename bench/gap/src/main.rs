@@ -14,6 +14,7 @@ mod sizes;
 mod wat;
 
 use anyhow::{Context, Result, bail};
+use std::path::Path;
 
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
@@ -55,4 +56,21 @@ pub(crate) fn option(rest: &[String], name: &str) -> Result<Option<String>> {
 
 pub(crate) fn required_option(rest: &[String], name: &str) -> Result<String> {
     option(rest, name)?.with_context(|| format!("missing required option {name}"))
+}
+
+/// Write `contents` to `path`, creating the parent directory first.
+///
+/// Outputs live under `bench/gap/work/`, which is git-ignored, so a fresh
+/// checkout does not have `work/instrumented/`. Creating the parent here means
+/// every command works from a clean tree instead of each caller having to
+/// remember the directory; `run.sh` did not, and CI failed with a bare `ENOENT`
+/// after building the modules. `bench/host` does the same for its `--out`.
+pub(crate) fn write_output(path: &str, contents: &[u8]) -> Result<()> {
+    if let Some(parent) = Path::new(path).parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating {}", parent.display()))?;
+    }
+    std::fs::write(path, contents).with_context(|| format!("writing {path}"))
 }

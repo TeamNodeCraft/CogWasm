@@ -1,6 +1,6 @@
 //! Static size breakdown of wasm modules: sections, functions and data.
 
-use crate::{option, required_option};
+use crate::{option, required_option, write_output};
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -106,7 +106,7 @@ pub fn run(rest: &[String]) -> Result<()> {
     };
     let text = serde_json::to_string_pretty(&result)?;
     if let Some(path) = out {
-        std::fs::write(path, &text)?;
+        write_output(&path, text.as_bytes())?;
     } else {
         println!("{text}");
     }

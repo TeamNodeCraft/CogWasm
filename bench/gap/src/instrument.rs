@@ -5,7 +5,7 @@
 //! `global.get $c; i64.const 1; i64.add; global.set $c`. That sequence has no
 //! net stack effect, so block types and branch targets are untouched.
 
-use crate::required_option;
+use crate::{required_option, write_output};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -234,9 +234,9 @@ pub fn run(rest: &[String]) -> Result<()> {
     let bytes = std::fs::read(&wasm_path).with_context(|| format!("reading {wasm_path}"))?;
     let mut instrumenter = Instrumenter::new(&bytes)?;
     let output_bytes = instrumenter.instrument()?;
-    std::fs::write(&out, &output_bytes)?;
+    write_output(&out, &output_bytes)?;
     let meta = instrumenter.meta(&wasm_path, &out, &output_bytes)?;
-    std::fs::write(&meta_path, serde_json::to_string_pretty(&meta)?)?;
+    write_output(&meta_path, serde_json::to_string_pretty(&meta)?.as_bytes())?;
     eprintln!(
         "instrumented {}: {} -> {} bytes, {} functions, {} blocks",
         wasm_path,
