@@ -1,0 +1,525 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Stage C <stage-c@example.invalid>
+Date: Thu, 19 Nov 2026 22:05:00 +1030
+Subject: [PATCH] wasm: fold constant addresses into memarg offsets
+
+Fold an inlined `iadd(base, iconst)` into the wasm load/store memarg offset,
+and stop `stack_addr` emitting `i32.const 0; i32.add` when its total offset is
+zero. The fold is only taken when the combined offset is non-negative and fits
+a memarg, and when the base's unsigned value plus that offset cannot wrap the
+address type; a frame-pointer base additionally requires an active stack-limit
+check and an offset within the frame. An unknown base or a wrapping add is
+left unchanged. Also drop the mask after an unsigned narrow load, where the
+wasm load already zero-extends, and keep it for signed narrow loads.
+---
+--- a/src/emit.rs
++++ b/src/emit.rs
+@@ -60,6 +60,27 @@
+     /// Holds the struct's address.
+     src: Local,
+     size: u32,
++}
++
++/// The dynamic part of a memory address after constant folding.
++#[derive(Clone, Copy)]
++enum AddressBase {
++    /// A CLIF value, pushed with [`Emitter::value`].
++    Value(Value),
++    /// The shadow-stack frame pointer, pushed with `local.get`.
++    FramePointer,
++}
++
++/// A memory address split into a dynamic base and a static offset that can be
++/// folded into the wasm memarg.
++struct FoldedAddress {
++    base: AddressBase,
++    offset: u64,
++}
++
++/// Mask of the low `bits` bits of a `u64`.
++fn type_mask(bits: u32) -> u64 {
++    if bits >= 64 { u64::MAX } else { (1u64 << bits) - 1 }
+ }
+ 
+ /// A function's frame on the shadow stack.
+@@ -431,12 +452,21 @@
+     /// Push the next operand of the instruction being lowered, in the order
+     /// given by [`operands`], and return it.
+     pub(crate) fn operand(&mut self) -> Result<Value> {
++        let v = self.take_operand();
++        self.value(v)?;
++        Ok(v)
++    }
++
++    /// Take the next operand without pushing it onto the wasm stack.
++    ///
++    /// [`Self::mem_address`] uses this to inspect an address before deciding
++    /// whether to emit the whole expression or only its base.
++    fn take_operand(&mut self) -> Value {
+         let cursor = self.cursors.last_mut().expect("operand() outside inst()");
+         assert!(cursor.0 < cursor.1, "too many operands requested");
+         let v = self.operand_stack[cursor.0];
+         cursor.0 += 1;
+-        self.value(v)?;
+-        Ok(v)
++        v
+     }
+ 
+     pub(crate) fn constant(&mut self, inst: Inst) -> Result<()> {
+@@ -522,6 +552,12 @@
+     /// Push the next operand, an address, converted to the wasm address type.
+     pub(crate) fn address(&mut self) -> Result<()> {
+         let v = self.operand()?;
++        self.push_address(v)
++    }
++
++    /// Push `v` converted to the wasm address type.
++    fn push_address(&mut self, v: Value) -> Result<()> {
++        self.value(v)?;
+         match (self.ty(v), self.config.module.address_type) {
+             (types::I64, AddressType::I32) => self.ins(I::I32WrapI64),
+             (types::I64, AddressType::I64) => {}
+@@ -571,16 +607,179 @@
+     /// Push the next operand, an address, and return the static offset to
+     /// use in the memarg.
+     pub(crate) fn mem_address(&mut self, offset: i32) -> Result<u64> {
+-        self.address()?;
++        let v = self.take_operand();
++        if let Some(folded) = self.fold_address(v, offset) {
++            match folded.base {
++                AddressBase::Value(base) => self.push_address(base)?,
++                AddressBase::FramePointer => self.local_get(self.fp()),
++            }
++            return Ok(folded.offset);
++        }
++        self.push_address(v)?;
+         if offset >= 0 {
+             Ok(offset as u64)
+         } else {
+             self.ptr_const(offset as i64);
+             self.ptr_add();
+             Ok(0)
++        }
++    }
++
++    /// Peel inlined `iadd(_, iconst)` and `stack_addr` from an address, and
++    /// return the dynamic base plus the offset that can go in the memarg.
++    ///
++    /// Returns `None` when the address must be emitted unchanged. A fold is
++    /// only valid when the combined static offset is non-negative and fits the
++    /// memarg, and when the base's unsigned value plus that offset cannot wrap
++    /// the address type. A frame-pointer base additionally needs an active
++    /// stack-limit check and an offset within the frame, so `fp` itself cannot
++    /// have wrapped below zero.
++    fn fold_address(&self, v: Value, clif_offset: i32) -> Option<FoldedAddress> {
++        let address_type = match self.config.module.address_type {
++            AddressType::I32 => types::I32,
++            AddressType::I64 => types::I64,
++        };
++        // `address()` may wrap or extend; folding across that changes the
++        // arithmetic. Only fold when the value already has the memory type.
++        if self.ty(v) != address_type {
++            return None;
++        }
++
++        let mut base = AddressBase::Value(v);
++        let mut offset = i128::from(clif_offset);
++        loop {
++            let AddressBase::Value(value) = base else { break };
++            let ValueDef::Result(inst, 0) = self.func.dfg.value_def(value) else { break };
++            // A root/multi-use address has already had its add emitted.
++            if !self.trees.is_inlined(inst) {
++                break;
++            }
++            match self.func.dfg.insts[inst] {
++                D::Binary { opcode: Opcode::Iadd, args, .. } => {
++                    match (self.const_unsigned(args[0]), self.const_unsigned(args[1])) {
++                        // Prefer the larger constant as the base so the memarg
++                        // offset stays small. The value_max check below still
++                        // rejects a combination that could wrap.
++                        (Some(a), Some(b)) => {
++                            let (base_arg, add) =
++                                if a >= b { (args[0], b) } else { (args[1], a) };
++                            offset += i128::from(add);
++                            base = AddressBase::Value(base_arg);
++                        }
++                        (Some(k), None) => {
++                            offset += i128::from(k);
++                            base = AddressBase::Value(args[1]);
++                        }
++                        (None, Some(k)) => {
++                            offset += i128::from(k);
++                            base = AddressBase::Value(args[0]);
++                        }
++                        (None, None) => break,
++                    }
++                }
++                D::StackAddr { stack_slot, offset: slot_offset, .. } => {
++                    offset += i128::from(self.slot_offset[stack_slot]);
++                    offset += i128::from(i32::from(slot_offset));
++                    base = AddressBase::FramePointer;
++                }
++                D::NullAry { opcode: Opcode::GetStackPointer, .. } => {
++                    base = AddressBase::FramePointer;
++                }
++                _ => break,
++            }
+         }
++
++        let offset = u64::try_from(offset).ok()?;
++        let limit = match self.config.module.address_type {
++            AddressType::I32 => u64::from(u32::MAX),
++            AddressType::I64 => u64::MAX,
++        };
++        if offset > limit {
++            return None;
++        }
++        match base {
++            AddressBase::FramePointer => {
++                let frame = self.frame?;
++                if self.config.module.stack_limit_global.is_none()
++                    || offset > u64::from(frame.size)
++                {
++                    return None;
++                }
++            }
++            AddressBase::Value(base) => {
++                let max = self.value_max(base, 0)?;
++                if max.checked_add(offset)? > limit {
++                    return None;
++                }
++            }
++        }
++        Some(FoldedAddress { base, offset })
+     }
+ 
++    /// The unsigned value of an `iconst`, if `v` is one.
++    fn const_unsigned(&self, v: Value) -> Option<u64> {
++        let ValueDef::Result(inst, 0) = self.func.dfg.value_def(v) else { return None };
++        if !analysis::is_remat(self.func, inst) {
++            return None;
++        }
++        let D::UnaryImm { opcode: Opcode::Iconst, imm, .. } = self.func.dfg.insts[inst] else {
++            return None;
++        };
++        Some(imm.bits() as u64 & type_mask(self.ty(v).bits()))
++    }
++
++    /// A conservative upper bound on the unsigned value of `v`, or `None`.
++    /// The depth cap bounds recursion through long `iadd` chains.
++    fn value_max(&self, v: Value, depth: u32) -> Option<u64> {
++        if depth > 32 {
++            return None;
++        }
++        let ty = self.ty(v);
++        if !ty.is_int() || ty.is_vector() || ty.bits() > 64 {
++            return None;
++        }
++        let mask = type_mask(ty.bits());
++        let ValueDef::Result(inst, 0) = self.func.dfg.value_def(v) else { return None };
++        match self.func.dfg.insts[inst] {
++            D::UnaryImm { opcode: Opcode::Iconst, imm, .. } => {
++                Some(imm.bits() as u64 & mask)
++            }
++            D::Binary { opcode: Opcode::Band, args, .. } => {
++                match (self.value_max(args[0], depth + 1),
++                       self.value_max(args[1], depth + 1)) {
++                    (Some(a), Some(b)) => Some(a.min(b)),
++                    (Some(a), None) => Some(a),
++                    (None, Some(b)) => Some(b),
++                    (None, None) => None,
++                }
++            }
++            D::Binary { opcode: Opcode::Iadd, args, .. } => {
++                match (self.value_max(args[0], depth + 1),
++                       self.value_max(args[1], depth + 1)) {
++                    (Some(a), Some(b)) => a.checked_add(b).map(|m| m.min(mask)),
++                    _ => None,
++                }
++            }
++            D::Unary { opcode: Opcode::Uextend, arg } => {
++                let source_bits = self.ty(arg).bits();
++                Some(self.value_max(arg, depth + 1)
++                    .unwrap_or(type_mask(source_bits)))
++            }
++            D::Unary { opcode: Opcode::Ireduce, arg } => Some(
++                self.value_max(arg, depth + 1).map_or(mask, |m| m.min(mask)),
++            ),
++            D::Load { opcode, .. } => match (opcode, ty) {
++                (Opcode::Load, types::I8) | (Opcode::Uload8, _) => Some(0xff),
++                (Opcode::Load, types::I16) | (Opcode::Uload16, _) => Some(0xffff),
++                (Opcode::Uload32, _) => Some(u64::from(u32::MAX)),
++                (Opcode::Load, types::I32) => Some(u64::from(u32::MAX)),
++                (Opcode::Load, types::I64) => Some(u64::MAX),
++                _ => None,
++            },
++            _ => None,
++        }
++    }
++
+     /// Emit `stack_addr` for `stack_slot` + `offset` with result type `ty`.
+     pub(crate) fn stack_addr(
+         &mut self,
+@@ -590,8 +789,11 @@
+     ) -> Result<()> {
+         self.local_get(self.fp());
+         let off = self.slot_offset[stack_slot] as i64 + i64::from(offset);
+-        self.ptr_const(off);
+-        self.ptr_add();
++        // `stack_addr` with a zero total offset is just the frame pointer.
++        if off != 0 {
++            self.ptr_const(off);
++            self.ptr_add();
++        }
+         self.ptr_to(ty)
+     }
+ 
+--- a/src/lower.rs
++++ b/src/lower.rs
+@@ -835,6 +835,17 @@
+         Ok(())
+     }
+ 
++    /// Whether the wasm load already zero-extends the result to the full width
++    /// of `ty`, making a following `mask(ty)` redundant.
++    fn load_zero_extends(op: Opcode, ty: Type) -> bool {
++        matches!(
++            (op, ty),
++            (Opcode::Load, types::I8 | types::I16)
++                | (Opcode::Uload8, types::I8 | types::I16)
++                | (Opcode::Uload16, types::I16)
++        )
++    }
++
+     /// Lower a scalar memory load (`Load`, `Uload*`, `Sload*`), handling both
+     /// native little-endian and byte-swapped big-endian accesses.
+     fn scalar_load(&mut self, op: Opcode, ty: Type, flags: MemFlags, offset: i32) -> Result<()> {
+@@ -869,7 +880,11 @@
+                 (types::I64, types::I64) => {}
+                 (_, types::I64) if signed => self.ins(I::I64ExtendI32S),
+                 (_, types::I64) => self.ins(I::I64ExtendI32U),
+-                (_, types::I8 | types::I16 | types::I32 | types::F16) => self.mask(ty),
++                (_, types::I8 | types::I16 | types::I32 | types::F16) => {
++                    if signed || !Self::load_zero_extends(op, ty) {
++                        self.mask(ty);
++                    }
++                }
+                 _ => return error::unsupported(format!("{op}.{ty}")),
+             }
+             return Ok(());
+@@ -897,7 +912,9 @@
+         };
+         let m = self.memarg(off, flags, size);
+         self.ins(i(m));
+-        self.mask(ty);
++        if !Self::load_zero_extends(op, ty) {
++            self.mask(ty);
++        }
+         Ok(())
+     }
+ 
+diff --git a/tests/address.rs b/tests/address.rs
+new file mode 100644
+--- /dev/null
++++ b/tests/address.rs
+@@ -0,0 +1,200 @@
++//! Constant address folding: an inlined `iadd(base, iconst)` becomes a wasm
++//! memarg offset; wrapping and unknown bases must not fold.
++
++mod harness;
++
++use clif_to_wasm::Config;
++use cranelift_codegen::data_value::DataValue;
++use cranelift_codegen::ir::types;
++use wasmparser::{Operator, Parser, Payload};
++
++#[derive(Default)]
++struct Counts {
++    i32_add: usize,
++    i32_and: usize,
++    memarg_offsets: Vec<u64>,
++}
++
++fn counts(wasm: &[u8]) -> Counts {
++    let mut c = Counts::default();
++    for payload in Parser::new(0).parse_all(wasm) {
++        if let Payload::CodeSectionEntry(body) = payload.unwrap() {
++            for op in body.get_operators_reader().unwrap() {
++                match op.unwrap() {
++                    Operator::I32Add => c.i32_add += 1,
++                    Operator::I32And => c.i32_and += 1,
++                    Operator::I32Load { memarg } => c.memarg_offsets.push(memarg.offset),
++                    Operator::I32Store { memarg } => c.memarg_offsets.push(memarg.offset),
++                    _ => {}
++                }
++            }
++        }
++    }
++    c
++}
++
++const FOLD_CONST: &str = "
++function %fold_const() -> i32 {
++block0:
++    v0 = iconst.i32 4096
++    v1 = iconst.i32 24
++    v2 = iadd v0, v1
++    v3 = iconst.i32 777
++    store.i32 v3, v2
++    v4 = iconst.i32 4096
++    v5 = iconst.i32 24
++    v6 = iadd v4, v5
++    v7 = load.i32 v6
++    return v7
++}
++";
++
++#[test]
++fn constant_address_is_folded_into_the_memarg() {
++    let funcs = cranelift_reader::parse_functions(FOLD_CONST).unwrap();
++    let (wasm, unsupported) = harness::compile_module(&funcs, &Config::default());
++    assert!(unsupported.is_empty(), "{unsupported:?}");
++    harness::validate(&wasm).unwrap();
++
++    let c = counts(&wasm);
++    assert_eq!(c.i32_add, 0, "the constant adds must be gone");
++    assert_eq!(c.memarg_offsets, [24, 24], "both accesses use offset 24");
++
++    let runner = harness::Runner::new(&wasm).unwrap();
++    let result = runner
++        .call("fold_const", &[], &[types::I32])
++        .unwrap()
++        .expect("returns");
++    assert_eq!(result, vec![DataValue::I32(777)]);
++}
++
++const FOLD_BOUNDED: &str = "
++function %fold_bounded(i32) -> i32 {
++block0(v0: i32):
++    v1 = iconst.i32 255
++    v2 = band v0, v1
++    v3 = iconst.i32 8
++    v4 = iadd v2, v3
++    v5 = iconst.i32 777
++    store.i32 v5, v4
++    v6 = iconst.i32 255
++    v7 = band v0, v6
++    v8 = iconst.i32 8
++    v9 = iadd v7, v8
++    v10 = load.i32 v9
++    return v10
++}
++";
++
++#[test]
++fn bounded_dynamic_address_is_folded() {
++    let funcs = cranelift_reader::parse_functions(FOLD_BOUNDED).unwrap();
++    let (wasm, unsupported) = harness::compile_module(&funcs, &Config::default());
++    assert!(unsupported.is_empty(), "{unsupported:?}");
++    harness::validate(&wasm).unwrap();
++
++    let c = counts(&wasm);
++    assert_eq!(c.i32_add, 0, "base <= 255, so base + 8 cannot wrap");
++    assert!(c.memarg_offsets.iter().all(|&o| o == 8));
++
++    let runner = harness::Runner::new(&wasm).unwrap();
++    for x in [0u32, 0xffff_ff00, 0xffff_ffff] {
++        let result = runner
++            .call("fold_bounded", &[DataValue::I32(x as i32)], &[types::I32])
++            .unwrap()
++            .expect("returns");
++        assert_eq!(result, vec![DataValue::I32(777)], "x = {x:#x}");
++    }
++}
++
++const OVERFLOW: &str = "
++function %no_fold_overflow() -> i32 {
++block0:
++    v0 = iconst.i32 -16
++    v1 = iconst.i32 32
++    v2 = iadd v0, v1
++    v3 = iconst.i32 16
++    v4 = iconst.i32 12345
++    store.i32 v4, v3
++    v5 = load.i32 v2
++    return v5
++}
++";
++
++#[test]
++fn wrapping_address_is_not_folded() {
++    let funcs = cranelift_reader::parse_functions(OVERFLOW).unwrap();
++    let (wasm, unsupported) = harness::compile_module(&funcs, &Config::default());
++    assert!(unsupported.is_empty(), "{unsupported:?}");
++    harness::validate(&wasm).unwrap();
++
++    let c = counts(&wasm);
++    assert_eq!(c.i32_add, 1, "the wrapping add must remain");
++    assert!(!c.memarg_offsets.contains(&32), "must not use offset 32");
++
++    let runner = harness::Runner::new(&wasm).unwrap();
++    let result = runner
++        .call("no_fold_overflow", &[], &[types::I32])
++        .unwrap()
++        .expect("the wrapped load is in bounds");
++    assert_eq!(result, vec![DataValue::I32(12345)]);
++}
++
++const UNBOUNDED: &str = "
++function %no_fold_unbounded(i32) -> i32 {
++block0(v0: i32):
++    v1 = iconst.i32 8
++    v2 = iadd v0, v1
++    v3 = load.i32 v2
++    return v3
++}
++";
++
++#[test]
++fn unbounded_address_is_not_folded() {
++    let funcs = cranelift_reader::parse_functions(UNBOUNDED).unwrap();
++    let (wasm, unsupported) = harness::compile_module(&funcs, &Config::default());
++    assert!(unsupported.is_empty(), "{unsupported:?}");
++    harness::validate(&wasm).unwrap();
++    assert_eq!(counts(&wasm).i32_add, 1);
++}
++
++const NARROW_LOAD: &str = "
++function %narrow(i32) -> i32 {
++block0(v0: i32):
++    v1 = load.i8 v0
++    return v1
++}
++";
++
++const NARROW_SIGNED_LOAD: &str = "
++function %narrow_signed(i32) -> i32 {
++block0(v0: i32):
++    v1 = sload8.i16 v0
++    v2 = uextend.i32 v1
++    return v2
++}
++";
++
++#[test]
++fn unsigned_narrow_load_has_no_redundant_mask() {
++    let funcs = cranelift_reader::parse_functions(NARROW_LOAD).unwrap();
++    let (wasm, unsupported) = harness::compile_module(&funcs, &Config::default());
++    assert!(unsupported.is_empty(), "{unsupported:?}");
++    harness::validate(&wasm).unwrap();
++    assert_eq!(
++        counts(&wasm).i32_and,
++        0,
++        "i32.load8_u already zero-extends to i32"
++    );
++
++    let funcs = cranelift_reader::parse_functions(NARROW_SIGNED_LOAD).unwrap();
++    let (wasm, unsupported) = harness::compile_module(&funcs, &Config::default());
++    assert!(unsupported.is_empty(), "{unsupported:?}");
++    harness::validate(&wasm).unwrap();
++    assert_eq!(
++        counts(&wasm).i32_and,
++        1,
++        "a signed narrow load still needs the mask for the narrow representation"
++    );
++}
