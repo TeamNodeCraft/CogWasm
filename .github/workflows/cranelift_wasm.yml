@@ -12,6 +12,7 @@ on:
       - main
     paths:
       - 'experiments/cranelift-wasm/**'
+      - 'bench/**'
       - '.github/workflows/cranelift_wasm.yml'
   workflow_dispatch:
 
@@ -97,6 +98,43 @@ jobs:
           bash ci/build-with-diagnostics.sh \
             "${RUNNER_TEMP}/cranelift-wasm.log" \
             bash experiments/cranelift-wasm/ci/build-and-test.sh
+
+      # A CI-sized subset of the product benchmark suite. It reuses the
+      # rustc.wasm, sysroot, Wild and Cargo target directory this job just
+      # built, so it adds about two minutes rather than a second full build.
+      - name: quick performance suite
+        if: success()
+        run: |
+          bash bench/run.sh --quick --runs 3 \
+            --out "bench/results/quick-${GITHUB_RUN_ID}.json"
+          cat "bench/results/quick-${GITHUB_RUN_ID}.md" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: upload benchmark result
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bench-quick-${{ github.run_id }}
+          path: |
+            bench/results/quick-*.json
+            bench/results/quick-*.md
+          if-no-files-found: warn
+          retention-days: 30
+          compression-level: 6
+
+      - name: publish benchmark result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: |
+          json=$(ls bench/results/quick-*.json 2>/dev/null | tail -n 1 || true)
+          markdown=${json%.json}.md
+          if [ -n "$json" ] && [ -f "$markdown" ]; then
+            bash bench/scripts/publish-ci.sh "$json" "$markdown"
+          else
+            echo "::warning::no quick benchmark result to publish"
+          fi
 
       # The full log is published even when the build fails, and the log
       # helper above adds ::error annotations for the interesting lines.

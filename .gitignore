@@ -3,3 +3,10 @@
 # Old logo experiments stay local; only the published logo in artwork/cog-logo/ is tracked.
 artwork/*
 !artwork/cog-logo/
+
+# Benchmark scratch space and local result files; committed points live in
+# bench/history/.
+bench/work/
+bench/results/
+__pycache__/
+*.pyc

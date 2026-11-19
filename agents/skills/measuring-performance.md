@@ -18,9 +18,9 @@ Every speed claim needs a number. This is how to get one that means something.
 
 | Question | Tool | Where |
 | --- | --- | --- |
-| How fast is generated code? | A.2 harness: maths over 100k points (e) and a host-call-heavy geometry stub (f), against LLVM `-O0` / `-O2` | `experiments/cranelift-wasm/stage-b/a2/`, `stage-c/run.sh a2check` |
-| How fast is the compiler? | Stage-B table: module load (cold, cached), instantiate, compile inside `rustc.wasm`, link, edit → result | `experiments/cranelift-wasm/stage-c/run.sh` |
-| How big is the output? | `wasm-tools objdump`/section sizes, total bytes | same scripts |
+| How fast is generated code? | The product suite runs kernels plus the A.2 maths (e) and host-call (f) programs against LLVM `-O0` / `-O2` | `bench/run.sh`, `experiments/cranelift-wasm/stage-b/a2/` |
+| How fast is the compiler? | The product suite: module load (cold, cached, precompiled), instantiate, compile inside `rustc.wasm` (warm and incremental, with phases), link, edit → result | `bench/run.sh --quick` / `--full` ([README](../../bench/README.md)) |
+| How big is the output? | Total/code/data bytes from the benchmark host | `bench/run.sh` |
 | Is it still correct? | Differential tests | `experiments/cranelift-wasm/difftest/` |
 
 ## Reporting
@@ -28,6 +28,17 @@ Every speed claim needs a number. This is how to get one that means something.
 Put results in `experiments/cranelift-wasm/results.md` (or the stage's own
 `results.md`) as a table: what changed, before, after, ratio, machine, commit.
 If the README's Status numbers change, update them in the same commit.
+
+For product-level numbers use the suite and keep the JSON:
+
+```sh
+bench/run.sh --full --out bench/history/<machine>-<commit>.json
+bench/compare.py bench/history/<before>.json bench/history/<after>.json
+```
+
+`compare.py` flags only changes larger than the run-to-run spread and refuses
+to compare different machine kinds unless forced. Commit meaningful points in
+`bench/history/`; do not compare CI numbers with a developer machine.
 
 ## Profiling generated code
 

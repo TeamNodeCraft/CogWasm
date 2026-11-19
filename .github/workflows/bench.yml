@@ -1,0 +1,163 @@
+name: bench
+
+# Full product benchmark suite. Weekly and on demand; the quick subset runs in
+# the cranelift_wasm pipeline on every compiler change.
+#
+# The optional `base` input is a commit SHA whose previously published JSON
+# (on the `bench-results` release) should be used for the comparison. Without
+# it the newest published full run is used.
+on:
+  workflow_dispatch:
+    inputs:
+      base:
+        description: 'Commit SHA of a published run to compare against (optional)'
+        required: false
+        type: string
+      record_history:
+        description: 'Commit this result to bench/history/'
+        required: false
+        type: boolean
+        default: false
+  schedule:
+    - cron: '0 6 * * 1'
+
+permissions:
+  contents: write
+
+jobs:
+  full:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: '1'
+      RUSTUP_HOME: ${{ github.workspace }}/experiments/cranelift-wasm/toolchain/rustup
+      CARGO_HOME: ${{ github.workspace }}/experiments/cranelift-wasm/toolchain/cargo
+    steps:
+      - name: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: false
+
+      - name: install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake pkg-config libclang-dev curl xz-utils zstd
+
+      # Same caches as cranelift_wasm.yml, keyed identically so the weekly run
+      # reuses the toolchain and registry the push builds already populated.
+      - name: restore rustup toolchains
+        id: cache-rustup
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            experiments/cranelift-wasm/toolchain/rustup
+            experiments/cranelift-wasm/toolchain/cargo/bin
+          key: cranelift-wasm-rustup-${{ runner.os }}-${{ runner.arch }}-nightly-2026-10-19-1.99.1-v1
+
+      - name: restore cargo registry and git
+        id: cache-cargo
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            experiments/cranelift-wasm/toolchain/cargo/registry
+            experiments/cranelift-wasm/toolchain/cargo/git
+          key: cranelift-wasm-cargo-${{ runner.os }}-${{ hashFiles('experiments/cranelift-wasm/stage-c/host/Cargo.lock', 'experiments/cranelift-wasm/stage-c/programs/*/Cargo.lock', 'experiments/cranelift-wasm/stage-b/a2/harness/Cargo.lock') }}-v1
+          restore-keys: |
+            cranelift-wasm-cargo-${{ runner.os }}-
+
+      - name: restore pinned source checkouts
+        id: cache-src
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            experiments/cranelift-wasm/toolchain/playground
+            experiments/cranelift-wasm/toolchain/clif-to-wasm
+            experiments/cranelift-wasm/toolchain/wild
+          key: cranelift-wasm-src-${{ runner.os }}-${{ hashFiles('experiments/cranelift-wasm/stage-c/patches/**') }}-f5298630-0e4e0458-fd79578-v1
+
+      - name: restore wasi-sdk
+        id: cache-wasi-sdk
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            experiments/cranelift-wasm/toolchain/stage-b/wasi-sdk-34.0-x86_64-linux
+            experiments/cranelift-wasm/toolchain/stage-b/wasi-sdk
+          key: cranelift-wasm-wasi-sdk-${{ runner.os }}-${{ runner.arch }}-34.0-v1
+
+      - name: build rustc.wasm, host and pure sysroot
+        run: |
+          bash experiments/cranelift-wasm/ci/setup-toolchain.sh
+          bash experiments/cranelift-wasm/stage-c/scripts/build-rustc-wasm.sh
+          bash experiments/cranelift-wasm/stage-c/scripts/build-host.sh
+          bash experiments/cranelift-wasm/stage-c/scripts/build-pure-sysroot.sh
+
+      - name: run full benchmark suite
+        run: |
+          bash bench/run.sh --full --out bench/results/full.json
+
+      - name: fetch comparison base
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          bash bench/scripts/find-base.sh bench/work/base.json "${{ inputs.base }}"
+
+      - name: compare with the previous full run
+        run: |
+          if [ -f bench/work/base.json ]; then
+            python3 bench/compare.py bench/work/base.json bench/results/full.json \
+              > bench/results/compare.md || true
+          else
+            printf 'No previous full run is published; this run is the baseline.\n' \
+              > bench/results/compare.md
+          fi
+          cat bench/results/full.md >> "${GITHUB_STEP_SUMMARY}"
+          cat bench/results/compare.md >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: publish to the bench-results release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          bash bench/scripts/publish-results.sh \
+            bench/results/full.json bench/results/full.md bench/results/compare.md
+
+      - name: record in bench/history (explicitly requested)
+        if: ${{ inputs.record_history }}
+        run: |
+          mkdir -p bench/history
+          dest="bench/history/$(date -u +%Y-%m-%d)-${GITHUB_SHA:0:12}.json"
+          cp bench/results/full.json "$dest"
+          git config user.name 'CogWasm CI'
+          git config user.email 'ci@cogwasm.invalid'
+          git add "$dest"
+          if git diff --cached --quiet; then
+            echo "bench/history already has this result"
+          else
+            git commit -m "bench: record CI results for ${GITHUB_SHA:0:12}"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+
+      - name: upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bench-full-${{ github.run_id }}
+          path: |
+            bench/results/full.json
+            bench/results/full.md
+            bench/results/compare.md
+          if-no-files-found: warn
+          retention-days: 90
+          compression-level: 6

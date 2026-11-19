@@ -37,6 +37,9 @@ Working end to end, still experimental. The build lives in
 [`experiments/cranelift-wasm/`](experiments/cranelift-wasm/) and is built and
 tested on every push by [CI](#ci). Differential tests also compare the pipeline
 with LLVM rustc on every run: [`difftest`](experiments/cranelift-wasm/difftest/README.md).
+The permanent compile-time and execution suite lives in [`bench/`](bench/README.md):
+it reports compiler start, compile phases, execution against LLVM `-O0`/`-O2`
+and output size, and checks every result bit-for-bit before reporting a timing.
 
 | | |
 | --- | --- |
@@ -48,6 +51,7 @@ with LLVM rustc on every run: [`difftest`](experiments/cranelift-wasm/difftest/R
 | Incremental | One-line edits reuse rustc's incremental cache in the resident compiler: about 12–14% faster edit to result for 12–18% larger output; opt-in (`--incremental`), off by default |
 | First load | 37.6 s to compile the 137 MiB `rustc.wasm`, 0.46 s from Wasmtime's cache, **18.7 ms** from a per-host precompiled `.cwasm` (282 MiB); the release bundle ships one per host |
 | Output | A small module of about 35 KB for a typical program, with a growable heap |
+| Performance suite | [`bench/run.sh --quick`](bench/README.md) in CI on every compiler change; the full suite is published from the `bench-results` release |
 
 Known limits:
 

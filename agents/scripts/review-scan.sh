@@ -37,11 +37,12 @@ read_into() { local _name="$1" _line; eval "$_name=()"; while IFS= read -r _line
   [[ -n "$_line" ]] && eval "$_name+=(\"\$_line\")"; done; }
 skip() { printf '   skipped: %s\n' "$*"; }
 
-# Our own code: everything tracked except patches for upstream projects, upstream
-# drafts, the legacy LLVM series and the rule fixtures.
+# Our own code: everything tracked except patches for upstream projects,
+# upstream drafts, vendored third-party sources (which follow their own style
+# and licences), the legacy LLVM series and the rule fixtures.
 own_files() {
   git ls-files -- "$@" \
-    | grep -v -E '^(patches/|.*/upstream/|.*/toolchain/|agents/scripts/rule-fixtures/)' || true
+    | grep -v -E '^(patches/|.*/upstream/|.*/vendor/|.*/toolchain/|agents/scripts/rule-fixtures/)' || true
 }
 if [[ $changed -eq 1 ]]; then
   base="$(git merge-base HEAD origin/main 2>/dev/null || echo HEAD)"

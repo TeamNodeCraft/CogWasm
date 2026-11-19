@@ -1,0 +1,169 @@
+{
+  "schema": 1,
+  "seeds": [
+    0,
+    1,
+    42,
+    18446744073709551615
+  ],
+  "programs": [
+    {
+      "name": "a_add",
+      "class": "small",
+      "source": "bench/programs/small/a_add.rs",
+      "quick": true,
+      "incremental": true
+    },
+    {
+      "name": "b_alloc",
+      "class": "small",
+      "source": "bench/programs/small/b_alloc.rs",
+      "quick": true,
+      "incremental": true
+    },
+    {
+      "name": "c_plugin",
+      "class": "small",
+      "source": "bench/programs/small/c_plugin.rs",
+      "quick": true,
+      "incremental": true
+    },
+    {
+      "name": "smoke",
+      "class": "small",
+      "source": "bench/programs/small/smoke.rs",
+      "quick": true,
+      "incremental": true
+    },
+    {
+      "name": "int_loops",
+      "class": "small",
+      "source": "bench/programs/small/int_loops.rs",
+      "quick": true,
+      "incremental": true
+    },
+    {
+      "name": "float_sum",
+      "class": "small",
+      "source": "bench/programs/small/float_sum.rs",
+      "quick": true,
+      "incremental": true
+    },
+    {
+      "name": "expr",
+      "class": "medium",
+      "source": "bench/programs/medium/expr.rs",
+      "quick": true,
+      "incremental": true
+    },
+    {
+      "name": "json",
+      "class": "medium",
+      "source": "bench/programs/medium/json.rs",
+      "quick": false,
+      "incremental": true
+    },
+    {
+      "name": "collections",
+      "class": "medium",
+      "source": "bench/programs/medium/collections.rs",
+      "quick": false,
+      "incremental": true
+    },
+    {
+      "name": "scene",
+      "class": "medium",
+      "source": "bench/programs/medium/scene.rs",
+      "quick": false,
+      "incremental": true
+    },
+    {
+      "name": "nbody",
+      "class": "kernels",
+      "source": "bench/programs/kernels/nbody.rs",
+      "quick": true,
+      "incremental": true
+    },
+    {
+      "name": "mandelbrot",
+      "class": "kernels",
+      "source": "bench/programs/kernels/mandelbrot.rs",
+      "quick": false,
+      "incremental": true
+    },
+    {
+      "name": "sha256",
+      "class": "kernels",
+      "source": "bench/programs/kernels/sha256.rs",
+      "quick": true,
+      "incremental": true
+    },
+    {
+      "name": "sort",
+      "class": "kernels",
+      "source": "bench/programs/kernels/sort.rs",
+      "quick": false,
+      "incremental": true
+    },
+    {
+      "name": "matmul",
+      "class": "kernels",
+      "source": "bench/programs/kernels/matmul.rs",
+      "quick": true,
+      "incremental": true
+    },
+    {
+      "name": "strings",
+      "class": "kernels",
+      "source": "bench/programs/kernels/strings.rs",
+      "quick": false,
+      "incremental": true
+    },
+    {
+      "name": "math_e",
+      "class": "kernels",
+      "source": "bench/programs/kernels/math_e.rs",
+      "quick": true,
+      "incremental": true,
+      "externs": [
+        "libm"
+      ]
+    },
+    {
+      "name": "hostcall_f",
+      "class": "kernels",
+      "source": "bench/programs/kernels/hostcall_f.rs",
+      "quick": true,
+      "incremental": true
+    },
+    {
+      "name": "libm_driver",
+      "class": "large",
+      "source": "bench/programs/large/libm_driver.rs",
+      "quick": false,
+      "incremental": true,
+      "externs": [
+        "libm"
+      ]
+    },
+    {
+      "name": "miniz_driver",
+      "class": "large",
+      "source": "bench/programs/large/miniz_driver.rs",
+      "quick": false,
+      "incremental": true,
+      "externs": [
+        "miniz_oxide",
+        "adler2"
+      ]
+    },
+    {
+      "name": "generated_stress",
+      "class": "large",
+      "source": "bench/work/generated_stress.rs",
+      "quick": false,
+      "incremental": false,
+      "generated": true
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+# Workspace for the vendored large-crate sources. The suite builds these with
+# both compilers; see bench/README.md.
+[workspace]
+resolver = "2"
+members = ["libm", "adler2", "miniz_oxide"]
+
+[patch.crates-io]
+adler2 = { path = "adler2" }
+
+[profile.release]
+opt-level = 2
+panic = "abort"
