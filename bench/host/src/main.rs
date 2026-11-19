@@ -128,6 +128,11 @@ struct CompileArgs {
     /// Extra `-L dependency=DIR` search directory.
     #[arg(long = "search-path")]
     search_paths: Vec<String>,
+    /// Extra argument passed to the compiler inside rustc.wasm. Used by the
+    /// gap-attribution experiment to raise rustc's MIR optimisation level
+    /// without changing the product's default.
+    #[arg(long = "rustc-arg", allow_hyphen_values = true)]
+    rustc_args: Vec<String>,
     /// Also measure incremental compiles with a one-line edit between runs.
     #[arg(long)]
     incremental: bool,
@@ -650,6 +655,7 @@ struct CompileOptions {
     search_paths: Vec<String>,
     incremental: Option<PathBuf>,
     time_passes: bool,
+    extra_args: Vec<String>,
 }
 
 impl CompileOptions {
@@ -686,6 +692,7 @@ impl CompileOptions {
         if self.time_passes {
             args.push("-Ztime-passes".to_owned());
         }
+        args.extend(self.extra_args.iter().cloned());
         args
     }
 }
@@ -805,6 +812,7 @@ fn run_phases(
         search_paths: options.search_paths.clone(),
         incremental: None,
         time_passes: true,
+        extra_args: options.extra_args.clone(),
     };
     let mut runs = Vec::with_capacity(count);
     for index in 0..count {
@@ -843,6 +851,7 @@ fn compile_with(
         search_paths: args.search_paths.clone(),
         incremental: None,
         time_passes: false,
+        extra_args: args.rustc_args.clone(),
     };
 
     let warmup = compile_once(engine, module, &options, &linker, 0)?;
@@ -1058,6 +1067,7 @@ fn run_incremental(
         search_paths: options.search_paths.clone(),
         incremental: Some(directory.to_path_buf()),
         time_passes: false,
+        extra_args: options.extra_args.clone(),
     };
     // The first compile populates the incremental directory; edits after it
     // reuse the cached work products.
