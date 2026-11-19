@@ -25,17 +25,52 @@ investigation before it can be planned).
 ## Goal 1 — Generated code as fast as LLVM, faster where it counts
 
 Today: tight numeric loops run about 3× slower than LLVM `-O2` output; code
-that mostly calls its host runs at parity. Both go through Wasmtime's Cranelift
-to native code, so the gap is optimisation *before* wasm: inlining, loop
-optimisation, scalar replacement, vectorisation.
+that mostly calls its host runs at parity.
+
+**What parity means.** The geometric mean over the benchmark suite's programs,
+against LLVM `-O2` built for the same wasm features and run in the same
+Wasmtime. The first target is **scalar parity: within 1.1×, with `simd128` off
+on both sides**. Matching LLVM's auto-vectorisation is a separate, later goal.
+
+**Where the gap is.** Both pipelines end in Wasmtime, which compiles the wasm
+to native code with the same Cranelift backend. So the whole gap is in the wasm
+we hand it. Roughly in order of cost for idiomatic Rust:
+
+1. **Operations done in software.** Most of A.2 (e)'s gap was `sqrt` (about
+   52 ns per point against LLVM's 12): LLVM emits wasm's `f64.sqrt`, we call a
+   routine. The same may hold for `min`/`max`/`abs`/`copysign`/`floor`/`ceil`/
+   `trunc`, bit counts and rotates.
+2. **Values in memory instead of registers.** Wasm has no addressable stack,
+   so any local whose address is taken (structs, tuples, `Option`, iterator
+   state) lives in linear memory and every use is a load or store. LLVM's SROA
+   and mem2reg turn nearly all of these back into registers; Cranelift has no
+   equivalent.
+3. **Too little inlining.** Iterators, closures and small methods are only
+   free once inlined, which then also removes most of point 2.
+4. **Bounds checks** that LLVM proves away with range analysis.
+5. **Loop optimisation:** unrolling, and vectorisation when SIMD is allowed.
+
+**Compile time.** Every pass costs time, and Goal 2 wants fast compiles. So
+optimisation goes in a second tier, as in a JIT: compile fast for the edit
+loop, rebuild optimised in the background, swap the faster plugin in when it
+is ready.
+
+Work in this order; each step is measured with the benchmark suite before the
+next starts.
 
 | Status | Item | Done when |
 | --- | --- | --- |
 | **done** | First code-generation wins in clif-to-wasm (tiny-leaf inlining; 1.25× on A.2 (e), LLVM gap 3.76× → 3.00×) | Measured improvement on the A.2 maths benchmark; difftest green |
-| **open** | A benchmark suite against LLVM `-O0` and `-O2`, run in CI, results published | A table in the README updated by CI |
-| **open** | Tier 2: a background optimising build (aggressive inlining, Cranelift e-graph at full strength, loop-invariant code motion, wasm-level clean-up), swapped in when ready | Within 1.5× of LLVM `-O2` on scalar benchmarks |
+| **in progress** | A benchmark suite against LLVM `-O0` and `-O2` (small, medium and large programs plus compute kernels), run in CI, results published | A table in the README updated by CI |
+| **open** | 1. Gap attribution: for each benchmark's hot loops, diff our wasm against LLVM's and assign every extra instruction to one of the five causes above | A published per-benchmark breakdown that names the next fix |
+| **open** | 2. Map built-in operations 1:1 to wasm instructions (`sqrt` first, then the rest of the list in point 1) | No software routine where wasm has an instruction; A.2 (e) gap measured |
+| **open** | 3. Turn up rustc's own pure-Rust MIR optimisations (`-Zmir-opt-level`, `-Zinline-mir`: MIR inlining, SROA, GVN, copy propagation) for the optimising tier | Speed and compile-time change measured per benchmark; difftest green |
+| **open** | 4. Tidy loads and stores: fold constant offsets into wasm's load/store offset, drop redundant extends and address arithmetic | Instruction counts in hot loops measured before/after |
+| **open** | 5. A cost-model inliner plus SROA/mem2reg on Cranelift IR (inline, promote non-escaping stack slots to SSA values, repeat) | Iterator-heavy benchmarks within 1.2× of LLVM `-O2` |
+| **open** | 6. Bounds-check removal from simple range facts (loop indices against slice lengths) | Measured on the benchmarks that index slices in loops |
+| **open** | Tier 2: run steps 3–6 in a background optimising build and swap the result in when ready, keeping the fast tier for the edit loop | Scalar parity (within 1.1× of LLVM `-O2`, `simd128` off) with edit-to-result unchanged |
 | **open** | Explicit SIMD (wasm `simd128`) supported end to end through clif-to-wasm, with SDK helpers | A `simd128` program in the difftest corpus; measured speed-up |
-| **research** | Auto-vectorisation in tier 2 for simple loops | Matches LLVM on the vectorisable benchmarks |
+| **research** | 7. Loop unrolling, then auto-vectorisation in tier 2 for simple loops | Matches LLVM on the vectorisable benchmarks with `simd128` on |
 | **research** | Profile-guided recompilation from live profiles | Measured win over the static tier-2 build |
 | **research** | Specialisation of hot functions on runtime-constant inputs | Measured win, with a fallback when inputs change |
 | **research** | Bulk maths offloaded to the GPU (host-compiled kernels via wgpu) | Beats LLVM-built wasm by an order of magnitude on large arrays |
