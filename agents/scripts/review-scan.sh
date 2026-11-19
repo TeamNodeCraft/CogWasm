@@ -46,10 +46,39 @@ own_files() {
 }
 if [[ $changed -eq 1 ]]; then
   base="$(git merge-base HEAD origin/main 2>/dev/null || echo HEAD)"
-  changed_list="$(git diff --name-only "$base" -- . ; git ls-files --others --exclude-standard)"
-  in_scope() { grep -F -x -f <(printf '%s\n' "$changed_list") || true; }
+  # Materialize the list once, then read it as a file. Piping it into `grep -q`
+  # let grep exit at its first match, the writer die of SIGPIPE, and `pipefail`
+  # turn the inverted test into "not changed"; every host crate was skipped.
+  changed_file="$tmpdir/changed.txt"
+  { git diff --name-only "$base" -- . ; git ls-files --others --exclude-standard; } \
+    >"$changed_file"
+  in_scope() { grep -F -x -f "$changed_file" || true; }
 else
   in_scope() { cat; }
+fi
+
+# True when the changed-file list contains a path under crate directory $1.
+# $2 is the list to search; it defaults to the list --changed built.
+dir_changed() {
+  local dir="$1" list="${2:-$changed_file}"
+  grep -q "^$dir/" "$list"
+}
+
+if [[ $changed -eq 1 ]]; then
+  # The scope filter must find a crate with one changed file and ignore one
+  # with none. This guards the matcher itself; the SIGPIPE failure came from
+  # the pipe that used to feed it.
+  note "changed-scope self-test"
+  scope_fixture="$tmpdir/scope.txt"
+  printf 'bench/gap/src/main.rs\nagents/README.md\n' >"$scope_fixture"
+  if ! dir_changed bench/gap "$scope_fixture" \
+    || dir_changed bench/host "$scope_fixture" \
+    || ! dir_changed agents "$scope_fixture"; then
+    blocking "the --changed scope filter does not match changed crate directories"
+    failed=1
+  else
+    echo "   changed crates are found"
+  fi
 fi
 
 # 1. The project rules still match their known examples.
@@ -119,7 +148,7 @@ host_crates=()
 for m in $(own_files '*Cargo.toml' | sort -u); do
   if grep -q -E '^\s*wasmtime\s*=|^\s*clap\s*=' "$m" || [[ "$m" == config_rewriter/Cargo.toml ]]; then
     dir="$(dirname "$m")"
-    if [[ $changed -eq 1 ]] && ! printf '%s\n' "$changed_list" | grep -q "^$dir/"; then continue; fi
+    if [[ $changed -eq 1 ]] && ! dir_changed "$dir"; then continue; fi
     host_crates+=("$m")
   fi
 done
