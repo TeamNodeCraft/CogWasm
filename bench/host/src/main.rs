@@ -723,6 +723,9 @@ struct CompileResult {
     runs: Vec<CompileRun>,
     phase_runs: Vec<CompileRun>,
     incremental: Option<IncrementalResult>,
+    /// A normal (non-incremental) rebuild after the incremental runs, so the
+    /// `out` module used for execution and size is the product's normal build.
+    final_build: Option<CompileRun>,
     medians: BTreeMap<String, f64>,
     ok: bool,
 }
@@ -869,6 +872,11 @@ fn compile_with(
         None
     };
 
+    let final_build = if incremental.is_some() {
+        Some(compile_once(engine, module, &options, &linker, 0)?)
+    } else {
+        None
+    };
     let medians = compile_medians(&runs, incremental.as_ref());
     let source_bytes = std::fs::read(crate_source)?;
     let result = CompileResult {
@@ -888,6 +896,7 @@ fn compile_with(
         runs,
         phase_runs,
         incremental,
+        final_build,
         medians,
         ok: true,
     };

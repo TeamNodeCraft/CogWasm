@@ -6,6 +6,7 @@
 #   bench/run.sh --full --runs 7 --out bench/results/local.json
 #   bench/run.sh --programs a_add,expr,sha256 --runs 5
 #   bench/run.sh --no-incremental        # for a compiler without the incremental patches
+#   bench/run.sh --cold-runs 1            # fewer 38 s cold module compiles
 #
 # Toolchain overrides (used by the baseline run in bench/README.md):
 #   BENCH_TOOLCHAIN      experiments/cranelift-wasm/toolchain to measure
@@ -24,6 +25,7 @@ HOST_TOOLCHAIN=${BENCH_HOST_TOOLCHAIN:-1.99.1}
 MODE=full
 PROGRAMS=
 RUNS=
+COLD_RUNS=
 OUT=
 PREPARE_PRECOMPILED=1
 NO_INCREMENTAL=0
@@ -40,6 +42,8 @@ while [ $# -gt 0 ]; do
         --programs=*) PROGRAMS=${1#--programs=} ;;
         --runs) RUNS=${2:?--runs needs a value}; shift ;;
         --runs=*) RUNS=${1#--runs=} ;;
+        --cold-runs) COLD_RUNS=${2:?--cold-runs needs a value}; shift ;;
+        --cold-runs=*) COLD_RUNS=${1#--cold-runs=} ;;
         --out) OUT=${2:?--out needs a path}; shift ;;
         --out=*) OUT=${1#--out=} ;;
         --no-precompiled) PREPARE_PRECOMPILED=0 ;;
@@ -159,7 +163,7 @@ ARGS=(
     --runs "$RUNS"
     --llvm-runs "$([ "$MODE" = quick ] && echo 2 || echo "$RUNS")"
     --phase-runs 1
-    --cold-runs "$([ "$MODE" = quick ] && echo 1 || echo "$RUNS")"
+    --cold-runs "${COLD_RUNS:-$([ "$MODE" = quick ] && echo 1 || echo "$RUNS")}"
     --host "$HOST_BIN"
     --toolchain "$TOOLCHAIN"
     --llvm-rustc "$LLVM_RUSTC"
