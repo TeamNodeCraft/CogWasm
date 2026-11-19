@@ -1,0 +1,224 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Stage C <stage-c@example.invalid>
+Date: Thu, 19 Nov 2026 22:05:00 +1030
+Subject: [PATCH] wasm: address constant aggregate locals in place
+
+cg_clif materialises every `_tmp = const ARRAY` assignment as a stack slot and
+a full `memcpy`. For a constant array that is only read, such as the 256-byte
+K table that SHA-256 indexes in every round, that copies the whole table into
+the shadow stack per iteration: `emit_small_memory_copy` gives up above four
+accesses and calls `compiler_builtins`' `copy_forward`, which is 79% of
+sha256's executed instructions.
+
+Find locals whose only write is one constant aggregate assignment and that are
+never address-taken, dropped or interior-mutable, and make their place point
+at the constant's read-only data allocation instead. The initialising
+assignment is then a no-op. Terminator writes (`call`/`tail_call`
+destinations, `drop` places, coroutine `yield` resume arguments) and inline
+asm outputs are rejected as well as statement writes, so the alias can never
+be written through.
+
+This is cg_clif's version of LLVM's store-to-load forwarding for this shape;
+the MIR itself is valid and rustc has no constant-place representation to use
+in its place. On sha256 the K-table copy disappears: `copy_forward` is no
+longer executed at all and the module's instruction count drops from 363.0M to
+71.5M (8.57x to 1.69x LLVM -O2) in bench/gap.
+---
+--- a/src/analyze.rs
++++ b/src/analyze.rs
+@@ -33,3 +33,88 @@
+ 
+     flag_map
+ }
++
++/// Find locals whose only write is a single assignment of a constant aggregate.
++///
++/// Such a local can be addressed in the constant's data-section allocation
++/// instead of copying the whole aggregate to a stack slot. The caller still has
++/// to check that the constant lowers to a by-reference `CValue` (an `Indirect`
++/// allocation); scalar constants stay in SSA values.
++pub(crate) fn analyze_const_locals<'tcx>(
++    mir: &'tcx Body<'tcx>,
++) -> IndexVec<Local, Option<ConstOperand<'tcx>>> {
++    let mut candidates: IndexVec<Local, Option<ConstOperand<'tcx>>> =
++        IndexVec::from_elem_n(None, mir.local_decls.len());
++    let mut rejected = IndexVec::from_elem_n(false, mir.local_decls.len());
++
++    for bb in mir.basic_blocks.iter() {
++        for stmt in bb.statements.iter() {
++            match &stmt.kind {
++                Assign(place_and_rval) => {
++                    let (place, rvalue) = &**place_and_rval;
++                    if place.projection.is_empty() {
++                        match rvalue {
++                            Rvalue::Use(Operand::Constant(constant), _)
++                                if candidates[place.local].is_none() && !rejected[place.local] =>
++                            {
++                                candidates[place.local] = Some((**constant).clone());
++                            }
++                            _ => reject_const_local(place.local, &mut candidates, &mut rejected),
++                        }
++                    } else {
++                        // Written through a projection: the bytes in the
++                        // constant allocation must not be reused for it.
++                        reject_const_local(place.local, &mut candidates, &mut rejected);
++                    }
++                    // Taking a reference (including one to a projection) lets
++                    // other code read or write the local.
++                    if let Rvalue::Ref(_, _, place)
++                    | Rvalue::RawPtr(_, place)
++                    | Rvalue::Reborrow(_, _, place) = rvalue
++                    {
++                        reject_const_local(place.local, &mut candidates, &mut rejected);
++                    }
++                }
++                SetDiscriminant { place, .. } => {
++                    reject_const_local(place.local, &mut candidates, &mut rejected)
++                }
++                _ => {}
++            }
++        }
++        match &bb.terminator().kind {
++            TerminatorKind::Call { destination, .. } => {
++                reject_const_local(destination.local, &mut candidates, &mut rejected);
++            }
++            TerminatorKind::Drop { place, .. } => {
++                reject_const_local(place.local, &mut candidates, &mut rejected);
++            }
++            TerminatorKind::Yield { resume_arg, .. } => {
++                reject_const_local(resume_arg.local, &mut candidates, &mut rejected);
++            }
++            TerminatorKind::InlineAsm { operands, .. } => {
++                for operand in &**operands {
++                    let place = match operand {
++                        InlineAsmOperand::Out { place, .. } => place.as_ref(),
++                        InlineAsmOperand::InOut { out_place, .. } => out_place.as_ref(),
++                        _ => None,
++                    };
++                    if let Some(place) = place {
++                        reject_const_local(place.local, &mut candidates, &mut rejected);
++                    }
++                }
++            }
++            _ => {}
++        }
++    }
++
++    candidates
++}
++
++fn reject_const_local<'tcx>(
++    local: Local,
++    candidates: &mut IndexVec<Local, Option<ConstOperand<'tcx>>>,
++    rejected: &mut IndexVec<Local, bool>,
++) {
++    rejected[local] = true;
++    candidates[local] = None;
++}
+--- a/src/abi/mod.rs
++++ b/src/abi/mod.rs
+@@ -234,6 +234,36 @@
+     }
+ }
+ 
++/// Make a [`CPlace`] that addresses a constant aggregate in place.
++///
++/// The constant's bytes already live in a read-only data allocation. Only
++/// `ConstValue::Indirect` lowers to a by-reference [`CValue`]; scalar
++/// constants are handled by the normal SSA/stack-slot path.
++fn make_const_local_place<'tcx>(
++    fx: &mut FunctionCx<'_, '_, 'tcx>,
++    constant: &ConstOperand<'tcx>,
++    layout: TyAndLayout<'tcx>,
++) -> Option<CPlace<'tcx>> {
++    if !layout.is_sized()
++        || layout.is_zst()
++        || !matches!(layout.backend_repr, BackendRepr::Memory { .. })
++        || layout.ty.needs_drop(fx.tcx, fx.typing_env())
++        || !layout.ty.is_freeze(fx.tcx, fx.typing_env())
++    {
++        return None;
++    }
++    let (const_val, ty) = crate::constant::eval_mir_constant(fx, constant);
++    if !matches!(const_val, ConstValue::Indirect { .. }) {
++        return None;
++    }
++    let cvalue = crate::constant::codegen_const_value(fx, const_val, ty);
++    let (ptr, extra) = cvalue.try_to_ptr()?;
++    Some(match extra {
++        Some(extra) => CPlace::for_ptr_with_extra(ptr, extra, layout),
++        None => CPlace::for_ptr(ptr, layout),
++    })
++}
++
+ /// Make a [`CPlace`] capable of holding value of the specified type.
+ fn make_local_place<'tcx>(
+     fx: &mut FunctionCx<'_, '_, 'tcx>,
+@@ -269,6 +299,7 @@
+     fx.bcx.ins().nop();
+ 
+     let ssa_analyzed = crate::analyze::analyze(fx);
++    let const_locals = crate::analyze::analyze_const_locals(fx.mir);
+ 
+     self::comments::add_args_header_comment(fx);
+ 
+@@ -406,7 +437,17 @@
+ 
+         let is_ssa = ssa_analyzed[local].is_ssa(fx, ty);
+ 
+-        let place = make_local_place(fx, local, layout, is_ssa);
++        let place = if let Some(constant) = &const_locals[local] {
++            match make_const_local_place(fx, constant, layout) {
++                Some(place) => {
++                    fx.const_locals[local] = true;
++                    place
++                }
++                None => make_local_place(fx, local, layout, is_ssa),
++            }
++        } else {
++            make_local_place(fx, local, layout, is_ssa)
++        };
+         assert_eq!(fx.local_map.push(place), local);
+     }
+ 
+--- a/src/common.rs
++++ b/src/common.rs
+@@ -288,6 +288,9 @@
+     pub(crate) bcx: FunctionBuilder<'clif>,
+     pub(crate) block_map: IndexVec<BasicBlock, Block>,
+     pub(crate) local_map: IndexVec<Local, CPlace<'tcx>>,
++    /// Locals whose only write is a constant aggregate assignment. Their place
++    /// addresses the constant allocation directly; the assignment is elided.
++    pub(crate) const_locals: IndexVec<Local, bool>,
+ 
+     /// When `#[track_caller]` is used, the implicit caller location is stored in this variable.
+     pub(crate) caller_location: Option<CValue<'tcx>>,
+--- a/src/base.rs
++++ b/src/base.rs
+@@ -129,6 +129,7 @@
+         bcx,
+         block_map,
+         local_map: IndexVec::with_capacity(mir.local_decls.len()),
++        const_locals: IndexVec::from_elem_n(false, mir.local_decls.len()),
+         caller_location: None, // set by `codegen_fn_prelude`
+         exception_slot,
+ 
+@@ -648,6 +649,18 @@
+             crate::discriminant::codegen_set_discriminant(fx, place, *variant_index);
+         }
+         StatementKind::Assign(to_place_and_rval) => {
++            // A const local's place is the constant's read-only allocation and
++            // this is its only write. Copying the aggregate into itself would
++            // write to that allocation, so the initialisation is a no-op.
++            if to_place_and_rval.0.projection.is_empty()
++                && fx.const_locals[to_place_and_rval.0.local]
++                && matches!(
++                    &to_place_and_rval.1,
++                    Rvalue::Use(Operand::Constant(_), _)
++                )
++            {
++                return;
++            }
+             let lval = codegen_place(fx, to_place_and_rval.0);
+             let dest_layout = lval.layout();
+             match to_place_and_rval.1 {
