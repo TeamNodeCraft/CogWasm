@@ -20,13 +20,21 @@ What is plotted (lower is better throughout):
 Panel 1 "Against LLVM -O2 (lower is better, 1.0 = parity)"
   * execution time ours/LLVM -O2, geometric mean over programs whose LLVM
     time is at least 0.1 ms (the same exclusion rule for every commit),
+  * executed wasm instructions ours/LLVM -O2, geometric mean on exactly the
+    same programs and floor,
   * module size ours/LLVM -O2, geometric mean over the quick programs, and
   * a dashed reference line at 1.0 labelled "LLVM -O2".
 
 Panel 2 "Compile speed (ms, lower is better)"
   * median warm compile across the quick programs,
-  * median incremental (edit-to-result) compile, when the point has it, and
-  * precompiled compiler load, when the point has it.
+  * median incremental (edit-to-result) compile, when the point has it,
+  * precompiled compiler load, when the point has it, and
+  * median compiler instructions (Wasmtime fuel) on a right-hand axis, when
+    the point has it.
+
+Deterministic instruction lines are solid; wall-clock lines are dotted. The
+legend says so once. Older points without counts simply have no value for the
+new lines.
 
 The x axis is commit order by commit date, not elapsed time. A commit whose
 quick program subset differs from its predecessor is marked with a dashed
@@ -53,9 +61,11 @@ EXEC_MIN_LLVM_MS = 0.1
 SHORT_SHA_LENGTH = 7
 DEFAULT_REPO = "TeamNodeCraft/CogWasm"
 DEFAULT_PAGE_URL = "https://teamnodecraft.github.io/CogWasm/#benchmarks"
+DETERMINISTIC_NOTE = "Solid = deterministic instruction count · dotted = wall-clock"
 
 # Okabe-Ito, a colour-blind-safe palette. Markers are distinct as well, so the
-# lines stay distinguishable when colour is not available.
+# lines stay distinguishable when colour is not available. `deterministic`
+# lines are solid; wall-clock lines are dotted (the legend says so once).
 SERIES: tuple[dict[str, Any], ...] = (
     {
         "key": "exec_ratio",
@@ -65,6 +75,19 @@ SERIES: tuple[dict[str, Any], ...] = (
         "digits": 2,
         "color": "#0072B2",
         "marker": "circle",
+        "axis": "left",
+        "deterministic": False,
+    },
+    {
+        "key": "exec_instructions_ratio",
+        "panel": 1,
+        "label": "Executed instructions",
+        "unit": "x LLVM -O2",
+        "digits": 2,
+        "color": "#56B4E9",
+        "marker": "cross",
+        "axis": "left",
+        "deterministic": True,
     },
     {
         "key": "size_ratio",
@@ -74,6 +97,8 @@ SERIES: tuple[dict[str, Any], ...] = (
         "digits": 2,
         "color": "#D55E00",
         "marker": "square",
+        "axis": "left",
+        "deterministic": False,
     },
     {
         "key": "warm_compile_ms",
@@ -83,6 +108,8 @@ SERIES: tuple[dict[str, Any], ...] = (
         "digits": 1,
         "color": "#009E73",
         "marker": "triangle",
+        "axis": "left",
+        "deterministic": False,
     },
     {
         "key": "incremental_ms",
@@ -92,6 +119,8 @@ SERIES: tuple[dict[str, Any], ...] = (
         "digits": 1,
         "color": "#CC79A7",
         "marker": "diamond",
+        "axis": "left",
+        "deterministic": False,
     },
     {
         "key": "precompiled_load_ms",
@@ -101,6 +130,19 @@ SERIES: tuple[dict[str, Any], ...] = (
         "digits": 1,
         "color": "#E69F00",
         "marker": "plus",
+        "axis": "left",
+        "deterministic": False,
+    },
+    {
+        "key": "compiler_instructions",
+        "panel": 2,
+        "label": "Compiler instructions",
+        "unit": "instructions",
+        "digits": 0,
+        "color": "#5B3A8E",
+        "marker": "star",
+        "axis": "right",
+        "deterministic": True,
     },
 )
 
@@ -135,6 +177,8 @@ class Point:
     metrics: dict[str, float | None]
     exec_programs: int
     size_programs: int
+    instruction_programs: int = 0
+    compiler_programs: int = 0
     subset_changed: bool = False
     subset_added: list[str] = field(default_factory=list)
     subset_removed: list[str] = field(default_factory=list)
@@ -161,6 +205,8 @@ class Point:
             "metrics": self.metrics,
             "exec_programs": self.exec_programs,
             "size_programs": self.size_programs,
+            "instruction_programs": self.instruction_programs,
+            "compiler_programs": self.compiler_programs,
             "source": self.source,
         }
 
@@ -214,6 +260,38 @@ def execution_ratio(
     return geometric_mean(ratios), len(ratios)
 
 
+def instruction_ratio(
+    programs: dict[str, Any],
+    names: Iterable[str],
+    min_llvm_ms: float = EXEC_MIN_LLVM_MS,
+) -> tuple[float | None, int]:
+    """Geometric mean of executed-instruction ratios, on the time subset.
+
+    The same programs and the same 0.1 ms LLVM -O2 floor as
+    :func:`execution_ratio`, so the two ratios can be read side by side.
+    Programs without counts (older points) are skipped.
+    """
+    ratios = []
+    for name in names:
+        clif = _number(_get(programs, name, "exec", "clif", "exec_ms", "median"))
+        llvm = _number(_get(programs, name, "exec", "llvm_o2", "exec_ms", "median"))
+        ours = _number(_get(programs, name, "instructions", "clif", "total"))
+        theirs = _number(_get(programs, name, "instructions", "llvm_o2", "total"))
+        if (
+            clif is None
+            or llvm is None
+            or clif <= 0
+            or llvm < min_llvm_ms
+            or ours is None
+            or theirs is None
+            or ours <= 0
+            or theirs <= 0
+        ):
+            continue
+        ratios.append(ours / theirs)
+    return geometric_mean(ratios), len(ratios)
+
+
 def size_ratio(
     programs: dict[str, Any], names: Iterable[str]
 ) -> tuple[float | None, int]:
@@ -238,6 +316,15 @@ def median_metric(
         if value is not None:
             values.append(value)
     return statistics.median(values) if values else None
+
+
+def metric_programs(
+    programs: dict[str, Any], names: Iterable[str], *path: str
+) -> int:
+    """How many programs have a finite value at one metric path."""
+    return sum(
+        1 for name in names if _number(_get(programs, name, *path)) is not None
+    )
 
 
 def parse_datetime(value: Any) -> datetime | None:
@@ -296,7 +383,14 @@ def point_from_json(raw: dict[str, Any], source: str) -> Point:
     programs = raw.get("programs")
     programs = programs if isinstance(programs, dict) else {}
     exec_value, exec_count = execution_ratio(programs, names)
+    instruction_value, instruction_count = instruction_ratio(programs, names)
     size_value, size_count = size_ratio(programs, names)
+    compiler_value = median_metric(
+        programs, names, "clif", "compiler_fuel", "median"
+    )
+    compiler_count = metric_programs(
+        programs, names, "clif", "compiler_fuel", "median"
+    )
     precompiled_mode = _get(raw, "startup", "precompiled")
     precompiled_value = None
     if (
@@ -315,6 +409,7 @@ def point_from_json(raw: dict[str, Any], source: str) -> Point:
         programs=names,
         metrics={
             "exec_ratio": exec_value,
+            "exec_instructions_ratio": instruction_value,
             "size_ratio": size_value,
             "warm_compile_ms": median_metric(
                 programs, names, "clif", "compile_warm", "median"
@@ -323,9 +418,12 @@ def point_from_json(raw: dict[str, Any], source: str) -> Point:
                 programs, names, "clif", "compile_incremental", "median"
             ),
             "precompiled_load_ms": precompiled_value,
+            "compiler_instructions": compiler_value,
         },
         exec_programs=exec_count,
         size_programs=size_count,
+        instruction_programs=instruction_count,
+        compiler_programs=compiler_count,
         source=source,
     )
 
@@ -444,16 +542,29 @@ def _nice_ticks(high: float, intervals: int = 5) -> tuple[float, list[float]]:
     return top, [index * step for index in range(count + 1)]
 
 
-def _panel_high(points: list[Point], panel: int) -> float:
+def _human_count(value: float) -> str:
+    """Short instruction-count label for an axis tick (1.5G, 800M, ...)."""
+    for unit in ("", "k", "M", "G", "T"):
+        if abs(value) < 1000 or unit == "T":
+            if unit == "":
+                return f"{value:.0f}"
+            return f"{value:.1f}".rstrip("0").rstrip(".") + unit
+        value /= 1000
+    return f"{value:.0f}"
+
+
+def _panel_high(points: list[Point], panel: int, axis: str = "left") -> float:
+    """Largest value on one axis of a panel, with a little headroom."""
     values = [
         point.metrics[str(series["key"])]
         for point in points
         for series in SERIES
         if series["panel"] == panel
+        and series.get("axis", "left") == axis
         and point.metrics.get(str(series["key"])) is not None
     ]
     high = max(values) * 1.06 if values else 1.0
-    if panel == REFERENCE["panel"]:
+    if panel == REFERENCE["panel"] and axis == "left":
         # The dashed parity line must stay on the panel even after the ratios
         # drop below 1.0, which is exactly the progress the chart is for.
         high = max(high, float(REFERENCE["value"]) * 1.05)
@@ -492,6 +603,25 @@ def _marker(kind: str, x: float, y: float, color: str, size: float = 3.2) -> str
             f'M {x:.1f} {y - size:.1f} L {x:.1f} {y + size:.1f}" '
             f'stroke="{color}" stroke-width="1.8" stroke-linecap="round"/>'
         )
+    if kind == "cross":
+        return (
+            f'<path d="M {x - size:.1f} {y - size:.1f} L {x + size:.1f} '
+            f'{y + size:.1f} M {x + size:.1f} {y - size:.1f} L '
+            f'{x - size:.1f} {y + size:.1f}" stroke="{color}" '
+            'stroke-width="1.8" stroke-linecap="round"/>'
+        )
+    if kind == "star":
+        points = []
+        for index in range(10):
+            angle = -math.pi / 2 + index * math.pi / 5
+            radius = size if index % 2 == 0 else size * 0.45
+            points.append(
+                f"{x + math.cos(angle) * radius:.1f},{y + math.sin(angle) * radius:.1f}"
+            )
+        return (
+            f'<polygon points="{" ".join(points)}" fill="{color}" '
+            'stroke="#ffffff" stroke-width="0.8"/>'
+        )
     raise ChartError(f"unknown marker kind: {kind}")
 
 
@@ -522,9 +652,9 @@ def _series_has_data(points: list[Point], key: str) -> bool:
 
 
 def _legend(
-    x: float, y: float, panel: int, points: list[Point]
+    x: float, y: float, panel: int, points: list[Point], max_x: float
 ) -> str:
-    """Legend row under one panel, including the reference line for panel 1."""
+    """Legend rows under one panel, wrapping before the panel border."""
     parts = []
     cursor = x
     for series in SERIES:
@@ -533,14 +663,21 @@ def _legend(
         has_data = _series_has_data(points, str(series["key"]))
         color = str(series["color"]) if has_data else "#afb8c1"
         label = str(series["label"])
+        width = 16 + len(label) * 5.0
+        if cursor > x and cursor + width > max_x:
+            cursor = x
+            y += 12
         title = "" if has_data else '<title>No values for this line in these points yet</title>'
         parts.append(
             f'<g>{title}{_marker(str(series["marker"]), cursor + 4, y - 3, color, 2.8)}'
             f'<text x="{cursor + 11:.1f}" y="{y:.1f}" font-size="9" '
             f'fill="{MUTED}">{html.escape(label)}</text></g>'
         )
-        cursor += 16 + len(label) * 5.0
+        cursor += width
     if panel == 1:
+        if cursor > x and cursor + 64 > max_x:
+            cursor = x
+            y += 12
         parts.append(
             f'<line x1="{cursor:.1f}" y1="{y - 3:.1f}" x2="{cursor + 10:.1f}" '
             f'y2="{y - 3:.1f}" stroke="{MUTED}" stroke-dasharray="3 2" '
@@ -579,6 +716,8 @@ def render_svg(data: dict[str, Any], width: int = SVG_WIDTH, height: int = SVG_H
             metrics=dict(item["metrics"]),
             exec_programs=int(item["exec_programs"]),
             size_programs=int(item["size_programs"]),
+            instruction_programs=int(item.get("instruction_programs", 0)),
+            compiler_programs=int(item.get("compiler_programs", 0)),
             subset_changed=bool(item["subset_changed"]),
             subset_added=list(item["subset_added"]),
             subset_removed=list(item["subset_removed"]),
@@ -603,8 +742,12 @@ def render_svg(data: dict[str, Any], width: int = SVG_WIDTH, height: int = SVG_H
         f'height="{height}" viewBox="0 0 {width} {height}" role="img" '
         f'aria-labelledby="chart-title chart-desc">',
         "<title id=\"chart-title\">CogWasm benchmark trend by commit</title>",
-        '<desc id="chart-desc">Execution time and module size against LLVM -O2, '
-        "and compile speed, one point per CI commit on main. Lower is better.</desc>",
+        (
+            '<desc id="chart-desc">Execution time, executed instructions and module '
+            'size against LLVM -O2, and compile speed plus compiler instructions, '
+            "one point per CI commit on main. Lower is better. Solid lines are "
+            "deterministic instruction counts; dotted lines are wall-clock.</desc>"
+        ),
         f'<rect width="{width}" height="{height}" fill="#ffffff"/>',
         f'<g font-family="{FONT}" fill="{INK}">',
         f'<text x="{margin}" y="24" font-size="16" font-weight="650">'
@@ -622,12 +765,34 @@ def render_svg(data: dict[str, Any], width: int = SVG_WIDTH, height: int = SVG_H
         panel_id = int(panel["id"])
         panel_x = margin if panel_id == 1 else margin + panel_width + gap
         plot_left = panel_x + 52
-        plot_right = panel_x + panel_width - 14
+        # A right-hand axis needs room for its labels inside the panel.
+        right_series = next(
+            (
+                series
+                for series in SERIES
+                if series["panel"] == panel_id
+                and series.get("axis", "left") == "right"
+                and _series_has_data(points, str(series["key"]))
+            ),
+            None,
+        )
+        has_right = right_series is not None
+        plot_right = panel_x + panel_width - (46 if has_right else 14)
         xs = _x_positions(count, plot_left, plot_right)
-        high = _panel_high(points, panel_id)
+        high = _panel_high(points, panel_id, "left")
         top, ticks = _nice_ticks(high)
+        right_top = 0.0
+        right_ticks: list[float] = []
+        if has_right:
+            right_top, right_ticks = _nice_ticks(
+                _panel_high(points, panel_id, "right")
+            )
+
         def y_for(value: float, top: float = top) -> float:
             return plot_bottom - (value / top) * (plot_bottom - plot_top)
+
+        def y_right(value: float, right_top: float = right_top) -> float:
+            return plot_bottom - (value / right_top) * (plot_bottom - plot_top)
         out.append(
             f'<rect x="{panel_x:.1f}" y="{panel_top}" width="{panel_width:.1f}" '
             f'height="{panel_height}" rx="8" fill="#ffffff" stroke="{BORDER}"/>'
@@ -646,6 +811,23 @@ def render_svg(data: dict[str, Any], width: int = SVG_WIDTH, height: int = SVG_H
             out.append(
                 f'<text x="{plot_left - 8:.1f}" y="{y + 3:.1f}" font-size="9" '
                 f'fill="{MUTED}" text-anchor="end">{label}</text>'
+            )
+        for tick in right_ticks:
+            y = y_right(tick)
+            out.append(
+                f'<line x1="{plot_right:.1f}" y1="{y:.1f}" x2="{plot_right + 3:.1f}" '
+                f'y2="{y:.1f}" stroke="{BORDER}" stroke-width="1"/>'
+            )
+            out.append(
+                f'<text x="{plot_right + 6:.1f}" y="{y + 3:.1f}" font-size="8.5" '
+                f'fill="{str(right_series["color"]) if right_series else MUTED}" '
+                f'text-anchor="start">{_human_count(tick)}</text>'
+            )
+        if right_series is not None:
+            out.append(
+                f'<text x="{plot_right + 6:.1f}" y="{plot_top - 8:.1f}" '
+                f'font-size="8" fill="{str(right_series["color"])}" '
+                'text-anchor="start">instructions</text>'
             )
         out.append(
             f'<line x1="{plot_left:.1f}" y1="{plot_bottom:.1f}" '
@@ -696,11 +878,13 @@ def render_svg(data: dict[str, Any], width: int = SVG_WIDTH, height: int = SVG_H
             key = str(series["key"])
             if not _series_has_data(points, key):
                 continue
-            for segment in _segments(points, key, xs, y_for):
+            value_y = y_right if series.get("axis", "left") == "right" else y_for
+            dash = "" if series.get("deterministic") else ' stroke-dasharray="5 3"'
+            for segment in _segments(points, key, xs, value_y):
                 coordinates = " ".join(f"{x:.1f},{y:.1f}" for x, y in segment)
                 out.append(
                     f'<polyline points="{coordinates}" fill="none" '
-                    f'stroke="{series["color"]}" stroke-width="1.8" '
+                    f'stroke="{series["color"]}" stroke-width="1.8"{dash} '
                     'stroke-linejoin="round" stroke-linecap="round"/>'
                 )
             for point, x in zip(points, xs):
@@ -711,11 +895,23 @@ def render_svg(data: dict[str, Any], width: int = SVG_WIDTH, height: int = SVG_H
                     _marker(
                         str(series["marker"]),
                         x,
-                        y_for(value),
+                        value_y(value),
                         str(series["color"]),
                     )
                 )
-        out.append(_legend(panel_x + 12, 364, panel_id, points))
+        out.append(
+            _legend(
+                panel_x + 12,
+                356,
+                panel_id,
+                points,
+                panel_x + panel_width - 12,
+            )
+        )
+    out.append(
+        f'<text x="{margin}" y="404" font-size="9" fill="{MUTED}">'
+        f"{html.escape(DETERMINISTIC_NOTE)}</text>"
+    )
     out.extend(["</g>", "</svg>"])
     return "\n".join(out) + "\n"
 

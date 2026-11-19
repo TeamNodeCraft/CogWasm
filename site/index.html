@@ -193,11 +193,11 @@
     </div>
 
     <div class="bench-trend">
-      <p class="bench-trend-intro">One point per CI commit on <code>main</code>, in commit order; lower is better. Hover or tap a point for its values and commit; click a legend item to hide or show a line. A dashed vertical rule marks a commit that changed the quick program subset.</p>
+      <p class="bench-trend-intro">One point per CI commit on <code>main</code>, in commit order; lower is better. Solid lines are deterministic executed-instruction counts; dotted lines are wall-clock. Hover or tap a point for its values and commit; click a legend item to hide or show a line. A dashed vertical rule marks a commit that changed the quick program subset.</p>
       <div id="bench-legend" class="legend" role="group" aria-label="Toggle chart lines"></div>
       <div id="bench-chart" class="chart" data-src="bench/data.json" aria-live="polite">
         <div class="message loading">Loading benchmark data&hellip;</div>
-        <noscript><img src="bench/chart.svg" width="800" height="420" alt="Benchmark trend by commit: execution time and module size against LLVM -O2, plus compile speed. Lower is better."></noscript>
+        <noscript><img src="bench/chart.svg" width="800" height="420" alt="Benchmark trend by commit: execution time, executed instructions and module size against LLVM -O2, plus compile speed and compiler instructions. Solid lines are deterministic counts; dotted lines are wall-clock. Lower is better."></noscript>
       </div>
       <p id="bench-footnote" class="footnote"></p>
       <div id="bench-tooltip" class="tooltip" role="status" hidden></div>

@@ -8,10 +8,12 @@
   var FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif";
   var CSS_COLOR = {
     exec_ratio: "--s-exec",
+    exec_instructions_ratio: "--s-instr",
     size_ratio: "--s-size",
     warm_compile_ms: "--s-warm",
     incremental_ms: "--s-inc",
-    precompiled_load_ms: "--s-pre"
+    precompiled_load_ms: "--s-pre",
+    compiler_instructions: "--s-fuel"
   };
   var state = { data: null, hidden: new Set(), touchPoint: null, suppressClick: false };
   var tooltip = document.getElementById("bench-tooltip");
@@ -56,6 +58,16 @@
       node = svgEl("path", { d: "M " + x + " " + (y - size) + " L " + (x + size) + " " + (y + size) + " L " + (x - size) + " " + (y + size) + " Z", fill: color, stroke: "var(--panel)", "stroke-width": 1 }, parent);
     } else if (kind === "diamond") {
       node = svgEl("path", { d: "M " + x + " " + (y - size) + " L " + (x + size) + " " + y + " L " + x + " " + (y + size) + " L " + (x - size) + " " + y + " Z", fill: color, stroke: "var(--panel)", "stroke-width": 1 }, parent);
+    } else if (kind === "cross") {
+      node = svgEl("path", { d: "M " + (x - size) + " " + (y - size) + " L " + (x + size) + " " + (y + size) + " M " + (x + size) + " " + (y - size) + " L " + (x - size) + " " + (y + size), stroke: color, "stroke-width": 1.9, "stroke-linecap": "round" }, parent);
+    } else if (kind === "star") {
+      var points = [];
+      for (var index = 0; index < 10; index += 1) {
+        var angle = -Math.PI / 2 + index * Math.PI / 5;
+        var radius = index % 2 === 0 ? size : size * 0.45;
+        points.push((x + Math.cos(angle) * radius).toFixed(2) + "," + (y + Math.sin(angle) * radius).toFixed(2));
+      }
+      node = svgEl("polygon", { points: points.join(" "), fill: color, stroke: "var(--panel)", "stroke-width": 0.8 }, parent);
     } else {
       node = svgEl("path", { d: "M " + (x - size) + " " + y + " L " + (x + size) + " " + y + " M " + x + " " + (y - size) + " L " + x + " " + (y + size), stroke: color, "stroke-width": 1.9, "stroke-linecap": "round" }, parent);
     }
@@ -82,6 +94,28 @@
     var date = new Date(iso);
     if (isNaN(date.getTime())) { return iso; }
     return date.toISOString().slice(0, 10);
+  }
+
+  function formatCount(value) {
+    var units = ["", "k", "M", "G", "T"];
+    var scaled = Number(value);
+    var unit = 0;
+    while (Math.abs(scaled) >= 1000 && unit < units.length - 1) {
+      scaled /= 1000;
+      unit += 1;
+    }
+    var digits = scaled >= 100 || unit === 0 ? 0 : 1;
+    return scaled.toFixed(digits).replace(/\.0$/, "") + units[unit];
+  }
+
+  function formatValue(series, value) {
+    if (series.unit === "instructions") {
+      return formatCount(value) + " instructions";
+    }
+    if (series.unit === "ms") {
+      return Number(value).toFixed(series.digits) + " ms";
+    }
+    return Number(value).toFixed(series.digits) + "× LLVM -O2";
   }
 
   function seriesHasData(series) {
@@ -128,6 +162,10 @@
       '<line x1="1" y1="6.5" x2="17" y2="6.5" stroke="var(--muted)" stroke-width="1.4" stroke-dasharray="3 2"/></svg>' +
       "<span>LLVM -O2 parity</span>";
     legend.appendChild(reference);
+    var note = document.createElement("span");
+    note.className = "legend-note";
+    note.textContent = "Solid = deterministic instruction count · dotted = wall-clock";
+    legend.appendChild(note);
   }
 
   function niceTicks(high, intervals) {
@@ -154,17 +192,18 @@
     return { top: top, ticks: ticks };
   }
 
-  function panelHigh(panel) {
+  function panelHigh(panel, axis) {
+    axis = axis || "left";
     var values = [];
     state.data.points.forEach(function (point) {
       state.data.series.forEach(function (series) {
-        if (series.panel === panel && point.metrics[series.key] !== null && point.metrics[series.key] !== undefined) {
+        if (series.panel === panel && (series.axis || "left") === axis && point.metrics[series.key] !== null && point.metrics[series.key] !== undefined) {
           values.push(point.metrics[series.key]);
         }
       });
     });
     var high = values.length ? Math.max.apply(null, values) * 1.06 : 1;
-    if (panel === state.data.reference.panel) {
+    if (panel === state.data.reference.panel && axis === "left") {
       // Keep the parity line on the panel once the ratios drop below 1.0.
       high = Math.max(high, state.data.reference.value * 1.05);
     }
@@ -214,19 +253,27 @@
     var svg = svgEl("svg", {
       viewBox: "0 0 " + width + " " + height,
       role: "img",
-      "aria-label": "CogWasm benchmark trend by commit. Two panels: execution and module size against LLVM -O2, and compile speed in milliseconds. Lower is better."
+      "aria-label": "CogWasm benchmark trend by commit. Two panels: execution time, executed instructions and module size against LLVM -O2, and compile speed plus compiler instructions. Lower is better. Solid lines are deterministic instruction counts; dotted lines are wall-clock."
     });
     state.data.panels.forEach(function (panel, panelIndex) {
       var panelX = stacked ? margin : margin + panelIndex * (panelWidth + gap);
       var panelY = stacked ? panelIndex * (panelHeight + gap) : 0;
       var plotLeft = panelX + (stacked ? 48 : 50);
-      var plotRight = panelX + panelWidth - 14;
+      var rightSeries = state.data.series.find(function (series) {
+        return series.panel === panel.id && (series.axis || "left") === "right" && seriesHasData(series);
+      });
+      var plotRight = panelX + panelWidth - (rightSeries ? (stacked ? 44 : 50) : 14);
       var xs = xPositions(state.data.points.length, plotLeft, plotRight);
-      var geometry = niceTicks(panelHigh(panel.id));
+      var geometry = niceTicks(panelHigh(panel.id, "left"));
       var top = geometry.top;
       var ticks = geometry.ticks;
+      var rightGeometry = rightSeries ? niceTicks(panelHigh(panel.id, "right")) : null;
+      var rightTop = rightGeometry ? rightGeometry.top : top;
       var yFor = function (value) {
         return panelY + plotBottom - (value / top) * (plotBottom - plotTop);
+      };
+      var yForRight = function (value) {
+        return panelY + plotBottom - (value / rightTop) * (plotBottom - plotTop);
       };
 
       svgEl("rect", {
@@ -247,6 +294,22 @@
           "text-anchor": "end"
         });
       });
+      if (rightGeometry) {
+        rightGeometry.ticks.forEach(function (tick) {
+          var y = yForRight(tick);
+          svgEl("line", { x1: plotRight, y1: y, x2: plotRight + 3, y2: y, stroke: "var(--border)", "stroke-width": 1 }, svg);
+          svgText(svg, plotRight + 6, y + 3, formatCount(tick), {
+            "font-size": stacked ? 9 : 9.5,
+            "text-anchor": "start",
+            fill: colorFor(rightSeries.key)
+          });
+        });
+        svgText(svg, plotRight + 6, panelY + plotTop - 8, "instructions", {
+          "font-size": 8.5,
+          "text-anchor": "start",
+          fill: colorFor(rightSeries.key)
+        });
+      }
       svgEl("line", { x1: plotLeft, y1: panelY + plotBottom, x2: plotRight, y2: panelY + plotBottom, stroke: "var(--border)", "stroke-width": 1 }, svg);
 
       state.data.points.forEach(function (point, index) {
@@ -307,19 +370,23 @@
       state.data.series.forEach(function (series) {
         if (series.panel !== panel.id || state.hidden.has(series.key)) { return; }
         var color = colorFor(series.key);
-        segmentsFor(state.data.points, series.key, xs, yFor).forEach(function (segment) {
-          svgEl("polyline", {
+        var valueY = (series.axis || "left") === "right" ? yForRight : yFor;
+        var dash = series.deterministic ? null : "5 3";
+        segmentsFor(state.data.points, series.key, xs, valueY).forEach(function (segment) {
+          var attributes = {
             points: segment.map(function (pair) { return pair[0] + "," + pair[1]; }).join(" "),
             fill: "none", stroke: color, "stroke-width": 1.9,
             "stroke-linejoin": "round", "stroke-linecap": "round"
-          }, svg);
+          };
+          if (dash) { attributes["stroke-dasharray"] = dash; }
+          svgEl("polyline", attributes, svg);
         });
         state.data.points.forEach(function (point, index) {
           var value = point.metrics[series.key];
           if (value === null || value === undefined) { return; }
-          marker(svg, series.marker, xs[index], yFor(value), color, 3.4);
+          marker(svg, series.marker, xs[index], valueY(value), color, 3.4);
           var hit = svgEl("circle", {
-            cx: xs[index], cy: yFor(value), r: 12, fill: "transparent",
+            cx: xs[index], cy: valueY(value), r: 12, fill: "transparent",
             "pointer-events": "all", "cursor": "pointer", tabindex: 0,
             role: "button",
             "aria-label": point.short_sha + " " + series.label
@@ -395,11 +462,9 @@
       if (state.hidden.has(series.key)) { return; }
       var value = point.metrics[series.key];
       if (value === null || value === undefined) { return; }
-      var formatted = Number(value).toFixed(series.digits);
-      var unit = series.unit === "ms" ? " ms" : "× LLVM -O2";
       rows += '<tr><td><span class="swatch" style="background:' + colorFor(series.key) +
         '"></span>' + escapeHtml(series.label) + "</td><td class=\"value\">" +
-        escapeHtml(formatted + unit) + "</td></tr>";
+        escapeHtml(formatValue(series, value)) + "</td></tr>";
     });
     return rows ? "<table>" + rows + "</table>" : "";
   }
@@ -409,6 +474,14 @@
     if (point.metrics.exec_ratio !== null && point.metrics.exec_ratio !== undefined) {
       notes.push("execution ratio over " + point.exec_programs +
         " programs (LLVM time ≥ " + state.data.exec_min_llvm_ms + " ms)");
+    }
+    if (point.metrics.exec_instructions_ratio !== null && point.metrics.exec_instructions_ratio !== undefined) {
+      notes.push("executed-instruction ratio over " + (point.instruction_programs || 0) +
+        " programs, same time floor");
+    }
+    if (point.metrics.compiler_instructions !== null && point.metrics.compiler_instructions !== undefined) {
+      notes.push("compiler instructions: median of " + (point.compiler_programs || 0) +
+        " programs, deterministic fuel");
     }
     if (point.metrics.size_ratio !== null && point.metrics.size_ratio !== undefined) {
       notes.push("module size over " + point.size_programs + " programs");
@@ -487,7 +560,9 @@
     footnote.innerHTML = "Source: <a href=\"https://github.com/" + escapeHtml(repo) +
       "/tree/main/bench/chart\">bench/chart</a> · " +
       "one point per successful quick run on main, from the append-only " +
-      "<code>bench-history</code> release. Static image for the README: " +
+      "<code>bench-history</code> release. Instruction lines are exact counts " +
+      "from basic-block instrumentation; compiler work is Wasmtime fuel. " +
+      "Static image for the README: " +
       "<a href=\"https://github.com/" + escapeHtml(repo) +
       "/releases/download/bench-history/chart.svg\">chart.svg</a>.";
   }

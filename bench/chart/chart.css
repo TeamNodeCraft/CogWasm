@@ -29,6 +29,13 @@
 .bench-trend .legend button[aria-pressed="false"] { opacity: 0.42; }
 .bench-trend .legend button:disabled { cursor: default; opacity: 0.38; }
 .bench-trend .legend .reference { color: var(--muted); }
+.bench-trend .legend .legend-note {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
 .bench-trend .legend svg { display: block; flex: none; }
 .bench-trend .chart { position: relative; width: 100%; margin: 0; }
 .bench-trend .chart svg { display: block; width: 100%; height: auto; overflow: visible; }

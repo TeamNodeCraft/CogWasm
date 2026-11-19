@@ -90,6 +90,89 @@ class ExecutionRatioTest(unittest.TestCase):
         self.assertAlmostEqual(ratio, 4.0)
 
 
+class InstructionRatioTest(unittest.TestCase):
+    def test_excludes_the_same_llvm_time_floor_as_the_time_ratio(self) -> None:
+        programs = {
+            "tiny": {
+                "exec": {
+                    "clif": {"exec_ms": {"median": 0.10}},
+                    "llvm_o2": {"exec_ms": {"median": 0.05}},
+                },
+                "instructions": {"clif": {"total": 100}, "llvm_o2": {"total": 10}},
+            },
+            "ok": {
+                "exec": {
+                    "clif": {"exec_ms": {"median": 0.40}},
+                    "llvm_o2": {"exec_ms": {"median": 0.20}},
+                },
+                "instructions": {"clif": {"total": 400}, "llvm_o2": {"total": 200}},
+            },
+            "also_ok": {
+                "exec": {
+                    "clif": {"exec_ms": {"median": 0.60}},
+                    "llvm_o2": {"exec_ms": {"median": 0.30}},
+                },
+                "instructions": {"clif": {"total": 600}, "llvm_o2": {"total": 100}},
+            },
+        }
+        ratio, count = chart.instruction_ratio(
+            programs, ["tiny", "ok", "also_ok"]
+        )
+        self.assertEqual(count, 2)
+        self.assertAlmostEqual(ratio, math.sqrt(2.0 * 6.0))
+
+    def test_missing_counts_are_skipped_not_zero(self) -> None:
+        programs = {
+            "both": {
+                "exec": {
+                    "clif": {"exec_ms": {"median": 0.2}},
+                    "llvm_o2": {"exec_ms": {"median": 0.1}},
+                },
+                "instructions": {"clif": {"total": 50}, "llvm_o2": {"total": 25}},
+            },
+            "missing_llvm": {
+                "exec": {
+                    "clif": {"exec_ms": {"median": 0.2}},
+                    "llvm_o2": {"exec_ms": {"median": 0.1}},
+                },
+                "instructions": {"clif": {"total": 50}},
+            },
+            "missing_both": {
+                "exec": {
+                    "clif": {"exec_ms": {"median": 0.2}},
+                    "llvm_o2": {"exec_ms": {"median": 0.1}},
+                }
+            },
+        }
+        ratio, count = chart.instruction_ratio(
+            programs, ["both", "missing_llvm", "missing_both"]
+        )
+        self.assertEqual(count, 1)
+        self.assertAlmostEqual(ratio, 2.0)
+
+    def test_uses_the_execution_ratio_subset(self) -> None:
+        programs = {
+            "counted": {
+                "exec": {
+                    "clif": {"exec_ms": {"median": 1.0}},
+                    "llvm_o2": {"exec_ms": {"median": 0.5}},
+                },
+                "instructions": {"clif": {"total": 10}, "llvm_o2": {"total": 5}},
+            },
+            "no_time": {
+                "instructions": {"clif": {"total": 10}, "llvm_o2": {"total": 5}},
+            },
+        }
+        time_ratio, time_count = chart.execution_ratio(
+            programs, ["counted", "no_time"]
+        )
+        inst_ratio, inst_count = chart.instruction_ratio(
+            programs, ["counted", "no_time"]
+        )
+        self.assertEqual(time_count, inst_count)
+        self.assertEqual(time_ratio, inst_ratio)
+
+
 class SizeRatioTest(unittest.TestCase):
     def test_skips_a_program_missing_either_size(self) -> None:
         programs = {
@@ -157,8 +240,29 @@ class FixtureTest(unittest.TestCase):
         missing = self.points[3]
         self.assertIsNone(missing.metrics["incremental_ms"])
         self.assertIsNone(missing.metrics["precompiled_load_ms"])
+        self.assertIsNone(missing.metrics["exec_instructions_ratio"])
+        self.assertIsNone(missing.metrics["compiler_instructions"])
         self.assertEqual(missing.size_programs, 2)
         self.assertEqual(self.points[4].metrics["precompiled_load_ms"], 16.0)
+
+    def test_instruction_ratio_and_compiler_median(self) -> None:
+        old = self.points[0]
+        self.assertIsNone(old.metrics["exec_instructions_ratio"])
+        self.assertEqual(old.instruction_programs, 0)
+        counted = self.points[1]
+        self.assertEqual(counted.instruction_programs, 3)
+        self.assertAlmostEqual(
+            counted.metrics["exec_instructions_ratio"],
+            (2.0 * 1.5 * 1.2) ** (1.0 / 3.0),
+        )
+        partial = self.points[2]
+        # b_alloc has no counts, so only a_add and sha256 contribute.
+        self.assertEqual(partial.instruction_programs, 2)
+        self.assertAlmostEqual(
+            partial.metrics["exec_instructions_ratio"], math.sqrt(6.0)
+        )
+        self.assertEqual(partial.compiler_programs, 3)
+        self.assertEqual(partial.metrics["compiler_instructions"], 2_000_000.0)
 
     def test_data_json_has_every_series_and_value(self) -> None:
         data = chart.build_data(self.points, repo="TeamNodeCraft/CogWasm")
@@ -167,14 +271,19 @@ class FixtureTest(unittest.TestCase):
             [series["key"] for series in data["series"]],
             [
                 "exec_ratio",
+                "exec_instructions_ratio",
                 "size_ratio",
                 "warm_compile_ms",
                 "incremental_ms",
                 "precompiled_load_ms",
+                "compiler_instructions",
             ],
         )
         self.assertEqual(data["reference"]["value"], 1.0)
         self.assertEqual(data["exec_min_llvm_ms"], 0.1)
+        self.assertFalse(data["series"][0]["deterministic"])
+        self.assertTrue(data["series"][1]["deterministic"])
+        self.assertEqual(data["series"][-1]["axis"], "right")
         json.dumps(data)  # the page consumes this as JSON
 
     def test_static_svg_is_the_readme_size_and_has_the_markers(self) -> None:
@@ -185,6 +294,10 @@ class FixtureTest(unittest.TestCase):
         self.assertIn("LLVM -O2", svg)
         self.assertIn("Quick program subset changed at ccccccc", svg)
         self.assertIn("Compile speed (ms, lower is better)", svg)
+        self.assertIn("Executed instructions", svg)
+        self.assertIn("Compiler instructions", svg)
+        self.assertIn(chart.DETERMINISTIC_NOTE, svg)
+        self.assertIn('stroke-dasharray="5 3"', svg)
         self.assertNotIn("<script", svg)
 
     def test_outputs_are_written(self) -> None:

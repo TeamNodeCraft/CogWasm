@@ -43,10 +43,12 @@
   --border: var(--rule);
   --grid: var(--rule);
   --s-exec: light-dark(#0072b2, #56b4e9);
+  --s-instr: light-dark(#2b8cbe, #8fd3ff);
   --s-size: light-dark(#d55e00, #ff8c5a);
   --s-warm: light-dark(#009e73, #34d399);
   --s-inc: light-dark(#cc79a7, #f0a6d0);
   --s-pre: light-dark(#e69f00, #f5c542);
+  --s-fuel: light-dark(#5b3a8e, #c4a7f7);
 }
 
 :root[data-theme="light"] {
