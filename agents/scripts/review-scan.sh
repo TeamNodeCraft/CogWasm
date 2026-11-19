@@ -33,7 +33,9 @@ blocking_reasons=()  # one line per blocking failure, repeated in the summary
 note() { printf '\n== %s\n' "$*"; }
 blocking() { blocking_reasons+=("$*"); printf '   BLOCKING: %s\n' "$*"; }
 # Read lines from stdin into the named array (bash 3.2 has no mapfile).
-read_into() { local _name="$1" _line; eval "$_name=()"; while IFS= read -r _line; do
+# Callers assign the array first so a reader that isn't shellcheck-aware can
+# still see the assignment: `eval` is the only way to name an array in 3.2.
+read_into() { local _name="$1" _line; while IFS= read -r _line; do
   [[ -n "$_line" ]] && eval "$_name+=(\"\$_line\")"; done; }
 skip() { printf '   skipped: %s\n' "$*"; }
 
@@ -117,6 +119,7 @@ fi
 # 2. Project anti-pattern rules.
 note "ast-grep scan"
 if command -v ast-grep >/dev/null; then
+  rs_files=()
   read_into rs_files < <(own_files '*.rs' | in_scope)
   if [[ ${#rs_files[@]} -gt 0 ]]; then
     scan_out="$tmpdir/ast-grep-scan.out"
@@ -177,6 +180,7 @@ fi
 
 # 4. Shell scripts.
 note "shellcheck"
+sh_files=()
 read_into sh_files < <(own_files '*.sh' | in_scope)
 if [[ ${#sh_files[@]} -eq 0 ]]; then
   echo "   no shell scripts in scope"
@@ -188,6 +192,7 @@ fi
 
 # 5. Python scripts.
 note "ruff"
+py_files=()
 read_into py_files < <(own_files '*.py' | in_scope)
 if [[ ${#py_files[@]} -eq 0 ]]; then
   echo "   no Python files in scope"

@@ -21,10 +21,10 @@ fi
 
 cd $MUSL
 ./configure --enable-debug --disable-shared --prefix=/musl-$TAG "$@"
-if [ "$TAG" = "i586" -o "$TAG" = "i686" ]; then
-  make -j$(nproc) AR=ar RANLIB=ranlib
+if [ "$TAG" = "i586" ] || [ "$TAG" = "i686" ]; then
+  make -j"$(nproc)" AR=ar RANLIB=ranlib
 else
-  make -j$(nproc)
+  make -j"$(nproc)"
 fi
 sudo make install
 make clean

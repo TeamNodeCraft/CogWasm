@@ -6,12 +6,7 @@ set -ex
 
 hide_output() {
   set +x
-  on_err="
-echo ERROR: An error was encountered with the build.
-cat /tmp/build.log
-exit 1
-"
-  trap "$on_err" ERR
+  trap 'echo "ERROR: An error was encountered with the build."; cat /tmp/build.log; exit 1' ERR
   bash -c "while true; do sleep 30; echo \$(date) - building ...; done" &
   PING_LOOP_PID=$!
   "$@" &> /tmp/build.log
@@ -38,7 +33,7 @@ curl https://ftp.gnu.org/gnu/binutils/binutils-$BINUTILS.tar.xz | tar xJf -
 mkdir binutils-build
 cd binutils-build
 hide_output ../binutils-$BINUTILS/configure --target=$TARGET
-hide_output make -j`nproc`
+hide_output make -j"$(nproc)"
 hide_output sudo make install
 
 cd ../..
@@ -70,10 +65,10 @@ sudo apt-get clean
 # The -dev packages are not available from the apt repository we're using.
 # However, those packages are just symlinks from *.so to *.so.<version>.
 # This makes all those symlinks.
-for lib in $(find -name '*.so.*'); do
+while IFS= read -r -d '' lib; do
   target=${lib%.so.*}.so
-  ln -s ${lib##*/} $target || echo "warning: silenced error symlinking $lib"
-done
+  ln -s "${lib##*/}" "$target" || echo "warning: silenced error symlinking $lib"
+done < <(find . -name '*.so.*' -print0)
 
 # Remove Solaris 11 functions that are optionally used by libbacktrace.
 # This is for Solaris 10 compatibility.
@@ -122,7 +117,7 @@ hide_output ../gcc-$GCC/configure \
   --disable-libquadmath-support   \
   --disable-lto
 
-hide_output make -j`nproc`
+hide_output make -j"$(nproc)"
 hide_output sudo make install
 
 cd ../..

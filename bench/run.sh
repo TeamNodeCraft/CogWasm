@@ -133,11 +133,14 @@ unset RUSTC
 HOST_TARGET="$TOOLCHAIN/target/stage-c-host"
 HOST_BIN="$HOST_TARGET/release/bench-host"
 BUILD_TOOLCHAIN=$HOST_TOOLCHAIN
+# `[ -d "$path"-* ]` tests a literal glob, not the matches, so the fallback was
+# never taken once the prefix had no directory. Collect the matches instead.
 shopt -s nullglob
-if [ ! -d "$RUSTUP_HOME/toolchains/$BUILD_TOOLCHAIN"-* ]; then
+HOST_TOOLCHAIN_DIRS=("$RUSTUP_HOME"/toolchains/"$BUILD_TOOLCHAIN"-*)
+shopt -u nullglob
+if [ "${#HOST_TOOLCHAIN_DIRS[@]}" -eq 0 ]; then
     BUILD_TOOLCHAIN=$NIGHTLY
 fi
-shopt -u nullglob
 printf 'building bench-host (%s)\n' "$BUILD_TOOLCHAIN" >&2
 CARGO_TARGET_DIR="$HOST_TARGET" RUSTUP_TOOLCHAIN="$BUILD_TOOLCHAIN" \
     "$CARGO_HOME/bin/cargo" build --release \

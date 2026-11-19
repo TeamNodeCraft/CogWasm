@@ -11,7 +11,6 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)   # experiments/cranelift-wasm
-STAGE_B="$ROOT/stage-b"
 TOOL="$ROOT/toolchain"
 WORK="$TOOL/stage-b"
 SRC="$WORK/rust"

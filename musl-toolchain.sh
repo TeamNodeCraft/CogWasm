@@ -1,6 +1,5 @@
+#!/usr/bin/env bash
 # https://github.com/rust-lang/rust/blob/44f233f2519ce5d633c87c38014d03d8a5f0e810/src/ci/docker/scripts/musl-toolchain.sh#L2
-
-#!/bin/sh
 # This script runs `musl-cross-make` to prepare C toolchain (Binutils, GCC, musl itself)
 # and builds static libunwind that we distribute for static target.
 #
@@ -14,12 +13,7 @@ set -ex
 
 hide_output() {
   set +x
-  on_err="
-echo ERROR: An error was encountered with the build.
-cat /tmp/build.log
-exit 1
-"
-  trap "$on_err" ERR
+  trap 'echo "ERROR: An error was encountered with the build."; cat /tmp/build.log; exit 1' ERR
   bash -c "while true; do sleep 30; echo \$(date) - building ...; done" &
   PING_LOOP_PID=$!
   "$@" &> /tmp/build.log
@@ -50,7 +44,7 @@ cd musl-cross-make
 # A version that includes support for building musl 1.2.3
 git checkout fe915821b652a7fa37b34a596f47d8e20bc72338
 
-hide_output make -j$(nproc) TARGET=$TARGET MUSL_VER=1.2.3 LINUX_HEADERS_SITE=$LINUX_HEADERS_SITE LINUX_VER=$LINUX_VER
+hide_output make -j"$(nproc)" TARGET=$TARGET MUSL_VER=1.2.3 LINUX_HEADERS_SITE=$LINUX_HEADERS_SITE LINUX_VER=$LINUX_VER
 hide_output sudo make install TARGET=$TARGET MUSL_VER=1.2.3 LINUX_HEADERS_SITE=$LINUX_HEADERS_SITE LINUX_VER=$LINUX_VER OUTPUT=$OUTPUT
 
 cd -
@@ -58,7 +52,7 @@ cd -
 # Install musl library to make binaries executable
 sudo ln -sf $OUTPUT/$TARGET/lib/libc.so /lib/ld-musl-$ARCH.so.1
 sudo chmod 777 /etc
-sudo echo $OUTPUT/$TARGET/lib >> /etc/ld-musl-$ARCH.path
+echo "$OUTPUT/$TARGET/lib" | sudo tee -a "/etc/ld-musl-$ARCH.path"
 
 # Now when musl bootstraps itself create proper toolchain symlinks to make build and tests easier
 if [ "$REPLACE_CC" = "1" ]; then

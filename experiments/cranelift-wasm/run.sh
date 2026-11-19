@@ -17,7 +17,6 @@ case "$(uname -s)" in
     *) LIBEXT=so ;;
 esac
 DYLIB="$ROOT/toolchain/target/cg_clif/release/librustc_codegen_cranelift.$LIBEXT"
-WILD="$ROOT/toolchain/target/wild/release/wild"
 export CARGO_TARGET_DIR="$ROOT/toolchain/target/programs"
 export RUSTUP_TOOLCHAIN="$NIGHTLY"
 
