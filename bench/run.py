@@ -701,6 +701,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--toolchain", type=Path, required=True)
     parser.add_argument("--llvm-rustc", type=Path, required=True)
     parser.add_argument("--precompiled", type=Path)
+    parser.add_argument(
+        "--startup-precompiled",
+        type=Path,
+        help="measure startup from this .cwasm but keep program compiles on the cached path",
+    )
     parser.add_argument("--out", type=Path)
     parser.add_argument("--no-incremental", action="store_true")
     return parser.parse_args(argv)
@@ -710,6 +715,8 @@ def main(argv: list[str]) -> int:
     args = parse_args(argv)
     if args.runs < 1:
         raise BenchError("--runs must be at least 1")
+    if args.precompiled is not None and args.startup_precompiled is not None:
+        raise BenchError("--precompiled and --startup-precompiled are mutually exclusive")
     result_path = args.out or (
         RESULTS
         / f"{args.mode}-{git_commit()['sha'][:12]}-"
@@ -773,6 +780,13 @@ def main(argv: list[str]) -> int:
         precompiled = precompiled.resolve()
         if not precompiled.exists():
             precompiled = None
+    startup_precompiled = args.startup_precompiled
+    if startup_precompiled is not None:
+        startup_precompiled = startup_precompiled.resolve()
+        if not startup_precompiled.exists():
+            raise BenchError(
+                f"--startup-precompiled {startup_precompiled} does not exist"
+            )
     load = "precompiled" if precompiled is not None else "cached"
 
     print("measuring compiler startup", file=sys.stderr)
@@ -790,8 +804,9 @@ def main(argv: list[str]) -> int:
         "--json",
         str(WORK / "startup.json"),
     ]
-    if precompiled is not None:
-        startup_command.extend(["--precompiled", str(precompiled)])
+    startup_artifact = precompiled if precompiled is not None else startup_precompiled
+    if startup_artifact is not None:
+        startup_command.extend(["--precompiled", str(startup_artifact)])
     startup = run_json(startup_command)
     rustc_wasm = toolchain / "stage-c" / "artifacts" / "rustc.wasm"
 
@@ -836,6 +851,7 @@ def main(argv: list[str]) -> int:
             "seeds": seeds,
             "programs": list(measured),
             "load": load,
+            "startup_precompiled": startup_artifact is not None,
             "rustc_wasm_bytes": startup["rustc_bytes"],
             "rustc_wasm_sha256": startup["rustc_sha256"],
         },
