@@ -73,8 +73,11 @@ bench/run.sh --programs a_add,expr,sha256 --runs 7 --out bench/results/local.jso
 
 `--quick` is 12 programs (all small programs, `expr`, `nbody`, `sha256`,
 `matmul`, `math_e`, `hostcall_f`) with 3 runs; `--full` is all 21 programs with
-5 runs and five cold module compiles. `--programs` accepts a name or
-`class/name`. Other switches: `--runs N`, `--out FILE`, `--no-precompiled`.
+5 runs and five cold module compiles. Quick runs also measure the precompiled
+`.cwasm` compiler load, but keep the program compiles on the cached path so
+quick points stay comparable across the change that added it. `--programs`
+accepts a name or `class/name`. Other switches: `--runs N`, `--out FILE`,
+`--no-precompiled`.
 
 Requirements: the stage-C artifacts must already exist under
 `experiments/cranelift-wasm/toolchain/` (`rustc.wasm`, `sysroot-pure`, Wild,
@@ -193,11 +196,42 @@ changes larger than that spread.
   compiler build, uploads the JSON, writes the table to the job summary and
   publishes both files on the rolling `ci-logs` release. It uses the artifacts
   that job already built.
+* On a successful main run, the same job appends the quick result to the
+  dedicated, append-only `bench-history` release as
+  `<commit-date>-<sha7>.json` (the quick JSON plus commit sha, subject, date,
+  run id and runner kind). A re-run replaces only its own commit's asset; the
+  script never deletes one. It also backfills quick results that only exist on
+  `ci-logs` (starting with `8476eeb`), then rebuilds
+  [`chart.svg`](chart/chart.py) and `data.json` from every point and uploads
+  them with stable names. `deploy_pages.yml` copies the static
+  [`bench/chart/index.html`](chart/index.html) plus those two assets to
+  `/bench/` on the repository's GitHub Pages site; the README image links
+  there for the interactive version.
 * `.github/workflows/bench.yml` runs `--full` on a weekly schedule and on
   `workflow_dispatch` (optional `base` commit and `record_history` switch). It
   publishes the JSON + Markdown as one asset per run on the `bench-results`
   release and writes a comparison against the previous published full run (or
   the given base commit) to the job summary.
+
+## Trend chart
+
+[`bench/chart/chart.py`](chart/chart.py) reads the `bench-history` points and
+writes `chart.svg` (the 800x420 README image) and `data.json` (the interactive
+page). Both plots are per-commit, not per-time. Panel 1 is the geometric mean
+of our execution time over LLVM `-O2` (programs whose LLVM time is under
+0.1 ms excluded, the same floor for every commit) and the geometric mean of
+module size over LLVM `-O2`. Panel 2 is the median warm compile, median
+incremental compile when present, and precompiled compiler load when present.
+A dashed vertical rule marks a commit whose quick program subset differs from
+the previous one, so changed subsets are visible instead of silently mixed.
+
+Local check:
+
+```sh
+python3 bench/chart/chart.py \
+  --history bench/chart/tests/fixtures/history --output /tmp/chart
+python3 -m unittest discover -s bench/chart/tests -v
+```
 
 ## Adding a program
 
