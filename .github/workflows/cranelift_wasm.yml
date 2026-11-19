@@ -10,11 +10,27 @@ on:
   push:
     branches:
       - main
+    # Only what can change the compiler, the benchmark programs or what CI runs
+    # on them. Docs, the chart's code (it is regenerated on the next build),
+    # committed history and analysis output don't need a one-hour rebuild.
     paths:
       - 'experiments/cranelift-wasm/**'
       - 'bench/**'
       - '.github/workflows/cranelift_wasm.yml'
+      - '!**/*.md'
+      - '!experiments/cranelift-wasm/upstream/**'
+      - '!experiments/cranelift-wasm/**/notes/**'
+      - '!bench/chart/**'
+      - '!bench/history/**'
+      - '!bench/gap/results/**'
   workflow_dispatch:
+
+# A newer push to main supersedes an older build: only the newest commit's
+# result matters, so cancel the older run instead of building both. A
+# cancelled commit simply gets no point on the benchmark chart.
+concurrency:
+  group: cranelift_wasm-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
