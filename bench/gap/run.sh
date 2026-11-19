@@ -20,11 +20,12 @@ CARGO_HOME=${CARGO_HOME:-$TOOLCHAIN/cargo}
 RUSTUP_HOME=${RUSTUP_HOME:-$TOOLCHAIN/rustup}
 export CARGO_HOME RUSTUP_HOME
 export PATH="$CARGO_HOME/bin:$PATH"
-export RUSTUP_TOOLCHAIN=${BENCH_HOST_TOOLCHAIN:-1.99.1-aarch64-apple-darwin}
+export RUSTUP_TOOLCHAIN=${BENCH_HOST_TOOLCHAIN:-1.99.1}
 export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$TOOLCHAIN/target/bench-host}
-export BENCH_HOST_TRIPLE=${BENCH_HOST_TRIPLE:-aarch64-apple-darwin}
 export BENCH_NIGHTLY=${BENCH_NIGHTLY:-nightly-2026-10-19}
 export BENCH_HOST_TOOLCHAIN=${BENCH_HOST_TOOLCHAIN:-1.99.1}
+# build.py and mir.py detect BENCH_HOST_TRIPLE from the toolchain when it is
+# not set; do not hard-code one host here.
 
 MIR=1
 SKIP_BUILD=0
