@@ -297,6 +297,15 @@ def point_from_json(raw: dict[str, Any], source: str) -> Point:
     programs = programs if isinstance(programs, dict) else {}
     exec_value, exec_count = execution_ratio(programs, names)
     size_value, size_count = size_ratio(programs, names)
+    precompiled_mode = _get(raw, "startup", "precompiled")
+    precompiled_value = None
+    if (
+        isinstance(precompiled_mode, dict)
+        and precompiled_mode.get("source") == "precompiled"
+    ):
+        precompiled_value = _number(
+            _get(precompiled_mode, "module_load", "median_ms")
+        )
     return Point(
         sha=sha,
         subject=subject,
@@ -313,9 +322,7 @@ def point_from_json(raw: dict[str, Any], source: str) -> Point:
             "incremental_ms": median_metric(
                 programs, names, "clif", "compile_incremental", "median"
             ),
-            "precompiled_load_ms": _number(
-                _get(raw, "startup", "precompiled", "module_load", "median_ms")
-            ),
+            "precompiled_load_ms": precompiled_value,
         },
         exec_programs=exec_count,
         size_programs=size_count,
@@ -445,9 +452,12 @@ def _panel_high(points: list[Point], panel: int) -> float:
         if series["panel"] == panel
         and point.metrics.get(str(series["key"])) is not None
     ]
-    if not values:
-        return 1.0
-    return max(values) * 1.06
+    high = max(values) * 1.06 if values else 1.0
+    if panel == REFERENCE["panel"]:
+        # The dashed parity line must stay on the panel even after the ratios
+        # drop below 1.0, which is exactly the progress the chart is for.
+        high = max(high, float(REFERENCE["value"]) * 1.05)
+    return high
 
 
 def _marker(kind: str, x: float, y: float, color: str, size: float = 3.2) -> str:

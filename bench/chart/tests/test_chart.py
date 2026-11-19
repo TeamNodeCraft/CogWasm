@@ -13,6 +13,7 @@ import re
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
 CHART_DIR = Path(__file__).resolve().parents[1]
@@ -195,6 +196,43 @@ class FixtureTest(unittest.TestCase):
             self.assertTrue(svg_path.read_text(encoding="utf-8").startswith("<svg"))
             parsed = json.loads(data_path.read_text(encoding="utf-8"))
             self.assertEqual(len(parsed["points"]), 5)
+
+
+class PanelScaleTest(unittest.TestCase):
+    def test_reference_line_stays_on_panel_below_parity(self) -> None:
+        point = chart.Point(
+            sha="a" * 40,
+            subject="faster than LLVM",
+            date=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            run_id="1",
+            runner="test",
+            programs=["a_add"],
+            metrics={"exec_ratio": 0.4, "size_ratio": 0.5},
+            exec_programs=1,
+            size_programs=1,
+        )
+        self.assertGreaterEqual(chart._panel_high([point], 1), 1.05)
+
+    def test_precompiled_fallback_is_not_plotted(self) -> None:
+        raw = {
+            "generated_at": "2026-01-01T00:00:00Z",
+            "commit": {"sha": "a" * 40, "subject": "fallback"},
+            "settings": {"programs": ["a_add"]},
+            "programs": {},
+            "startup": {
+                "precompiled": {
+                    "module_load": {"median_ms": 123.0},
+                    "source": "wasm",
+                    "fallback_reason": "compatibility hash mismatch",
+                }
+            },
+        }
+        point = chart.point_from_json(raw, "fallback.json")
+        self.assertIsNone(point.metrics["precompiled_load_ms"])
+        raw["startup"]["precompiled"]["source"] = "precompiled"
+        raw["startup"]["precompiled"]["fallback_reason"] = None
+        point = chart.point_from_json(raw, "precompiled.json")
+        self.assertEqual(point.metrics["precompiled_load_ms"], 123.0)
 
 
 class SinglePointTest(unittest.TestCase):
