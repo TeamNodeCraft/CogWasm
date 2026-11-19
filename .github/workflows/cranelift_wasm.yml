@@ -104,12 +104,23 @@ jobs:
       # A CI-sized subset of the product benchmark suite. It reuses the
       # rustc.wasm, sysroot, Wild and Cargo target directory this job just
       # built, so it adds about two minutes rather than a second full build.
+      # --fuel adds one fuel-enabled rustc.wasm compile per program (the first
+      # load pays the module compile, later programs hit the Wasmtime cache).
       - name: quick performance suite
         if: success()
         run: |
-          bash bench/run.sh --quick --runs 3 \
+          bash bench/run.sh --quick --runs 3 --fuel \
             --out "bench/results/quick-${GITHUB_RUN_ID}.json"
-          cat "bench/results/quick-${GITHUB_RUN_ID}.md" >> "${GITHUB_STEP_SUMMARY}"
+
+      # Exact executed wasm instructions for the same quick modules, plus the
+      # compiler-work median already in the JSON. Two measurements per module
+      # are compared inside count.py, so a drifting count stops the run.
+      - name: deterministic instruction counts
+        if: success()
+        run: |
+          json=$(ls bench/results/quick-*.json 2>/dev/null | tail -n 1)
+          bash bench/gap/count-quick.sh "$json"
+          cat "${json%.json}.md" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: codegen structure checks
         if: success()
