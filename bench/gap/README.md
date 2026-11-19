@@ -27,7 +27,10 @@ exported counter, runs the suite seeds, and writes:
 - `results/mir.json`, `results/MIR.md` — rustc MIR-level experiment.
 - `results/SUMMARY.md` — compact tables.
 
-The code is split by job: `src/instrument.rs` rewrites wasm, `src/measure.rs`
+The per-seed counts and the raw per-program size files are git-ignored; the
+compact `results/analysis.json`, the MIR results and the hot-function WAT are
+committed so the published report is readable without a rerun. The code is
+split by job: `src/instrument.rs` rewrites wasm, `src/measure.rs`
 runs it in Wasmtime, `src/sizes.rs` reports static bytes, and `analyze.py`
 turns counts into the attribution. The instrumenter is deliberately
 conservative: it re-encodes the original operator stream unchanged and inserts
