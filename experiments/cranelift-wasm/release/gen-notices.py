@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Assemble THIRD_PARTY_NOTICES for a CogWasm (rust_wasm) compiler bundle.
+"""Assemble THIRD_PARTY_NOTICES for a CogWasm compiler bundle.
 
 The package list comes from `cargo metadata` for the host/tool crates that are
 actually built, so the notices track the dependency graph instead of a
@@ -343,7 +343,7 @@ def main() -> None:
     args = parser.parse_args()
 
     experiment = args.experiment.resolve()
-    root = experiment.parents[1]  # rust_wasm repository root
+    root = experiment.parents[1]  # CogWasm repository root
     manifests = [experiment / relative for relative in MANIFESTS]
     manifests.extend(sorted(experiment.glob(PROGRAM_GLOB)))
 

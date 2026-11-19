@@ -92,7 +92,7 @@ to cg_clif, and running `git apply --check` for both item-3 patches.
 
 ## How to reproduce
 
-All commands from `rust_wasm/experiments/cranelift-wasm`:
+All commands from `CogWasm/experiments/cranelift-wasm`:
 
 ```sh
 ./stage-c/scripts/run-item3.sh all

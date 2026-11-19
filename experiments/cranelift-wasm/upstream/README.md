@@ -60,7 +60,7 @@ Without modifying `toolchain/stage-b/rust`, `toolchain/cg_clif`, or
 
 ## Licence mapping
 
-As required by `rust_wasm/README.md` ("Patch files"):
+As required by `CogWasm/README.md` ("Patch files"):
 
 * `rust/**` and `cg_clif/**` patches: **MIT OR Apache-2.0** (the Rust
   project's licence). The commit messages say so explicitly.
@@ -74,7 +74,7 @@ licence, not under the parent repository's MIT OR Apache-2.0 option.
 
 * Nothing was pushed to an upstream project, and no PR, issue or discussion was
   opened.
-* The preparation changed no existing tracked `rust_wasm` file; this change
+* The preparation changed no existing tracked `CogWasm` file; this change
   only adds the `upstream/` drafts. The parent session commits them in the
   repository's normal history, not in an upstream repository.
 * No `git add`/`commit` was run by the preparation step.

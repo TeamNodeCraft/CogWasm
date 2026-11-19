@@ -101,7 +101,7 @@ instead of assuming `aarch64-apple-darwin`, and use `nproc` when available (CI)
 or `sysctl` (macOS). GitHub caches the rustup toolchain, Cargo registry/git and
 the pinned checkouts, keyed on the pins; the multi-GB rustc build tree is not
 cached. The full log is published to the
-[`ci-logs` release](https://github.com/AlexMitchellMus/rust_wasm/releases/tag/ci-logs),
+[`ci-logs` release](https://github.com/TeamNodeCraft/CogWasm/releases/tag/ci-logs),
 and `rustc.wasm` plus `sysroot-pure` are workflow artifacts kept for 7 days.
 
 ### Green CI run (Linux x86_64)

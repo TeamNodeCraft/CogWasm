@@ -3,7 +3,7 @@
 > **Draft research note, not submission text.** A human owns any future
 > upstream contribution and must write the issue/PR in their own words under
 > the project's current AI policy. See `../../README.md` and
-> `rust_wasm/CONTRIBUTING.md`.
+> `CogWasm/CONTRIBUTING.md`.
 
 ## Problem
 

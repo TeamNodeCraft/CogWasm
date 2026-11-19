@@ -162,7 +162,7 @@ printed to stdout, so the CI log contains the full record.
 ## Running
 
 ```sh
-cd rust_wasm/experiments/cranelift-wasm
+cd CogWasm/experiments/cranelift-wasm
 
 # Default: 48 handwritten + 24 generated, 4 run seeds (288 calls)
 difftest/run.sh

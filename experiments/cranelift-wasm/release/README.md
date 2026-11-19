@@ -1,4 +1,4 @@
-# CogWasm (rust_wasm) compiler bundle
+# CogWasm compiler bundle
 
 This bundle contains a **modified build of the Rust compiler**, not the
 official Rust compiler. It is built from `rustc` with the
