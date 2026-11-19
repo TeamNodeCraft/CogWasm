@@ -5,6 +5,7 @@
 #   bench/run.sh --full                   # all programs (default 5 runs)
 #   bench/run.sh --full --runs 7 --out bench/results/local.json
 #   bench/run.sh --programs a_add,expr,sha256 --runs 5
+#   bench/run.sh --no-incremental        # for a compiler without the incremental patches
 #
 # Toolchain overrides (used by the baseline run in bench/README.md):
 #   BENCH_TOOLCHAIN      experiments/cranelift-wasm/toolchain to measure
@@ -25,6 +26,7 @@ PROGRAMS=
 RUNS=
 OUT=
 PREPARE_PRECOMPILED=1
+NO_INCREMENTAL=0
 
 usage() {
     sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
@@ -41,6 +43,7 @@ while [ $# -gt 0 ]; do
         --out) OUT=${2:?--out needs a path}; shift ;;
         --out=*) OUT=${1#--out=} ;;
         --no-precompiled) PREPARE_PRECOMPILED=0 ;;
+        --no-incremental) NO_INCREMENTAL=1 ;;
         -h|--help) usage; exit 0 ;;
         *) printf 'unknown argument: %s (try --help)\n' "$1" >&2; exit 2 ;;
     esac
@@ -170,7 +173,14 @@ fi
 if [ -n "$PRECOMPILED" ]; then
     ARGS+=(--precompiled "$PRECOMPILED")
 fi
+if [ "$NO_INCREMENTAL" = 1 ]; then
+    ARGS+=(--no-incremental)
+fi
 
+# A baseline run points BENCH_TOOLCHAIN at a detached worktree; record that
+# checkout's commit, not the main checkout's.
+COMMIT_ROOT=$(git -C "$TOOLCHAIN" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$ROOT")
+export BENCH_COMMIT_ROOT="$COMMIT_ROOT"
 export BENCH_TOOLCHAIN="$TOOLCHAIN"
 export BENCH_NIGHTLY="$NIGHTLY"
 export BENCH_HOST_TOOLCHAIN="$BUILD_TOOLCHAIN"

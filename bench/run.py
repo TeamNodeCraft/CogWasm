@@ -144,10 +144,11 @@ def memory_bytes(os_name: str) -> int | None:
 
 
 def git_commit() -> dict:
+    root = Path(os.environ.get("BENCH_COMMIT_ROOT", ROOT))
     try:
-        sha = run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], quiet=True).strip()
+        sha = run(["git", "-C", str(root), "rev-parse", "HEAD"], quiet=True).strip()
         subject = run(
-            ["git", "-C", str(ROOT), "log", "-1", "--format=%s"], quiet=True
+            ["git", "-C", str(root), "log", "-1", "--format=%s"], quiet=True
         ).strip()
         return {"sha": sha, "subject": subject}
     except BenchError:
@@ -252,6 +253,10 @@ def build_deps(toolchain: Path, work: Path) -> dict[str, Path]:
         ):
             roots[pipeline] = target
             continue
+        if os.environ.get("BENCH_REBUILD_DEPS"):
+            # Cargo cannot see that the compiler behind the RUSTC wrapper
+            # changed, so an explicit rebuild must start from a clean target.
+            shutil.rmtree(target, ignore_errors=True)
         target.mkdir(parents=True, exist_ok=True)
         command = [
             str(cargo),
