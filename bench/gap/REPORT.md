@@ -57,11 +57,18 @@ are summed over the four suite seeds; per-seed counts are in
 
 Categories: local.get/set/tee; loads/stores split into shadow-stack and
 non-stack by a flow-insensitive taint of the `__stack_pointer` global through
-locals; direct/indirect calls (with targets); branches; integer and float
+locals; direct/indirect calls (with targets; per-target direct counts are in
+`analysis.json`, per-call-site targets and type indices in the per-seed meta);
+branches; integer and float
 arithmetic and comparisons; conversions; constants; globals; memory
 size/grow/copy/fill; bounds-check-shaped compare+branch-to-panic; and `other`.
 Structural markers (`block`/`loop`/`if`/`else`/`end`) are not counted as
 executed instructions, on either side.
+
+Indirect calls are counted by category but not resolved to a dynamic callee:
+they are 11,328 in `b_alloc`, 3,929 in `sort`, 4,096 in `generated_stress`,
+371 in `scene`, 39 in `collections` and a handful elsewhere. They are a small
+fraction of every gap; the direct-call tables cover the hot targets.
 
 The stack taint is an over-approximation: a local is "stack" if any assignment
 to it can derive from `__stack_pointer`; this can only mislabel a heap access
