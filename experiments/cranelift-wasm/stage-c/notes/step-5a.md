@@ -47,6 +47,13 @@ The prototype was scoped to the `nbody` crate for the experiment; it is a
 narrow first SROA increment, not a general inliner or full SROA. It is 230
 lines including the new pass file and its registration.
 
+Rustc's existing MIR inliner runs before this pass. On nbody its hot loop has
+no remaining inlinable call: `sqrt_newton`, the range helpers and the `Vec`
+accessors are already inlined, so the measurable increment here is the SROA
+half. A cost-model inliner is still part of step 5b for the iterator- and
+trait-heavy programs where step 3 measured that rustc's inliner is too
+conservative; it is not exercised by nbody's inner loop.
+
 Result (same command, 5 runs):
 
 | | baseline | MIR hoist | change |
