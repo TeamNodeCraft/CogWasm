@@ -1,0 +1,412 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Stage C <stage-c@example.invalid>
+Date: Wed, 19 Nov 2026 21:40:00 +1030
+Subject: [PATCH] wasm: omit all-zero active data segments from the output
+
+Linear memory starts zeroed, so an active data segment whose bytes are all
+zero (for example a `.bss` section from a wasm object) does not need to be
+encoded. wasm-ld leaves these implicit; Wild currently copies every input
+segment into the output, which adds a fixed 16,388-byte all-zero segment to
+every linked CogWasm module.
+
+Omit an ordinary active segment when it has no data relocations and every
+byte is zero. Keep its memory range reserved: `memory_cursor` still advances
+by the full input length, so later segment offsets, data symbol addresses,
+`__data_end` and the initial memory page count are unchanged. The layout
+entry stays in `object_data_layouts` and keeps its `Active` segment place,
+so code relocations that point into the omitted range still resolve. Counts,
+offsets and `memory.init`/`data.drop` indices are renumbered only over emitted
+segments.
+
+Do not omit passive, TLS or shared-memory initialization segments: they are
+referenced by segment index. Do not omit anything when the output imports its
+memory via `--import-memory`, because the host-provided memory may already
+contain data and Wild does not synthesize a `memory.fill` initializer for it
+(this matches wasm-ld's `emitBssSegments` rule).
+
+Tested with a wasm object containing a 16 KiB zero `.bss` and a nonzero
+`.data` tail: output shrinks from 16,792 to 397 bytes, the zero segment is
+gone, the tail keeps its offset and linear memory still has 2 pages. The
+new `wasm/zero-data` integration test asserts both the segment count and
+that no active segment is entirely zero, and runs the module under wasmtime.
+
+This patch was changed by the contributors to CogWasm for the pinned Wild
+checkout (0.11.0, fd79578abb). Wild is dual-licensed MIT OR Apache-2.0; this
+patch is provided under the same terms.
+---
+ libwild/src/wasm.rs                           | 70 ++++++++++++++++++++++-----
+ libwild/src/wasm_writer.rs                    | 11 +++--
+ wild/tests/integration_tests.rs               | 66 ++++++++++++++++++++++++-
+ wild/tests/sources/wasm/zero-data/zero-data.c | 22 +++++++++
+ 4 files changed, 151 insertions(+), 18 deletions(-)
+diff --git a/libwild/src/wasm.rs b/libwild/src/wasm.rs
+index 9e91b340..5082ef11 100644
+--- a/libwild/src/wasm.rs
++++ b/libwild/src/wasm.rs
+@@ -372,6 +372,17 @@ pub(crate) struct WasmDataSegmentLayout<'data> {
+     pub(crate) tls_template: bool,
+     /// Ordinary data kept passive so another shared-memory instance does not reapply it.
+     pub(crate) shared_init: bool,
++    /// All-zero active data with no data relocations, so it is not encoded. The
++    /// memory range is still reserved so that later segments and data symbols
++    /// keep their addresses.
++    pub(crate) omitted: bool,
++}
++
++impl WasmDataSegmentLayout<'_> {
++    /// Whether this segment contributes bytes and an index to the output data section.
++    pub(crate) fn is_emitted(&self) -> bool {
++        !self.omitted
++    }
+ }
+ 
+ #[derive(Debug, Clone)]
+@@ -1812,6 +1823,7 @@ fn layout_object_data<'data>(
+     memory_cursor: &mut u32,
+     want_tls: bool,
+     shared_passive_init: bool,
++    omit_zero_data: bool,
+     mut tls_cursor: Option<&mut u32>,
+ ) -> Result<Vec<WasmDataSegmentLayout<'data>>> {
+     let segment_reloc_ranges =
+@@ -1868,19 +1880,36 @@ fn layout_object_data<'data>(
+                     }
+                 }
+             };
+-        let encoded_output_size = output_data_segment_encoded_size(
+-            segment.data.len(),
+-            output_memory_offset,
+-            output_memory_index,
+-            passive,
+-        )?;
+         let (reloc_range, payload_start) = segment_reloc_ranges
+             .get(filtered_idx)
+             .cloned()
+             .unwrap_or((0..0, 0));
++        // Linear memory starts zeroed, so an all-zero active segment with no
++        // data relocations is already present without encoding its bytes. Its
++        // range stays reserved above (memory_cursor advanced by the full
++        // length), which keeps later segment offsets, data symbol addresses and
++        // the initial memory size unchanged. Passive/TLS segments are indexed
++        // by memory.init/data.drop and must stay in the output.
++        let omitted = omit_zero_data
++            && !passive
++            && !tls_template
++            && !shared_init
++            && reloc_range.is_empty()
++            && segment.data.iter().all(|byte| *byte == 0);
++        let data = if omitted { &[][..] } else { segment.data };
++        let encoded_output_size = if omitted {
++            0
++        } else {
++            output_data_segment_encoded_size(
++                data.len(),
++                output_memory_offset,
++                output_memory_index,
++                passive,
++            )?
++        };
+         segments.push(WasmDataSegmentLayout {
+             segment_index: original_index,
+-            data: segment.data,
++            data,
+             reloc_range,
+             payload_start,
+             output_memory_index,
+@@ -1889,6 +1918,7 @@ fn layout_object_data<'data>(
+             passive,
+             tls_template,
+             shared_init,
++            omitted,
+         });
+     }
+     Ok(segments)
+@@ -1899,8 +1929,11 @@ pub(crate) fn output_data_segment_count(
+ ) -> u32 {
+     object_data_layouts
+         .iter()
+-        .map(|obj| u32::try_from(obj.len()).unwrap_or(u32::MAX))
+-        .sum()
++        .flatten()
++        .filter(|segment| segment.is_emitted())
++        .count()
++        .try_into()
++        .unwrap_or(u32::MAX)
+ }
+ 
+ pub(crate) fn output_data_has_passive(
+@@ -1909,10 +1942,11 @@ pub(crate) fn output_data_has_passive(
+     object_data_layouts
+         .iter()
+         .flatten()
+-        .any(|segment| segment.passive)
++        .any(|segment| segment.is_emitted() && segment.passive)
+ }
+ 
+-/// Original data-segment index to output index. Missing entries were removed by GC.
++/// Original data-segment index to output index. Missing entries were removed by GC; omitted
++/// all-zero segments are not present in the output and so have no output index either.
+ fn output_data_segment_indices(
+     object_data_layouts: &[Vec<WasmDataSegmentLayout<'_>>],
+ ) -> Result<Vec<Vec<Option<u32>>>> {
+@@ -1920,7 +1954,7 @@ fn output_data_segment_indices(
+     let mut maps = Vec::with_capacity(object_data_layouts.len());
+     for segments in object_data_layouts {
+         let mut by_original = Vec::new();
+-        for segment in segments {
++        for segment in segments.iter().filter(|segment| segment.is_emitted()) {
+             let slot = segment.segment_index as usize;
+             if slot >= by_original.len() {
+                 by_original.resize(slot + 1, None);
+@@ -2132,6 +2166,7 @@ fn compute_data_section_size(object_data_layouts: &[Vec<WasmDataSegmentLayout<'_
+     let segments_total: u64 = object_data_layouts
+         .iter()
+         .flatten()
++        .filter(|segment| segment.is_emitted())
+         .map(|segment| u64::from(segment.encoded_output_size))
+         .sum();
+     let payload_size = count_leb_size + segments_total;
+@@ -5558,6 +5593,9 @@ fn passive_init_copies(
+     let mut index = 0u32;
+     for segments in object_data_layouts {
+         for segment in segments {
++            if !segment.is_emitted() {
++                continue;
++            }
+             if !segment.data.is_empty() {
+                 let len =
+                     u32::try_from(segment.data.len()).context("Wasm data segment too large")?;
+@@ -6378,6 +6416,11 @@ where
+     let no_growable_memory = symbol_db.args.no_growable_memory;
+     let shared_memory = symbol_db.args.shared_memory;
+     let import_memory = symbol_db.args.memory_import();
++    // With linker-defined memory, linear memory starts zeroed, so all-zero
++    // active data segments need not be encoded. Imported memory may already
++    // contain data from its host, and Wild does not synthesize a memory.fill
++    // initializer for it, so keep the bytes in that case (as wasm-ld does).
++    let omit_zero_data = import_memory.is_none();
+     let export_memory = &symbol_db.args.export_memory;
+ 
+     if stack_size > 0 {
+@@ -6486,6 +6529,7 @@ where
+                     &mut memory_cursor,
+                     false,
+                     shared_memory,
++                    omit_zero_data,
+                     None,
+                 )?;
+             }
+@@ -6502,6 +6546,7 @@ where
+                             &mut memory_cursor,
+                             true,
+                             false,
++                            false,
+                             Some(&mut tls_cursor),
+                         )?;
+                         layout.object_data_layouts[obj_idx].extend(tls_segments);
+@@ -6528,6 +6573,7 @@ where
+                             &mut memory_cursor,
+                             true,
+                             false,
++                            false,
+                             None,
+                         )?;
+                         layout.object_data_layouts[obj_idx].extend(tls_segments);
+diff --git a/libwild/src/wasm_writer.rs b/libwild/src/wasm_writer.rs
+index 120cce4a..fe009696 100644
+--- a/libwild/src/wasm_writer.rs
++++ b/libwild/src/wasm_writer.rs
+@@ -437,10 +437,7 @@ fn write_code_section(wasm_layout: &WasmLayout<'_>, out: &mut [u8]) -> Result<()
+ 
+ fn write_data_section(wasm_layout: &WasmLayout<'_>, out: &mut [u8]) -> Result<()> {
+     let object_data_layouts = &wasm_layout.object_data_layouts;
+-    let segment_count: u32 = object_data_layouts
+-        .iter()
+-        .map(|obj| u32::try_from(obj.len()).unwrap_or(u32::MAX))
+-        .sum();
++    let segment_count = output_data_segment_count(object_data_layouts);
+     if segment_count == 0 {
+         ensure!(
+             out.is_empty(),
+@@ -454,7 +451,11 @@ fn write_data_section(wasm_layout: &WasmLayout<'_>, out: &mut [u8]) -> Result<()
+     let flat: Vec<(usize, &WasmDataSegmentLayout<'_>)> = object_data_layouts
+         .iter()
+         .enumerate()
+-        .flat_map(|(obj_idx, segs)| segs.iter().map(move |seg| (obj_idx, seg)))
++        .flat_map(|(obj_idx, segs)| {
++            segs.iter()
++                .filter(|seg| seg.is_emitted())
++                .map(move |seg| (obj_idx, seg))
++        })
+         .collect();
+     ensure!(
+         flat.len() == segment_count as usize,
+diff --git a/wild/tests/integration_tests.rs b/wild/tests/integration_tests.rs
+index d18683fe..94ed6b1c 100644
+--- a/wild/tests/integration_tests.rs
++++ b/wild/tests/integration_tests.rs
+@@ -142,6 +142,11 @@
+ //!
+ //! ExpectFuncTypeCount:{count} (Wasm) Asserts the type section has exactly {count} function types.
+ //!
++//! ExpectDataSegmentCount:{count} (Wasm) Asserts the data section has exactly {count} segments.
++//!
++//! ExpectNoZeroDataSegments:{true|false} (Wasm) When true, asserts that no active data segment is
++//! entirely zero. Such segments are redundant because linear memory starts zeroed.
++//!
+ //! ExpectTable:max=initial|max=none (Wasm) Asserts the output has one defined funcref table.
+ //! max=initial requires its maximum to equal its initial size. max=none requires no maximum.
+ //!
+@@ -681,6 +686,8 @@ struct WasmModuleInfo {
+     memory_imports: Vec<(String, String, wasmparser::MemoryType)>,
+     tables: Vec<wasmparser::TableType>,
+     table_imports: Vec<(String, String, wasmparser::TableType)>,
++    data_segment_count: usize,
++    active_zero_data_segment_count: usize,
+ }
+ 
+ fn i32_const_from_expr(expr: &wasmparser::ConstExpr<'_>) -> Option<i32> {
+@@ -710,6 +717,8 @@ impl WasmModuleInfo {
+         let mut memory_imports = Vec::new();
+         let mut tables = Vec::new();
+         let mut table_imports = Vec::new();
++        let mut data_segment_count = 0usize;
++        let mut active_zero_data_segment_count = 0usize;
+ 
+         for payload in Parser::new(0).parse_all(&bytes) {
+             match payload? {
+@@ -815,8 +824,19 @@ impl WasmModuleInfo {
+                 Payload::CodeSectionStart { .. } => {
+                     section_names.insert("Code".to_owned());
+                 }
+-                Payload::DataSection(_) => {
++                Payload::DataSection(section) => {
+                     section_names.insert("Data".to_owned());
++                    for data in section {
++                        let data = data.with_context(|| {
++                            format!("Invalid data segment in {}", path.display())
++                        })?;
++                        data_segment_count += 1;
++                        if matches!(data.kind, wasmparser::DataKind::Active { .. })
++                            && data.data.iter().all(|byte| *byte == 0)
++                        {
++                            active_zero_data_segment_count += 1;
++                        }
++                    }
+                 }
+                 Payload::DataCountSection { .. } => {
+                     section_names.insert("DataCount".to_owned());
+@@ -842,6 +862,8 @@ impl WasmModuleInfo {
+             memory_imports,
+             tables,
+             table_imports,
++            data_segment_count,
++            active_zero_data_segment_count,
+         })
+     }
+ 
+@@ -880,6 +902,31 @@ impl WasmModuleInfo {
+         Ok(())
+     }
+ 
++    fn ensure_data_segments(
++        &self,
++        expected_count: Option<usize>,
++        no_zero_segments: bool,
++        linker_name: &str,
++    ) -> Result {
++        if let Some(expected) = expected_count {
++            ensure!(
++                self.data_segment_count == expected,
++                "Expected {expected} data segment(s) in {linker_name} output ({}), found {}",
++                self.path.display(),
++                self.data_segment_count
++            );
++        }
++        if no_zero_segments {
++            ensure!(
++                self.active_zero_data_segment_count == 0,
++                "Expected no all-zero active data segments in {linker_name} output ({}), found {}",
++                self.path.display(),
++                self.active_zero_data_segment_count
++            );
++        }
++        Ok(())
++    }
++
+     fn ensure_func_imports(
+         &self,
+         expected: &[(String, String, usize)],
+@@ -2377,6 +2424,10 @@ struct Assertions {
+     expected_table_import: Option<ExpectedTableImport>,
+     /// Wasm: total number of function types in the type section.
+     expected_func_type_count: Option<usize>,
++    /// Wasm: exact number of data segments in the data section.
++    expected_data_segment_count: Option<usize>,
++    /// Wasm: no active data segment may be entirely zero.
++    expect_no_zero_data_segments: bool,
+     /// Wasm: required maximum of the single defined funcref table.
+     expected_table_maximum: Option<ExpectedTableMaximum>,
+     /// Wasm: required `name` section module name.
+@@ -3181,6 +3232,12 @@ fn process_directive(
+         "ExpectFuncImportCount" => {
+             config.assertions.expected_func_import_count = Some(arg.trim().parse()?);
+         }
++        "ExpectDataSegmentCount" => {
++            config.assertions.expected_data_segment_count = Some(arg.trim().parse()?);
++        }
++        "ExpectNoZeroDataSegments" => {
++            config.assertions.expect_no_zero_data_segments = arg.parse()?;
++        }
+         "ExpectSharedMemory" => {
+             config.assertions.expect_shared_memory = arg.parse()?;
+         }
+@@ -6416,6 +6473,8 @@ impl Assertions {
+             expected_memory_import: self.expected_memory_import.clone(),
+             expected_table_import: self.expected_table_import.clone(),
+             expected_func_type_count: self.expected_func_type_count,
++            expected_data_segment_count: self.expected_data_segment_count,
++            expect_no_zero_data_segments: self.expect_no_zero_data_segments,
+             expected_table_maximum: self.expected_table_maximum,
+             expected_module_name: self.expected_module_name.clone(),
+             ..Default::default()
+@@ -6449,6 +6508,11 @@ impl Assertions {
+         )?;
+         info.ensure_func_type_count(self.expected_func_type_count, linker_name)?;
+         info.ensure_func_types_unique(linker_name)?;
++        info.ensure_data_segments(
++            self.expected_data_segment_count,
++            self.expect_no_zero_data_segments,
++            linker_name,
++        )?;
+         info.ensure_exports(&self.expected_symtab_entries, &self.no_sym, linker_name)?;
+         info.ensure_shared_memory(self.expect_shared_memory, linker_name)?;
+         info.ensure_memory_import(self.expected_memory_import.as_ref(), linker_name)?;
+diff --git a/wild/tests/sources/wasm/zero-data/zero-data.c b/wild/tests/sources/wasm/zero-data/zero-data.c
+new file mode 100644
+index 00000000..0c1941df
+--- /dev/null
++++ b/wild/tests/sources/wasm/zero-data/zero-data.c
+@@ -0,0 +1,22 @@
++//#Config:default
++//#MaxFileSize:4096
++//#ExpectDataSegmentCount:1
++//#ExpectNoZeroDataSegments:true
++
++// A zero-initialised buffer becomes an all-zero active data segment in the
++// object. Linear memory already starts zeroed, so the linker must not encode
++// those 16 KiB. The volatile reads keep the buffer observable so the test also
++// checks that its address is still backed by the initial memory.
++volatile char zero_buf[16384];
++volatile char tail_buf[4] = {1, 2, 3, 4};
++
++void _start(void) {
++  for (unsigned i = 0; i < sizeof(zero_buf); ++i) {
++    if (zero_buf[i] != 0) {
++      __builtin_trap();
++    }
++  }
++  if (tail_buf[0] != 1 || tail_buf[3] != 4) {
++    __builtin_trap();
++  }
++}

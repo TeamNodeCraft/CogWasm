@@ -101,8 +101,28 @@ log "fetching pinned clif-to-wasm and Wild"
 checkout "$TOOL/clif-to-wasm" https://github.com/ryancbuckley/clif-to-wasm "$CLIF_REV"
 checkout "$TOOL/wild" https://github.com/wild-linker/wild "$WILD_REV"
 
+# Wild patches. The reverse check makes reruns idempotent whether the patch
+# is applied as a commit or left uncommitted. If a patch is newly applied the
+# cached binary predates it, so rebuild even when the executable exists.
+shopt -s nullglob
+WILD_PATCHES=("$ROOT"/stage-c/patches/wild/*.patch)
+[ "${#WILD_PATCHES[@]}" -gt 0 ] || {
+    echo "no Wild patches found under $ROOT/stage-c/patches/wild" >&2; exit 1; }
+wild_patch_applied=false
+for p in "${WILD_PATCHES[@]}"; do
+    if git -C "$TOOL/wild" apply --reverse --check "$p" 2>/dev/null; then
+        echo "$(basename "$p") already applied"
+    else
+        echo "applying $(basename "$p")"
+        git -C "$TOOL/wild" apply "$p"
+        wild_patch_applied=true
+    fi
+    git -C "$TOOL/wild" apply --reverse --check "$p" || {
+        echo "$(basename "$p") is not present after apply" >&2; exit 1; }
+done
+
 log "building native Wild ($JOBS jobs)"
-if [ ! -x "$TOOL/target/wild/release/wild" ]; then
+if [ "$wild_patch_applied" = true ] || [ ! -x "$TOOL/target/wild/release/wild" ]; then
     ( cd "$TOOL/wild" && RUSTUP_TOOLCHAIN="$STABLE" \
         CARGO_TARGET_DIR="$TOOL/target/wild" \
         cargo build --release -p wild-linker )
