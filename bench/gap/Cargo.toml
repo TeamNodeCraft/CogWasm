@@ -1,0 +1,20 @@
+[package]
+name = "cogwasm-gap"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "gap-tool"
+path = "src/main.rs"
+test = false
+
+[dependencies]
+anyhow = "=1.0.104"
+rustc-demangle = "=0.1.28"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.149"
+wasm-encoder = { version = "=0.263.0", default-features = false, features = ["std", "wasmparser"] }
+wasmparser = "=0.263.0"
+wasmprinter = "=0.263.0"
+wasmtime = { version = "=50.0.2", default-features = false, features = ["cranelift", "runtime", "std", "cache", "anyhow", "threads"] }
