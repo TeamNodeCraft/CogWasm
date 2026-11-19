@@ -52,7 +52,7 @@ from typing import Any, Iterable
 EXEC_MIN_LLVM_MS = 0.1
 SHORT_SHA_LENGTH = 7
 DEFAULT_REPO = "TeamNodeCraft/CogWasm"
-DEFAULT_PAGE_URL = "https://teamnodecraft.github.io/CogWasm/bench/"
+DEFAULT_PAGE_URL = "https://teamnodecraft.github.io/CogWasm/#benchmarks"
 
 # Okabe-Ito, a colour-blind-safe palette. Markers are distinct as well, so the
 # lines stay distinguishable when colour is not available.

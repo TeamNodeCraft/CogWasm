@@ -9,9 +9,10 @@ committed as copies:
 * it copies the logo files from ``artwork/cog-logo/`` under the names the page
   uses, so the artwork stays single-sourced in git.
 
-With ``--include-bench`` it also copies the committed chart page and, when
-they exist locally, the generated ``chart.svg`` and ``data.json``. The Pages
-workflow does that part itself because those two files are release assets.
+The Benchmarks section's interactive chart is ``bench/chart/chart.js`` and
+``chart.css``; they are always copied to ``bench/``. Its data, ``data.json``,
+and the static ``chart.svg`` are release assets: the Pages workflow downloads
+them into ``bench/``, and ``--include-bench`` copies local copies for a preview.
 
 Usage:
 
@@ -50,6 +51,9 @@ ARTWORK_COPIES = {
 
 # Committed files copied unchanged.
 SITE_FILES = ("style.css", "script.js")
+# The interactive chart's code, from bench/chart/, served under bench/.
+BENCH_CODE = ("chart.js", "chart.css")
+# Generated release assets (bench-history), served under bench/.
 BENCH_ASSETS = ("chart.svg", "data.json")
 
 
@@ -125,19 +129,18 @@ def build_site(output: Path, commit: str, date: str, include_bench: bool) -> Non
     for name in SITE_FILES:
         copy_file(SITE_DIR / name, output / name)
     build_artwork(output)
+    for name in BENCH_CODE:
+        copy_file(BENCH_DIR / name, output / "bench" / name)
 
     if include_bench:
-        build_bench(output)
+        build_bench_assets(output)
 
     print(f"site built in {output}")
     print(f"  status: as of {commit}, {date}")
-    if include_bench:
-        print("  chart page: bench/index.html")
 
 
-def build_bench(output: Path) -> None:
-    """Copy the committed chart page and any locally generated chart assets."""
-    copy_file(BENCH_DIR / "index.html", output / "bench" / "index.html")
+def build_bench_assets(output: Path) -> None:
+    """Copy locally generated chart assets, for a preview of the Benchmarks section."""
     for name in BENCH_ASSETS:
         source = BENCH_DIR / name
         if source.is_file():
@@ -145,8 +148,8 @@ def build_bench(output: Path) -> None:
         else:
             print(
                 f"warning: {source} is a release asset and is not present; "
-                "the page will show its fallback text and the static chart will "
-                "be missing. Download it with: gh release download bench-history "
+                "the Benchmarks section will show its fallback text and the "
+                "static chart will be missing. Download it with: gh release download bench-history "
                 f"--pattern {name} --dir {BENCH_DIR}",
                 file=sys.stderr,
             )
@@ -171,7 +174,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--include-bench",
         action="store_true",
-        help="also copy bench/chart/index.html and any local chart assets",
+        help="also copy local bench/chart/chart.svg and data.json, for a preview",
     )
     return parser.parse_args(argv)
 

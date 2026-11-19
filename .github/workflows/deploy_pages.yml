@@ -66,14 +66,14 @@ jobs:
           rm tags.txt
           ls -lR public/
 
-      # The interactive page is the one committed file; the data and the
-      # static image come from the same bench-history assets the README uses.
-      - name: Build bench chart page
+      # The interactive chart lives in the site's Benchmarks section (build.py
+      # copies its code); its data and the static image come from the same
+      # bench-history assets the README uses.
+      - name: Download benchmark chart data
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p public/bench
-          cp bench/chart/index.html public/bench/index.html
           if gh release view bench-history >/dev/null 2>&1; then
             gh release download bench-history --pattern chart.svg \
               --dir public/bench --clobber \

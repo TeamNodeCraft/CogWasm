@@ -13,7 +13,9 @@
 <meta property="og:url" content="https://teamnodecraft.github.io/CogWasm/">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="bench/chart.css">
 <script src="script.js" defer></script>
+<script src="bench/chart.js" defer></script>
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
@@ -28,7 +30,7 @@
       <ul>
         <li><a href="#how-it-works">How it works</a></li>
         <li><a href="#status">Status</a></li>
-        <li><a href="bench/">Benchmarks</a></li>
+        <li><a href="#benchmarks">Benchmarks</a></li>
         <li><a href="#roadmap">Roadmap</a></li>
         <li><a href="#contribute">Contribute</a></li>
       </ul>
@@ -53,7 +55,7 @@
       <h1 id="intro-title">CogWasm</h1>
       <p class="lede">rustc, built as a WebAssembly module that compiles Rust to WebAssembly, with no LLVM inside.</p>
       <p class="intro-links">
-        <a class="button button-quiet" href="bench/">Benchmarks</a>
+        <a class="button button-quiet" href="#benchmarks">Benchmarks</a>
       </p>
     </div>
   </section>
@@ -172,13 +174,19 @@
     <p>The suite measures compiler start, compile phases, execution against LLVM <code>-O0</code> and <code>-O2</code>, and output size. Every result is checked bit-for-bit against both LLVM builds before a timing is accepted, so a wrong answer stops the run instead of becoming a speed-up. The quick suite runs in CI on every compiler change, and these are CI-runner numbers.</p>
 
     <div class="bench-live" id="bench-live" aria-live="polite">
-      <p class="bench-fallback">See the <a href="bench/">interactive chart</a> for the latest CI numbers.</p>
+      <p class="bench-fallback">The latest CI numbers are in the chart below.</p>
     </div>
 
-    <figure class="chart-figure">
-      <a href="bench/"><img src="bench/chart.svg" width="800" height="420" alt="Benchmark trend by commit: execution time and module size against LLVM -O2, plus compile speed. Lower is better."></a>
-      <figcaption>One point per CI commit. <a href="bench/">Open the interactive chart</a>, where each point shows its values and commit.</figcaption>
-    </figure>
+    <div class="bench-trend">
+      <p class="bench-trend-intro">One point per CI commit on <code>main</code>, in commit order; lower is better. Hover or tap a point for its values and commit; click a legend item to hide or show a line. A dashed vertical rule marks a commit that changed the quick program subset.</p>
+      <div id="bench-legend" class="legend" role="group" aria-label="Toggle chart lines"></div>
+      <div id="bench-chart" class="chart" data-src="bench/data.json" aria-live="polite">
+        <div class="message loading">Loading benchmark data&hellip;</div>
+        <noscript><img src="bench/chart.svg" width="800" height="420" alt="Benchmark trend by commit: execution time and module size against LLVM -O2, plus compile speed. Lower is better."></noscript>
+      </div>
+      <p id="bench-footnote" class="footnote"></p>
+      <div id="bench-tooltip" class="tooltip" role="status" hidden></div>
+    </div>
   </section>
 
   <section class="container section" id="roadmap" aria-labelledby="roadmap-title">

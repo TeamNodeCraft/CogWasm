@@ -213,10 +213,11 @@ backend SROA/inliner and the memory-intrinsic lowering above roadmap step 3.
   script never deletes one. It also backfills quick results that only exist on
   `ci-logs` (starting with `8476eeb`), then rebuilds
   [`chart.svg`](chart/chart.py) and `data.json` from every point and uploads
-  them with stable names. `deploy_pages.yml` copies the static
-  [`bench/chart/index.html`](chart/index.html) plus those two assets to
-  `/bench/` on the repository's GitHub Pages site; the README image links
-  there for the interactive version.
+  them with stable names. The interactive chart is part of the project
+  site's Benchmarks section: [`bench/chart/chart.js`](chart/chart.js) and
+  [`chart.css`](chart/chart.css), copied by `site/build.py`, read
+  `data.json`, which `deploy_pages.yml` downloads next to them. The README
+  image links to that section.
 * `.github/workflows/bench.yml` runs `--full` on a weekly schedule and on
   `workflow_dispatch` (optional `base` commit and `record_history` switch). It
   publishes the JSON + Markdown as one asset per run on the `bench-results`

@@ -148,10 +148,7 @@
       if (point.runner) {
         meta.appendChild(document.createTextNode(" on " + point.runner));
       }
-      meta.appendChild(document.createTextNode(". "));
-      var chart = element("a", "", "Interactive chart");
-      chart.href = "bench/";
-      meta.appendChild(chart);
+      meta.appendChild(document.createTextNode("."));
       live.appendChild(meta);
     })
     .catch(function () {

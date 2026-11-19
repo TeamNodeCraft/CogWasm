@@ -1,155 +1,6 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CogWasm benchmarks</title>
-<meta name="description" content="CogWasm benchmark trend: execution time and module size against LLVM -O2, plus compile speed, one point per CI commit.">
-<meta name="color-scheme" content="light dark">
-<meta property="og:type" content="website">
-<meta property="og:site_name" content="CogWasm">
-<meta property="og:title" content="CogWasm benchmarks">
-<meta property="og:description" content="Execution time and module size against LLVM -O2, plus compile speed, one point per CI commit.">
-<meta property="og:url" content="https://teamnodecraft.github.io/CogWasm/bench/">
-<link rel="icon" href="../favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="../style.css">
-<script src="../script.js" defer></script>
-<style>
-  * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; }
-  body {
-    background: var(--bg);
-    color: var(--ink);
-    font: 14px/1.45 var(--font-sans);
-  }
-  .wrap { max-width: 1040px; margin: 0 auto; padding: 20px 16px 36px; }
-  /* Keep the shared header and footer on the same left edge as the chart. */
-  body > .site-header .container,
-  body > .site-footer .container { width: min(1040px, 100% - 2.5rem); }
-  h1 { margin: 0 0 6px; font-size: clamp(20px, 3.2vw, 28px); line-height: 1.2; }
-  .lede { margin: 0; max-width: 72ch; color: var(--muted); }
-  .lede strong { color: var(--ink); font-weight: 600; }
-  .legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin: 18px 0 10px;
-  }
-  .legend button, .legend .reference {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    min-height: 32px;
-    padding: 4px 10px;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    background: var(--panel);
-    color: var(--ink);
-    font: inherit;
-    font-size: 13px;
-  }
-  .legend button { cursor: pointer; }
-  .legend button:hover { border-color: var(--muted); }
-  .legend button[aria-pressed="false"] { opacity: 0.42; }
-  .legend button:disabled { cursor: default; opacity: 0.38; }
-  .legend .reference { color: var(--muted); }
-  .legend svg { display: block; flex: none; }
-  .chart { position: relative; width: 100%; margin: 0; }
-  .chart svg { display: block; width: 100%; height: auto; overflow: visible; }
-  .message {
-    padding: 28px 16px;
-    border: 1px dashed var(--border);
-    border-radius: 10px;
-    color: var(--muted);
-    text-align: center;
-  }
-  html:not(.js) .message.loading { display: none; }
-  .footnote { margin: 14px 0 0; color: var(--muted); font-size: 12px; }
-  .footnote a { color: inherit; }
-  .tooltip {
-    position: fixed;
-    z-index: 10;
-    width: max-content;
-    max-width: min(340px, calc(100vw - 24px));
-    padding: 10px 12px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--tooltip);
-    color: var(--ink);
-    box-shadow: var(--shadow);
-    font-size: 12px;
-    pointer-events: none;
-  }
-  .tooltip[hidden] { display: none; }
-  .tooltip .head { display: flex; gap: 8px; align-items: baseline; }
-  .tooltip .sha { font-weight: 700; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-  .tooltip .date { color: var(--muted); }
-  .tooltip .subject { margin: 3px 0 5px; overflow-wrap: anywhere; }
-  .tooltip .meta { color: var(--muted); margin-bottom: 7px; }
-  .tooltip table { border-collapse: collapse; width: 100%; }
-  .tooltip td { padding: 1px 0; vertical-align: baseline; }
-  .tooltip td.value { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .tooltip .swatch { display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 2px; }
-  .tooltip .note { margin-top: 7px; color: var(--muted); }
-  .tooltip .note.subset { color: var(--accent-text); }
-  .tooltip a { color: var(--accent-text); }
-  @media (max-width: 680px) {
-    .wrap { padding: 14px 10px 28px; }
-    body > .site-header .container,
-    body > .site-footer .container { width: calc(100% - 20px); }
-    .legend { gap: 5px; }
-    .legend button, .legend .reference { font-size: 12px; padding: 3px 8px; }
-  }
-</style>
-</head>
-<body>
-<a class="skip-link" href="#main">Skip to content</a>
-
-<header class="site-header">
-  <div class="container header-inner">
-    <a class="brand" href="../" aria-label="CogWasm home">
-      <img class="brand-mark" src="../logo.svg" alt="" width="30" height="30">
-      <span class="brand-name">CogWasm</span>
-    </a>
-    <nav class="site-nav" id="site-nav" aria-label="Site">
-      <ul>
-        <li><a href="../#how-it-works">How it works</a></li>
-        <li><a href="../#status">Status</a></li>
-        <li><a href="./">Benchmarks</a></li>
-        <li><a href="../#roadmap">Roadmap</a></li>
-        <li><a href="../#contribute">Contribute</a></li>
-      </ul>
-    </nav>
-    <div class="header-actions">
-      <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="site-nav">Menu</button>
-      <a class="github-link" href="https://github.com/TeamNodeCraft/CogWasm">
-        <svg class="github-mark" viewBox="0 0 16 16" width="18" height="18" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
-        <span>GitHub</span>
-      </a>
-    </div>
-  </div>
-</header>
-
-<main class="wrap" id="main">
-  <header>
-    <h1>CogWasm benchmark trend</h1>
-    <p class="lede">
-      One point per CI commit on <strong>main</strong>, in commit order. Lower is better.
-      Hover or tap a point for the values; click opens the commit.
-      A dashed vertical rule marks a commit that changed the quick program subset.
-    </p>
-  </header>
-  <div id="legend" class="legend" role="group" aria-label="Toggle chart lines"></div>
-  <div id="chart" class="chart" aria-live="polite">
-    <div class="message loading">Loading benchmark data&hellip;</div>
-    <noscript>
-      <div class="message">The interactive chart needs JavaScript. <a href="chart.svg">Open the static chart</a>, or read the <a href="../#benchmarks">benchmark summary</a>.</div>
-    </noscript>
-  </div>
-  <p id="footnote" class="footnote"></p>
-  <div id="tooltip" class="tooltip" role="status" hidden></div>
-</main>
-<script>
+// Interactive benchmark trend chart for the Benchmarks section of the CogWasm site.
+// Reads data.json (built by bench/chart/chart.py from the bench-history release)
+// from the URL in the container's data-src attribute. No libraries.
 (function () {
   "use strict";
 
@@ -163,8 +14,8 @@
     precompiled_load_ms: "--s-pre"
   };
   var state = { data: null, hidden: new Set(), touchPoint: null, suppressClick: false };
-  var tooltip = document.getElementById("tooltip");
-  var chart = document.getElementById("chart");
+  var tooltip = document.getElementById("bench-tooltip");
+  var chart = document.getElementById("bench-chart");
   var hideTimer = null;
 
   function svgEl(name, attrs, parent) {
@@ -246,7 +97,7 @@
   }
 
   function buildLegend() {
-    var legend = document.getElementById("legend");
+    var legend = document.getElementById("bench-legend");
     legend.textContent = "";
     state.data.series.forEach(function (series) {
       var button = document.createElement("button");
@@ -632,7 +483,7 @@
     buildLegend();
     drawChart();
     var repo = state.data.repo;
-    var footnote = document.getElementById("footnote");
+    var footnote = document.getElementById("bench-footnote");
     footnote.innerHTML = "Source: <a href=\"https://github.com/" + escapeHtml(repo) +
       "/tree/main/bench/chart\">bench/chart</a> · " +
       "one point per successful quick run on main, from the append-only " +
@@ -658,7 +509,7 @@
     if (state.data) { drawChart(); }
   });
 
-  fetch("data.json", { cache: "no-store" })
+  fetch(chart.getAttribute("data-src") || "bench/data.json", { cache: "no-store" })
     .then(function (response) {
       if (!response.ok) { throw new Error("HTTP " + response.status); }
       return response.json();
@@ -672,19 +523,6 @@
       render();
     })
     .catch(function (error) {
-      fail("Could not load data.json (" + error.message + "). If you opened this file directly, serve the directory over HTTP instead.");
+      fail("Could not load data.json (" + error.message + "). If you opened the page from disk, serve the built site over HTTP instead.");
     });
 })();
-</script>
-
-<footer class="site-footer">
-  <div class="container">
-    <div class="footer-inner">
-      <p><strong>Licences.</strong> Original code, build scripts and documentation are <a href="https://github.com/TeamNodeCraft/CogWasm/blob/main/LICENSE-MIT">MIT</a> OR <a href="https://github.com/TeamNodeCraft/CogWasm/blob/main/LICENSE-APACHE">Apache-2.0</a>, at your option. Patch files follow the licence of the upstream project they modify; see <a href="https://github.com/TeamNodeCraft/CogWasm/blob/main/README.md#patch-files">Patch files</a>. The logo and artwork are &copy; 2026 AlexMitchellMus, all rights reserved; see <a href="https://github.com/TeamNodeCraft/CogWasm/blob/main/artwork/cog-logo/ARTWORK.md">ARTWORK.md</a>.</p>
-      <p><strong>Credits.</strong> CogWasm continues <a href="https://github.com/oligamiq/rust_wasm">oligamiq/rust_wasm</a> (via <a href="https://github.com/AlexMitchellMus/rust_wasm">AlexMitchellMus/rust_wasm</a>), which built rustc with LLVM for WebAssembly. The pure-Rust compiler stands on bjorn3's rustc-to-wasm and Cranelift work, Ryan Buckley's clif-to-wasm and in-browser playground, the Wild linker, and the Bytecode Alliance's Cranelift and Wasmtime.</p>
-      <p class="footer-repo"><a href="https://github.com/TeamNodeCraft/CogWasm">TeamNodeCraft/CogWasm on GitHub</a></p>
-    </div>
-  </div>
-</footer>
-</body>
-</html>
