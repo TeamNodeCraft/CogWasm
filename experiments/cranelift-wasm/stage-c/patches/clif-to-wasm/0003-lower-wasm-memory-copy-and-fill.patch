@@ -1,0 +1,214 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Stage C <stage-c@example.invalid>
+Date: Thu, 19 Nov 2026 22:05:00 +1030
+Subject: [PATCH] wasm: lower memory.copy and memory.fill intrinsics
+
+Cranelift has no bulk-memory opcode. Add the two reserved test-case names that
+a frontend can call to get `memory.copy` and `memory.fill`, next to the
+existing `memory.grow`/`memory.size` mechanism. Both take
+`(i32, i32, i32) -> ()` and operate on `ModuleLayout::memory_index`; the
+reserved calls must not be tail calls.
+
+The bulk-memory feature is on for wasm32-unknown-unknown: LLVM's default
+"generic" CPU enables it and every object cg_clif writes declares it. The
+tests check the emitted instructions, memmove semantics for an overlapping
+copy, and the low-byte truncation of `memory.fill`.
+---
+--- a/src/wasm_intrinsic.rs
++++ b/src/wasm_intrinsic.rs
+@@ -1,7 +1,8 @@
+ //! WebAssembly instructions that have no Cranelift opcode.
+ //!
+-//! Cranelift's IR is ISA-neutral and has no `memory.grow` or `memory.size`.
+-//! A frontend that needs them calls a function with one of the reserved
++//! Cranelift's IR is ISA-neutral and has no `memory.grow`, `memory.size`,
++//! `memory.copy` or `memory.fill`. A frontend that needs one calls a function
++//! with one of the reserved
+ //! [`ExternalName::TestCase`](cranelift_codegen::ir::ExternalName::TestCase)
+ //! names below; [`compile_function`](crate::compile_function) replaces the call
+ //! with the instruction. These are reserved names, so no environment entry or
+@@ -18,8 +19,8 @@
+ //! ```
+ //!
+ //! The calls must have the exact signature shown for the instruction
+-//! (`(i32) -> i32` for grow, `() -> i32` for size) and must not be tail
+-//! calls. They apply to
++//! (`(i32) -> i32` for grow, `() -> i32` for size, `(i32, i32, i32) -> ()` for
++//! copy and fill) and must not be tail calls. They apply to
+ //! [`ModuleLayout::memory_index`](crate::ModuleLayout::memory_index) and only
+ //! to a 32-bit memory.
+ 
+@@ -36,17 +37,32 @@
+     /// `memory.size`, from a call to `__clif_to_wasm_memory_size`:
+     /// `() -> i32`, the current size in pages.
+     MemorySize,
++    /// `memory.copy`, from a call to `__clif_to_wasm_memory_copy`:
++    /// `(i32, i32, i32) -> ()`, copying `len` bytes from `src` to `dest` as if
++    /// by `memmove`.
++    MemoryCopy,
++    /// `memory.fill`, from a call to `__clif_to_wasm_memory_fill`:
++    /// `(i32, i32, i32) -> ()`, filling `len` bytes at `dest` with the low
++    /// byte of `value`.
++    MemoryFill,
+ }
+ 
+ impl WasmIntrinsic {
+     /// All intrinsics, for lookups.
+-    const ALL: [WasmIntrinsic; 2] = [WasmIntrinsic::MemoryGrow, WasmIntrinsic::MemorySize];
++    const ALL: [WasmIntrinsic; 4] = [
++        WasmIntrinsic::MemoryGrow,
++        WasmIntrinsic::MemorySize,
++        WasmIntrinsic::MemoryCopy,
++        WasmIntrinsic::MemoryFill,
++    ];
+ 
+     /// The reserved symbol name that selects this instruction.
+     pub const fn symbol_name(self) -> &'static str {
+         match self {
+             WasmIntrinsic::MemoryGrow => "__clif_to_wasm_memory_grow",
+             WasmIntrinsic::MemorySize => "__clif_to_wasm_memory_size",
++            WasmIntrinsic::MemoryCopy => "__clif_to_wasm_memory_copy",
++            WasmIntrinsic::MemoryFill => "__clif_to_wasm_memory_fill",
+         }
+     }
+ 
+@@ -60,9 +76,11 @@
+     /// The call signature this intrinsic requires.
+     pub(crate) fn signature(self) -> (&'static [Type], &'static [Type]) {
+         const I32: &[Type] = &[types::I32];
++        const I32X3: &[Type] = &[types::I32, types::I32, types::I32];
+         match self {
+             WasmIntrinsic::MemoryGrow => (I32, I32),
+             WasmIntrinsic::MemorySize => (&[], I32),
++            WasmIntrinsic::MemoryCopy | WasmIntrinsic::MemoryFill => (I32X3, &[]),
+         }
+     }
+ }
+--- a/src/lower.rs
++++ b/src/lower.rs
+@@ -1309,6 +1309,20 @@
+             }
+             WasmIntrinsic::MemorySize => {
+                 self.ins(I::MemorySize(self.config.module.memory_index.0));
++            }
++            WasmIntrinsic::MemoryCopy => {
++                let mem = self.config.module.memory_index.0;
++                self.operand()?; // destination
++                self.operand()?; // source
++                self.operand()?; // length
++                self.ins(I::MemoryCopy { src_mem: mem, dst_mem: mem });
++            }
++            WasmIntrinsic::MemoryFill => {
++                let mem = self.config.module.memory_index.0;
++                self.operand()?; // destination
++                self.operand()?; // byte value
++                self.operand()?; // length
++                self.ins(I::MemoryFill(mem));
+             }
+         }
+         Ok(())
+--- a/tests/memory.rs
++++ b/tests/memory.rs
+@@ -141,3 +141,102 @@
+     }
+     harness::validate(&wasm).unwrap();
+ }
++
++const COPY_FILL_CLIF: &str = "
++function %copy(i32, i32, i32) {
++    fn0 = %__clif_to_wasm_memory_copy(i32, i32, i32)
++block0(v0: i32, v1: i32, v2: i32):
++    call fn0(v0, v1, v2)
++    return
++}
++
++function %fill(i32, i32, i32) {
++    fn0 = %__clif_to_wasm_memory_fill(i32, i32, i32)
++block0(v0: i32, v1: i32, v2: i32):
++    call fn0(v0, v1, v2)
++    return
++}
++
++; Store a pattern at 4096, then copy 4 bytes from 4098 to 4096 (overlapping,
++; dest < src). memmove semantics leave 4096..4100 = 02 01 00 00 = 0x00000102.
++function %copy_overlapping() -> i32 {
++    fn0 = %__clif_to_wasm_memory_copy(i32, i32, i32)
++block0:
++    v0 = iconst.i32 4096
++    v1 = iconst.i32 0x01020304
++    store v1, v0
++    v2 = iconst.i32 4098
++    v3 = iconst.i32 4
++    call fn0(v0, v2, v3)
++    v4 = load.i32 v0
++    return v4
++}
++
++; Fill 4 bytes with 0x1ff; only the low byte may be stored.
++function %fill_truncates() -> i32 {
++    fn0 = %__clif_to_wasm_memory_fill(i32, i32, i32)
++block0:
++    v0 = iconst.i32 4096
++    v1 = iconst.i32 0x1ff
++    v2 = iconst.i32 4
++    call fn0(v0, v1, v2)
++    v3 = load.i32 v0
++    return v3
++}
++";
++
++fn count_copy_fill(wasm: &[u8]) -> (usize, usize, usize) {
++    let (mut copies, mut fills, mut calls) = (0, 0, 0);
++    for payload in Parser::new(0).parse_all(wasm) {
++        if let Payload::CodeSectionEntry(body) = payload.unwrap() {
++            for op in body.get_operators_reader().unwrap() {
++                match op.unwrap() {
++                    Operator::MemoryCopy { dst_mem, src_mem } => {
++                        assert_eq!((dst_mem, src_mem), (0, 0));
++                        copies += 1;
++                    }
++                    Operator::MemoryFill { mem } => {
++                        assert_eq!(mem, 0);
++                        fills += 1;
++                    }
++                    Operator::Call { .. } => calls += 1,
++                    _ => {}
++                }
++            }
++        }
++    }
++    (copies, fills, calls)
++}
++
++#[test]
++fn memory_copy_and_fill_instructions() {
++    use cranelift_codegen::data_value::DataValue;
++    use cranelift_codegen::ir::types;
++
++    let funcs = cranelift_reader::parse_functions(COPY_FILL_CLIF).unwrap();
++    let (wasm, unsupported) = harness::compile_module(&funcs, &Config::default());
++    assert!(unsupported.is_empty(), "{unsupported:?}");
++    harness::validate(&wasm).unwrap();
++
++    // Two memory.copy (the wrapper and the overlapping test), two memory.fill
++    // (the wrapper and the truncation test), and no wasm `call` at all.
++    assert_eq!(count_copy_fill(&wasm), (2, 2, 0), "emitted instructions");
++
++    let runner = harness::Runner::new(&wasm).unwrap();
++    assert_eq!(
++        runner
++            .call("copy_overlapping", &[], &[types::I32])
++            .unwrap()
++            .unwrap()[0],
++        DataValue::I32(0x0000_0102),
++        "memory.copy must have memmove semantics",
++    );
++    assert_eq!(
++        runner
++            .call("fill_truncates", &[], &[types::I32])
++            .unwrap()
++            .unwrap()[0],
++        DataValue::I32(-1),
++        "memory.fill must store the low 8 bits",
++    );
++}

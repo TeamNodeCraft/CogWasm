@@ -1,0 +1,422 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Stage C <stage-c@example.invalid>
+Date: Thu, 19 Nov 2026 22:05:00 +1030
+Subject: [PATCH] wasm: inline small constant memory intrinsics
+
+cg_clif lowered every `memcpy`, `memmove` and `memset` to a libc call and
+never looked at the size. The hot 8-byte swaps in core's sort therefore called
+`compiler_builtins`' `copy_forward` (157 instructions per swap) where LLVM
+emits an i64 load and store.
+
+Read the constant count from the MIR operand and put the decision in one
+helper used by all four lowering sites: size 0 emits nothing; a constant size
+up to 64 bytes becomes straight-line loads followed by stores (memmove
+semantics, widest power-of-two width that divides the size, aligned only when
+the pointee's alignment guarantees it); a larger or runtime size becomes
+`memory.copy`/`memory.fill` when the target has bulk-memory (wasm32 unless
+`-bulk-memory`); otherwise it stays a libc call. Volatile operations keep the
+libc call.
+
+sort's instruction count drops from 1.26G to 327M (8.39x to 2.17x LLVM -O2)
+in bench/gap, and no `memcpy`/`memmove`/`memset` call remains in its hot
+functions.
+---
+--- a/src/intrinsics/mod.rs
++++ b/src/intrinsics/mod.rs
+@@ -15,6 +15,7 @@
+ mod llvm;
+ mod llvm_aarch64;
+ mod llvm_x86;
++pub(crate) mod memory;
+ mod simd;
+ 
+ use cranelift_codegen::ir::{
+@@ -480,22 +481,37 @@
+             fx.bcx.ins().debugtrap();
+         }
+         sym::copy => {
+-            intrinsic_args!(fx, args => (src, dst, count); intrinsic);
+-            let src = src.load_scalar(fx);
+-            let dst = dst.load_scalar(fx);
+-            let count = count.load_scalar(fx);
++            if args.len() != 3 {
++                bug_on_incorrect_arg_count(intrinsic);
++            }
++            let src_operand = &args[0].node;
++            let dst_operand = &args[1].node;
++            let count_operand = &args[2].node;
++            let src = codegen_operand(fx, src_operand).load_scalar(fx);
++            let dst = codegen_operand(fx, dst_operand).load_scalar(fx);
++            let count_value = codegen_operand(fx, count_operand).load_scalar(fx);
+ 
+             let elem_ty = generic_args.type_at(0);
+-            let elem_size: u64 = fx.layout_of(elem_ty).size.bytes();
+-            assert_eq!(args.len(), 3);
++            let elem_layout = fx.layout_of(elem_ty);
++            let elem_size: u64 = elem_layout.size.bytes();
+             let byte_amount = if elem_size != 1 {
+-                fx.bcx.ins().imul_imm_u(count, elem_size as i64)
++                fx.bcx.ins().imul_imm_u(count_value, elem_size as i64)
+             } else {
+-                count
++                count_value
+             };
++            let known_bytes = memory::const_usize(fx, count_operand)
++                .and_then(|count| count.checked_mul(elem_size));
+ 
+-            // FIXME emit_small_memmove
+-            fx.bcx.call_memmove(fx.target_config, dst, src, byte_amount);
++            memory::codegen_memory_copy(
++                fx,
++                dst,
++                src,
++                byte_amount,
++                known_bytes,
++                elem_layout.align.abi.bytes(),
++                false,
++                false,
++            );
+         }
+         sym::volatile_copy_memory | sym::volatile_copy_nonoverlapping_memory => {
+             // NOTE: the volatile variants have src and dst swapped
+@@ -654,21 +670,37 @@
+         }
+ 
+         sym::write_bytes | sym::volatile_set_memory => {
+-            intrinsic_args!(fx, args => (dst, val, count); intrinsic);
+-            let val = val.load_scalar(fx);
+-            let count = count.load_scalar(fx);
++            if args.len() != 3 {
++                bug_on_incorrect_arg_count(intrinsic);
++            }
++            let dst_operand = &args[0].node;
++            let val_operand = &args[1].node;
++            let count_operand = &args[2].node;
++            let val = codegen_operand(fx, val_operand).load_scalar(fx);
++            let count_value = codegen_operand(fx, count_operand).load_scalar(fx);
++            let dst = codegen_operand(fx, dst_operand);
+ 
+             let pointee_ty = dst.layout().ty.builtin_deref(true).unwrap();
+-            let pointee_size = fx.layout_of(pointee_ty).size.bytes();
++            let pointee_layout = fx.layout_of(pointee_ty);
++            let pointee_size = pointee_layout.size.bytes();
+             let count = if pointee_size != 1 {
+-                fx.bcx.ins().imul_imm_u(count, pointee_size as i64)
++                fx.bcx.ins().imul_imm_u(count_value, pointee_size as i64)
+             } else {
+-                count
++                count_value
+             };
+             let dst_ptr = dst.load_scalar(fx);
+-            // FIXME make the memset actually volatile when switching to emit_small_memset
+-            // FIXME use emit_small_memset
+-            fx.bcx.call_memset(fx.target_config, dst_ptr, val, count);
++            let known_bytes = memory::const_usize(fx, count_operand)
++                .and_then(|count| count.checked_mul(pointee_size));
++
++            memory::codegen_memory_set(
++                fx,
++                dst_ptr,
++                val,
++                count,
++                known_bytes,
++                pointee_layout.align.abi.bytes(),
++                intrinsic == sym::volatile_set_memory,
++            );
+         }
+         sym::ctlz | sym::ctlz_nonzero => {
+             intrinsic_args!(fx, args => (arg); intrinsic);
+--- a/src/base.rs
++++ b/src/base.rs
+@@ -879,11 +879,19 @@
+                     if operand.layout().size.bytes() == 0 {
+                         // Do nothing for ZST's
+                     } else if fx.clif_type(operand.layout().ty) == Some(types::I8) {
+-                        let times = fx.bcx.ins().iconst(fx.pointer_type, times as i64);
+-                        // FIXME use emit_small_memset where possible
++                        let times_value =
++                            fx.bcx.ins().iconst(fx.pointer_type, times as i64);
+                         let addr = lval.to_ptr().get_addr(fx);
+                         let val = operand.load_scalar(fx);
+-                        fx.bcx.call_memset(fx.target_config, addr, val, times);
++                        crate::intrinsics::memory::codegen_memory_set(
++                            fx,
++                            addr,
++                            val,
++                            times_value,
++                            Some(times),
++                            operand.layout().align.abi.bytes(),
++                            false,
++                        );
+                     } else {
+                         let loop_block = fx.bcx.create_block();
+                         let loop_block2 = fx.bcx.create_block();
+@@ -985,18 +993,23 @@
+                     .layout_of(fx.typing_env().as_query_input(pointee))
+                     .expect("expected pointee to have a layout");
+                 let elem_size: u64 = pointee_layout.layout.size().bytes();
++                let align = pointee_layout.layout.align().abi.bytes();
+ 
+                 let dst = dst.load_scalar(fx);
+                 let src = codegen_operand(fx, src).load_scalar(fx);
+-                let count = codegen_operand(fx, count).load_scalar(fx);
++                let count_value = codegen_operand(fx, count).load_scalar(fx);
+ 
+                 let bytes = if elem_size != 1 {
+-                    fx.bcx.ins().imul_imm_u(count, elem_size as i64)
++                    fx.bcx.ins().imul_imm_u(count_value, elem_size as i64)
+                 } else {
+-                    count
++                    count_value
+                 };
++                let known_bytes = crate::intrinsics::memory::const_usize(fx, count)
++                    .and_then(|count| count.checked_mul(elem_size));
+ 
+-                fx.bcx.call_memcpy(fx.target_config, dst, src, bytes);
++                crate::intrinsics::memory::codegen_memory_copy(
++                    fx, dst, src, bytes, known_bytes, align, true, false,
++                );
+             }
+         },
+     }
+--- a/src/wasm.rs
++++ b/src/wasm.rs
+@@ -43,6 +43,30 @@
+     features
+ }
+ 
++/// Whether the target has the bulk-memory proposal, and so `memory.copy` and
++/// `memory.fill` are available.
++///
++/// LLVM's wasm "generic" CPU, the default for `wasm32-unknown-unknown`,
++/// enables it, and the `target_features` section of every object we write
++/// declares it. Only an explicit `-bulk-memory` turns it off, so follow LLVM
++/// rather than requiring `+bulk-memory` in the target spec (which is empty).
++pub(crate) fn bulk_memory(sess: &Session) -> bool {
++    if !is_wasm(sess) {
++        return false;
++    }
++    let mut enabled = true;
++    for list in [&*sess.target.options.features, &sess.opts.cg.target_feature] {
++        for feature in list.split(',') {
++            match feature {
++                "+bulk-memory" => enabled = true,
++                "-bulk-memory" => enabled = false,
++                _ => {}
++            }
++        }
++    }
++    enabled
++}
++
+ /// Whether the program has threads (shared memory and TLS).
+ pub(crate) fn threads(sess: &Session) -> bool {
+     target_features(sess).iter().any(|f| f == "atomics")
+diff --git a/src/intrinsics/memory.rs b/src/intrinsics/memory.rs
+new file mode 100644
+--- /dev/null
++++ b/src/intrinsics/memory.rs
+@@ -0,0 +1,203 @@
++//! `memcpy`, `memmove` and `memset` lowering.
++//!
++//! A constant, small length becomes straight-line loads and stores, as LLVM
++//! lowers it. A larger or variable length becomes the wasm bulk-memory
++//! instruction when the target has it, and a libc call otherwise.
++
++use clif_to_wasm::WasmIntrinsic;
++use cranelift_codegen::ir::{ExtFuncData, ExternalName};
++
++use crate::prelude::*;
++
++/// Copies of at most this many bytes are inlined. Eight 8-byte accesses are
++/// already more instructions than the engines' inlined `memory.copy`, and this
++/// covers the 8-byte swaps and short `[u8; N]` initialisations in core.
++const MAX_INLINE_BYTES: u64 = 64;
++
++/// Copy `byte_amount` bytes from `src` to `dst`.
++///
++/// `known_bytes` is the value of `byte_amount` when it is a compile-time
++/// constant. `align` is the alignment both pointers are guaranteed to have.
++/// With `non_overlapping` false the ranges may overlap; all source words are
++/// read before any destination word is written, which is memmove semantics.
++/// Volatile operations are never specialised.
++pub(crate) fn codegen_memory_copy(
++    fx: &mut FunctionCx<'_, '_, '_>,
++    dst: Value,
++    src: Value,
++    byte_amount: Value,
++    known_bytes: Option<u64>,
++    align: u64,
++    non_overlapping: bool,
++    volatile: bool,
++) {
++    if !volatile {
++        if let Some(bytes) = known_bytes {
++            if bytes == 0 {
++                return;
++            }
++            if bytes <= MAX_INLINE_BYTES {
++                emit_inline_copy(fx, dst, src, bytes, align);
++                return;
++            }
++        }
++        if bulk_memory_available(fx) {
++            call_wasm_memory_intrinsic(fx, WasmIntrinsic::MemoryCopy, &[dst, src, byte_amount]);
++            return;
++        }
++    }
++    if non_overlapping {
++        fx.bcx.call_memcpy(fx.target_config, dst, src, byte_amount);
++    } else {
++        fx.bcx.call_memmove(fx.target_config, dst, src, byte_amount);
++    }
++}
++
++/// Write `byte_amount` bytes of the low byte of `value` at `dst`.
++pub(crate) fn codegen_memory_set(
++    fx: &mut FunctionCx<'_, '_, '_>,
++    dst: Value,
++    value: Value,
++    byte_amount: Value,
++    known_bytes: Option<u64>,
++    align: u64,
++    volatile: bool,
++) {
++    if !volatile {
++        if let Some(bytes) = known_bytes {
++            if bytes == 0 {
++                return;
++            }
++            if bytes <= MAX_INLINE_BYTES {
++                emit_inline_fill(fx, dst, value, bytes, align);
++                return;
++            }
++        }
++        if bulk_memory_available(fx) {
++            // `memory.fill` takes an i32 byte value; the intrinsic's argument
++            // is an i8.
++            let value = if fx.bcx.func.dfg.value_type(value) == types::I32 {
++                value
++            } else {
++                fx.bcx.ins().uextend(types::I32, value)
++            };
++            call_wasm_memory_intrinsic(fx, WasmIntrinsic::MemoryFill, &[dst, value, byte_amount]);
++            return;
++        }
++    }
++    fx.bcx.call_memset(fx.target_config, dst, value, byte_amount);
++}
++
++/// The compile-time value of a MIR integer operand, if it has one.
++pub(crate) fn const_usize<'tcx>(
++    fx: &FunctionCx<'_, '_, 'tcx>,
++    operand: &mir::Operand<'tcx>,
++) -> Option<u64> {
++    let value = crate::constant::mir_operand_get_const_val(fx, operand)?;
++    u64::try_from(value.to_uint(value.size())).ok()
++}
++
++fn bulk_memory_available(fx: &FunctionCx<'_, '_, '_>) -> bool {
++    // The reserved helper calls only describe a 32-bit memory (like
++    // memory.grow/size); wasm64 keeps the libc call.
++    fx.pointer_type == types::I32 && crate::wasm::bulk_memory(fx.tcx.sess)
++}
++
++/// Emit a call to one of clif-to-wasm's reserved wasm instruction names.
++fn call_wasm_memory_intrinsic(
++    fx: &mut FunctionCx<'_, '_, '_>,
++    intrinsic: WasmIntrinsic,
++    args: &[Value],
++) {
++    let params = match intrinsic {
++        WasmIntrinsic::MemoryCopy | WasmIntrinsic::MemoryFill => {
++            vec![AbiParam::new(types::I32); 3]
++        }
++        _ => bug!("unexpected wasm memory intrinsic {intrinsic:?}"),
++    };
++    let sig = fx.bcx.func.import_signature(Signature {
++        call_conv: fx.target_config.default_call_conv,
++        params,
++        returns: vec![],
++    });
++    let func = fx.bcx.func.import_function(ExtFuncData {
++        name: ExternalName::testcase(intrinsic.symbol_name()),
++        signature: sig,
++        colocated: false,
++        patchable: false,
++    });
++    if fx.clif_comments.enabled() {
++        fx.add_comment(func, intrinsic.symbol_name().to_string());
++    }
++    fx.bcx.ins().call(func, args);
++}
++
++/// The widest access width (at most 8 bytes) that divides `bytes`.
++fn access_width(bytes: u64) -> u64 {
++    debug_assert!(bytes != 0);
++    1 << bytes.trailing_zeros().min(3)
++}
++
++fn access_type(width: u64) -> Type {
++    match width {
++        1 => types::I8,
++        2 => types::I16,
++        4 => types::I32,
++        8 => types::I64,
++        _ => unreachable!(),
++    }
++}
++
++/// Aligned only for the width the pointee's alignment actually guarantees.
++fn access_flags(width: u64, align: u64) -> MemFlagsData {
++    let mut flags = MemFlagsData::new();
++    if width <= align {
++        flags.set_aligned();
++    }
++    flags
++}
++
++fn emit_inline_copy(
++    fx: &mut FunctionCx<'_, '_, '_>,
++    dst: Value,
++    src: Value,
++    bytes: u64,
++    align: u64,
++) {
++    let width = access_width(bytes);
++    let ty = access_type(width);
++    let flags = access_flags(width, align);
++    // Load every source word before writing any destination word, so an
++    // overlapping range gets memmove semantics.
++    let values: Vec<Value> = (0..bytes / width)
++        .map(|i| fx.bcx.ins().load(ty, flags, src, (i * width) as i32))
++        .collect();
++    for (i, value) in values.into_iter().enumerate() {
++        fx.bcx.ins().store(flags, value, dst, (i as u64 * width) as i32);
++    }
++}
++
++fn emit_inline_fill(
++    fx: &mut FunctionCx<'_, '_, '_>,
++    dst: Value,
++    value: Value,
++    bytes: u64,
++    align: u64,
++) {
++    let width = access_width(bytes);
++    let ty = access_type(width);
++    let flags = access_flags(width, align);
++    // `memset` writes the low 8 bits of its `c_int` argument; replicate that
++    // byte to the access width.
++    let byte = fx.bcx.ins().band_imm_u(value, 0xff);
++    let fill = if width == 1 {
++        byte
++    } else {
++        let widened = fx.bcx.ins().uextend(ty, byte);
++        let factor = 0x0101_0101_0101_0101u64 >> (64 - width * 8);
++        fx.bcx.ins().imul_imm_u(widened, factor as i64)
++    };
++    for i in 0..bytes / width {
++        fx.bcx.ins().store(flags, fill, dst, (i * width) as i32);
++    }
++}
