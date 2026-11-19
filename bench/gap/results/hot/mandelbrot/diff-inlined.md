@@ -2,7 +2,7 @@
 
 LLVM -O2 inlined the whole program into `run`; this is the hot function that survives as a separate body in our module.
 
-## Ours (611,269,332 instructions, 100.0%)
+## Ours (611,269,324 instructions, 100.0%)
 
 ```wat
 (func $_RNvCsgUqo56RTmP6_10mandelbrot4body (;3;) (type 3) (param i64) (result i64)
@@ -13,8 +13,6 @@ LLVM -O2 inlined the whole program into `run`; this is the hot function that sur
     local.tee 18
     global.set $__stack_pointer
     local.get 18
-    i32.const 0
-    i32.add
     local.set 1
     i32.const 0
     local.set 2

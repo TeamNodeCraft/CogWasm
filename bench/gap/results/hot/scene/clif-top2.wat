@@ -17,8 +17,6 @@
       i32.load offset=4 align=1
       local.set 4
       local.get 62
-      i32.const 0
-      i32.add
       local.tee 6
       local.get 5
       i32.store align=1
@@ -307,8 +305,6 @@
             local.get 32
             i32.add
             i32.load8_u
-            i32.const 255
-            i32.and
             local.set 34
             local.get 1
             i32.load offset=4 align=1
@@ -596,8 +592,6 @@
                           local.get 59
                           i32.add
                           i32.load8_u
-                          i32.const 255
-                          i32.and
                           if ;; label = @12
                             br 1 (;@11;)
                           else

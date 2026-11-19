@@ -519,6 +519,15 @@ def main() -> int:
                 continue
             ours = hot_dir / f"clif-top{row['rank']}.wat"
             theirs = hot_dir / f"llvm_o2-top{counterpart['rank']}.wat"
+            if not theirs.exists():
+                # The counterpart can rank below the three hot functions
+                # written for each build; extract its body on demand.
+                wat_for(
+                    args.modules / "llvm_o2" / f"{name}.wasm",
+                    counterpart["name"],
+                    theirs,
+                    tool,
+                )
             (hot_dir / f"diff-top{row['rank']}.md").write_text(
                 f"# {row['demangled']}\n\n"
                 f"- ours: {row['instructions']:,} executed instructions "

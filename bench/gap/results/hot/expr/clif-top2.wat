@@ -42,8 +42,6 @@
             local.get 4
             i32.add
             i32.load8_u
-            i32.const 255
-            i32.and
             local.tee 6
             i32.const 32
             i32.eq
@@ -132,8 +130,6 @@
               i32.store align=1
               local.get 6
               i32.load8_u
-              i32.const 255
-              i32.and
               local.tee 6
               i32.const 47
               i32.ge_u
@@ -506,8 +502,6 @@
         return
       else
         local.get 9
-        i32.const 0
-        i32.add
         local.tee 5
         i32.const 12
         i32.store align=1

@@ -1,6 +1,6 @@
 # generated_stress::combine::<generated_stress::S0>
 
-- ours: 29,696 executed instructions (4.3% of the program)
+- ours: 29,696 executed instructions (4.4% of the program)
 - LLVM -O2: 19,968 executed instructions (5.7%)
 
 ## Ours

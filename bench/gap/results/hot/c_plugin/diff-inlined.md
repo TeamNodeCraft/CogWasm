@@ -2,7 +2,7 @@
 
 LLVM -O2 inlined the whole program into `run`; this is the hot function that survives as a separate body in our module.
 
-## Ours (2,072 instructions, 42.8%)
+## Ours (2,064 instructions, 50.0%)
 
 ```wat
 (func $_RNvCskuAql209qb2_8c_plugin4eval (;7;) (type 6) (param i32 i32) (result f64)
@@ -13,8 +13,6 @@ LLVM -O2 inlined the whole program into `run`; this is the hot function that sur
     local.tee 15
     global.set $__stack_pointer
     local.get 15
-    i32.const 0
-    i32.add
     local.tee 2
     local.get 0
     i32.store align=1

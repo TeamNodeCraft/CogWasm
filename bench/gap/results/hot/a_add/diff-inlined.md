@@ -2,7 +2,7 @@
 
 LLVM -O2 inlined the whole program into `run`; this is the hot function that survives as a separate body in our module.
 
-## Ours (488 instructions, 40.1%)
+## Ours (480 instructions, 59.7%)
 
 ```wat
 (func $_RNvCs1lxurIFlWxT_5a_add10emit_bytes (;1;) (type 1) (param i32 i32)
@@ -13,8 +13,6 @@ LLVM -O2 inlined the whole program into `run`; this is the hot function that sur
     local.tee 8
     global.set $__stack_pointer
     local.get 8
-    i32.const 0
-    i32.add
     local.tee 2
     local.get 0
     i32.store align=1

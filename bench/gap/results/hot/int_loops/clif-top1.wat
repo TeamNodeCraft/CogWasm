@@ -77,8 +77,6 @@
     i32.add
     local.set 2
     local.get 14
-    i32.const 0
-    i32.add
     local.set 3
     local.get 14
     i32.const 48

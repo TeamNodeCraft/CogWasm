@@ -164,8 +164,6 @@
         end
       else
         local.get 9
-        i32.const 0
-        i32.add
         local.tee 3
         local.get 4
         f64.store align=1

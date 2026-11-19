@@ -2,7 +2,7 @@
 
 LLVM -O2 inlined the whole program into `run`; this is the hot function that survives as a separate body in our module.
 
-## Ours (10,880,380 instructions, 100.0%)
+## Ours (10,880,372 instructions, 100.0%)
 
 ```wat
 (func $_RNvCskgam9jYqc1y_10hostcall_f4body (;8;) (type 3) (param i64) (result i64)
@@ -171,8 +171,6 @@ LLVM -O2 inlined the whole program into `run`; this is the hot function that sur
         end
       else
         local.get 9
-        i32.const 0
-        i32.add
         local.tee 3
         local.get 4
         f64.store align=1

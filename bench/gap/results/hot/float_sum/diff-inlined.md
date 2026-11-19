@@ -2,7 +2,7 @@
 
 LLVM -O2 inlined the whole program into `run`; this is the hot function that survives as a separate body in our module.
 
-## Ours (95,556 instructions, 38.0%)
+## Ours (95,548 instructions, 39.3%)
 
 ```wat
 (func $_RNvCs6DQIhS9wjfV_9float_sum4body (;5;) (type 5) (param i64) (result i64)
@@ -86,8 +86,6 @@ LLVM -O2 inlined the whole program into `run`; this is the hot function that sur
         local.get 3
         i32.store align=1
         local.get 22
-        i32.const 0
-        i32.add
         local.tee 2
         local.get 1
         i32.load align=1

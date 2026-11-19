@@ -1,150 +1,146 @@
-(func $_RNvNtNtCs1xoxxhqgeCT_17compiler_builtins3mem5impls12copy_forward (;125;) (type 6) (param i32 i32 i32)
-    (local i32 i32 i32)
-    block ;; label = @1
+(func $_RNvCsknsHYGPguHZ_4sort9sift_down (;50;) (type 3) (param i32 i32 i32 i32)
+    (local i32 i32 i32 i64 i32)
+    i32.const 1067144
+    local.set 4
+    loop ;; label = @1
       local.get 2
-      i32.const 16
+      local.get 2
+      i32.add
+      local.tee 5
+      i32.const 1
+      i32.add
+      local.tee 6
+      local.get 3
       i32.ge_u
       if ;; label = @2
-        local.get 0
-        i32.const -1
-        i32.mul
-        local.tee 3
-        i32.const 3
-        i32.and
-        local.set 4
-        local.get 0
-        local.get 4
-        i32.add
-        local.set 5
-        local.get 2
-        local.get 4
-        i32.sub
-        local.set 4
-        local.get 1
-        local.set 2
-        loop ;; label = @3
-          local.get 0
+        return
+      else
+        block ;; label = @3
           local.get 5
+          i32.const 2
+          i32.add
+          local.tee 5
+          local.get 3
           i32.lt_u
           if ;; label = @4
-            local.get 0
-            local.get 2
-            i32.load8_u
-            i32.const 255
-            i32.and
-            i32.store8
-            local.get 0
-            i32.const 1
-            i32.add
-            local.get 2
-            i32.const 1
-            i32.add
-            local.set 2
-            local.set 0
-            br 1 (;@3;)
-          else
-            block ;; label = @5
-              local.get 1
-              local.get 3
+            local.get 6
+            local.get 1
+            i32.lt_u
+            if ;; label = @5
+              local.get 0
+              local.get 6
               i32.const 3
-              i32.and
+              i32.shl
               i32.add
-              local.tee 3
-              i32.const 3
-              i32.and
+              i64.load align=1
+              local.set 7
+              local.get 5
+              local.get 1
+              i32.lt_u
               if ;; label = @6
-                call $_RNvNtNtNtCs1xoxxhqgeCT_17compiler_builtins4math9libm_math7support9cold_path
+                local.get 7
+                local.get 0
                 local.get 5
-                local.get 3
-                local.get 4
-                i32.const -4
-                i32.and
-                call $_RNvNvNtNtCs1xoxxhqgeCT_17compiler_builtins3mem5impls12copy_forward29copy_forward_misaligned_words
-                br 1 (;@5;)
+                i32.const 3
+                i32.shl
+                i32.add
+                i64.load align=1
+                i64.lt_u
+                if ;; label = @7
+                  local.get 5
+                  local.set 6
+                  br 4 (;@3;)
+                else
+                  br 4 (;@3;)
+                end
               else
                 local.get 5
-                local.get 4
-                i32.const -4
-                i32.and
-                i32.add
-                local.set 2
-                local.get 5
-                local.get 3
-                local.set 0
-                local.set 1
-                loop ;; label = @7
-                  local.get 1
-                  local.get 2
-                  i32.lt_u
-                  if ;; label = @8
-                    local.get 1
-                    local.get 0
-                    i32.load align=1
-                    i32.store align=1
-                    local.get 1
-                    i32.const 4
-                    i32.add
-                    local.get 0
-                    i32.const 4
-                    i32.add
-                    local.set 0
-                    local.set 1
-                    br 1 (;@7;)
-                  else
-                    br 3 (;@5;)
-                  end
-                end
+                local.get 1
+                i32.const 1067328
+                call $_RNvNtCsk7Mwp4gGzxp_4core9panicking18panic_bounds_check
+                unreachable
               end
+            else
+              local.get 6
+              local.get 1
+              i32.const 1067344
+              call $_RNvNtCsk7Mwp4gGzxp_4core9panicking18panic_bounds_check
+              unreachable
             end
-            local.get 4
-            i32.const -4
-            i32.and
-            local.set 2
-            local.get 5
-            local.get 2
-            i32.add
-            local.get 4
-            local.get 2
-            i32.sub
-            local.get 3
-            local.get 2
-            i32.add
-            local.set 1
-            local.set 2
-            local.set 0
-            br 3 (;@1;)
+          else
+            br 1 (;@3;)
           end
         end
-      else
-        br 1 (;@1;)
-      end
-    end
-    local.get 0
-    local.get 2
-    i32.add
-    local.set 5
-    loop ;; label = @1
-      local.get 0
-      local.get 5
-      i32.lt_u
-      if ;; label = @2
-        local.get 0
+        local.get 2
         local.get 1
-        i32.load8_u
-        i32.const 255
-        i32.and
-        i32.store8
-        local.get 0
-        i32.const 1
-        i32.add
-        local.get 1
-        i32.const 1
-        i32.add
-        local.set 1
-        local.set 0
-        br 1 (;@1;)
-      else
-        return
+        i32.lt_u
+        local.tee 5
+        if ;; label = @3
+          local.get 0
+          local.get 2
+          i32.const 3
+          i32.shl
+          i32.add
+          i64.load align=1
+          local.set 7
+          local.get 6
+          local.get 1
+          i32.lt_u
+          local.tee 8
+          if ;; label = @4
+            local.get 7
+            local.get 0
+            local.get 6
+            i32.const 3
+            i32.shl
+            i32.add
+            i64.load align=1
+            i64.ge_u
+            if ;; label = @5
+              return
+            else
+              local.get 5
+              if ;; label = @6
+                local.get 8
+                if ;; label = @7
+                  local.get 0
+                  local.get 1
+                  local.get 2
+                  local.get 6
+                  local.get 4
+                  call $_RNvMNtCsk7Mwp4gGzxp_4core5sliceSy14swap_uncheckedCsknsHYGPguHZ_4sort
+                  local.get 6
+                  local.set 2
+                  br 6 (;@1;)
+                else
+                  local.get 6
+                  local.get 1
+                  i32.const 1067264
+                  call $_RNvNtCsk7Mwp4gGzxp_4core9panicking18panic_bounds_check
+                  unreachable
+                end
+              else
+                local.get 2
+                local.get 1
+                i32.const 1067280
+                call $_RNvNtCsk7Mwp4gGzxp_4core9panicking18panic_bounds_check
+                unreachable
+              end
+            end
+          else
+            local.get 6
+            local.get 1
+            i32.const 1067296
+            call $_RNvNtCsk7Mwp4gGzxp_4core9panicking18panic_bounds_check
+            unreachable
+          end
+        else
+          local.get 2
+          local.get 1
+          i32.const 1067312
+          call $_RNvNtCsk7Mwp4gGzxp_4core9panicking18panic_bounds_check
+          unreachable
+        end
       end
     end
     unreachable

@@ -38,8 +38,6 @@
       local.get 1
       i32.store align=1
       local.get 4
-      i32.const 0
-      i32.add
       i32.const 1
       i32.store align=1
       local.get 3
@@ -58,8 +56,6 @@
       return
     else
       local.get 4
-      i32.const 0
-      i32.add
       i32.const 0
       i32.store align=1
       local.get 4

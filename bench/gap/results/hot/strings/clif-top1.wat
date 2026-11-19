@@ -71,8 +71,6 @@
       i32.load offset=4 align=1
       local.set 4
       local.get 8
-      i32.const 0
-      i32.add
       local.tee 5
       local.get 7
       i32.store align=1
@@ -138,8 +136,6 @@
     i32.add
     i32.store offset=8 align=1
     local.get 8
-    i32.const 0
-    i32.add
     local.tee 7
     local.get 5
     i32.store align=1

@@ -6,8 +6,6 @@
     local.tee 8
     global.set $__stack_pointer
     local.get 8
-    i32.const 0
-    i32.add
     local.tee 3
     local.get 0
     i32.store align=1

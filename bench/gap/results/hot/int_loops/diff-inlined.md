@@ -2,7 +2,7 @@
 
 LLVM -O2 inlined the whole program into `run`; this is the hot function that survives as a separate body in our module.
 
-## Ours (181,175 instructions, 73.1%)
+## Ours (181,167 instructions, 84.7%)
 
 ```wat
 (func $_RNvCsgBEE3CyPQPa_9int_loops4body (;3;) (type 3) (param i64) (result i64)
@@ -84,8 +84,6 @@ LLVM -O2 inlined the whole program into `run`; this is the hot function that sur
     i32.add
     local.set 2
     local.get 14
-    i32.const 0
-    i32.add
     local.set 3
     local.get 14
     i32.const 48

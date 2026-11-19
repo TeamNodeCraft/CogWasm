@@ -79,8 +79,6 @@
         local.get 3
         i32.store align=1
         local.get 32
-        i32.const 0
-        i32.add
         local.tee 5
         local.get 4
         i32.load align=1

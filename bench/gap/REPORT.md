@@ -147,6 +147,8 @@ The report calls this out wherever it matters.
 
 Geometric mean over the ten programs above 0.1 ms: **3.53×** ours/O2
 (the suite's headline 3.5×), reproduced from an independent instruction count.
+This table is the pre-batch baseline at `92f976a`; the after-batch-1 table is
+below.
 
 | program | exec ours (ms) | LLVM O2 (ms) | ours/O2 | ours/O0 | instr ratio | extra instr | dominant cause |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
@@ -165,6 +167,55 @@ Geometric mean over the ten programs above 0.1 ms: **3.53×** ours/O2
 sort and strings are at 1.07–1.09× O0, but sha256 is 2.57× *slower* than O0 —
 its gap is not just missing LLVM-level optimisation, it is a pathological
 software copy in a hot loop (below).
+
+## After batch 1
+
+Batch 1 (19 Nov 2026, final commit `b3d59d0`) fixed the ranked items 1, 5 and
+6: constant aggregates addressed in place (sha256's K table), small constant
+`memcpy`/`memmove`/`memset` inlined or lowered to wasm bulk-memory, all-zero
+data segments omitted by Wild, and constant addresses folded where safe. The
+ten focus programs, measured with `bench/run.sh --full` (5 runs) on the same
+machine against LLVM `-O2`:
+
+| program | before ours/O2 | after ours/O2 | after instr ratio | after exec (ms) |
+| --- | ---: | ---: | ---: | ---: |
+| mandelbrot | 1.06× | 1.08× | 1.44× | 7.095 |
+| nbody | 5.07× | 5.10× | 3.45× | 70.243 |
+| sha256 | 12.33× | **1.50×** | 1.66× | 0.355 |
+| sort | 12.22× | **3.51×** | 2.13× | 3.401 |
+| matmul | 1.56× | 1.57× | 1.10× | 1.864 |
+| strings | 9.20× | 8.50× | 4.84× | 1.388 |
+| math_e | 2.71× | 2.73× | 2.21× | 6.851 |
+| hostcall_f | 1.00× | 0.98× | 1.55× | 0.502 |
+| libm_driver | 3.25× | 3.20× | 2.46× | 2.734 |
+| miniz_driver | 2.91× | 2.82× | 2.30× | 1.449 |
+| **geomean** | **3.53×** | **2.49×** | | |
+
+The instruction ratios are from the final full gap run
+([`results/analysis.json`](results/analysis.json), history
+[`bench/history/2026-11-19-darwin-arm64-b3d59d0.json`](../history/2026-11-19-darwin-arm64-b3d59d0.json)).
+Per fix:
+
+- **Constant aggregate in place (F1a).** sha256 363.02M → 71.48M executed
+  instructions (8.57× → 1.69×) immediately after the fix; the final 1.66×
+  includes the later memory-intrinsic and address folds. `copy_forward` is no
+  longer executed.
+- **Small constant memory intrinsics (F1b).** sort 1.26G → 327.35M executed
+  instructions (8.39× → 2.17×) immediately after the fix; final 2.13×. Its
+  hot functions use i64 loads/stores and `memory.copy` for the runtime tail.
+- **Zero data in Wild (F2).** a_add 34,622 → 18,163 bytes (data 18,417 →
+  1,659), sha256 50,057 → 33,347 bytes; median total size over the suite
+  63.7 KB → 46.5 KB. No execution change.
+- **Address/constant folding (F3).** strings 111.16M → 107.24M and
+  miniz_driver 216.36M → 216.10M executed instructions, nbody and mandelbrot
+  −616 each; no program regressed. The suite geomean is unchanged at 2.49×,
+  so this is an instruction-count win, not a headline speed win.
+
+Compile time stayed flat: the suite median warm compile is 102.0 ms against
+104.9 ms before. `compare.py` flagged strings warm compile at +7.4%, but a
+7-run rerun gave 112.2 ms against the 113.1 ms baseline, so that was
+run-to-run noise. Correctness: the 72-program differential test and all 21
+suite programs are bit-for-bit green.
 
 ## Per-program attribution
 

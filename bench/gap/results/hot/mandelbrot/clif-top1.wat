@@ -6,8 +6,6 @@
     local.tee 18
     global.set $__stack_pointer
     local.get 18
-    i32.const 0
-    i32.add
     local.set 1
     i32.const 0
     local.set 2
