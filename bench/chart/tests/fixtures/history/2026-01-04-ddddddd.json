@@ -1,0 +1,180 @@
+{
+  "schema": 1,
+  "kind": "quick",
+  "generated_at": "2026-01-04T10:00:00Z",
+  "machine": {
+    "kind": "test-linux-x86_64",
+    "os": "Linux",
+    "arch": "x86_64",
+    "cores": 4
+  },
+  "commit": {
+    "sha": "dddddddddddddddddddddddddddddddddddddddd",
+    "subject": "speed up the shared frontend"
+  },
+  "ci_point": {
+    "schema": 1,
+    "sha": "dddddddddddddddddddddddddddddddddddddddd",
+    "subject": "speed up the shared frontend",
+    "date": "2026-01-04T10:00:00Z",
+    "run_id": "1004",
+    "workflow": "cranelift_wasm",
+    "runner": "test-linux-x86_64",
+    "repo": "TeamNodeCraft/CogWasm"
+  },
+  "settings": {
+    "runs": 3,
+    "llvm_runs": 2,
+    "programs": [
+      "a_add",
+      "b_alloc",
+      "sha256"
+    ],
+    "load": "cached"
+  },
+  "startup": {
+    "cached": {
+      "module_load": {
+        "median_ms": 900.0,
+        "runs": 1
+      },
+      "instantiate": {
+        "median_ms": 5.0,
+        "runs": 1
+      },
+      "source": "wasm"
+    },
+    "cold": {
+      "module_load": {
+        "median_ms": 100000.0,
+        "runs": 1
+      },
+      "instantiate": {
+        "median_ms": 5.0,
+        "runs": 1
+      },
+      "source": "wasm"
+    }
+  },
+  "programs": {
+    "a_add": {
+      "name": "a_add",
+      "class": "small",
+      "correct": true,
+      "clif": {
+        "compile_warm": {
+          "median": 70,
+          "min": 70,
+          "max": 70,
+          "runs": 3
+        }
+      },
+      "llvm": {},
+      "exec": {
+        "clif": {
+          "exec_ms": {
+            "median": 0.3,
+            "min": 0.3,
+            "max": 0.3,
+            "runs": 3
+          }
+        },
+        "llvm_o2": {
+          "exec_ms": {
+            "median": 0.2,
+            "min": 0.2,
+            "max": 0.2,
+            "runs": 2
+          }
+        }
+      },
+      "size": {
+        "clif": {
+          "total_bytes": 1000
+        },
+        "llvm_o2": {
+          "total_bytes": 500
+        }
+      }
+    },
+    "b_alloc": {
+      "name": "b_alloc",
+      "class": "small",
+      "correct": true,
+      "clif": {
+        "compile_warm": {
+          "median": 90,
+          "min": 90,
+          "max": 90,
+          "runs": 3
+        }
+      },
+      "llvm": {},
+      "exec": {
+        "clif": {
+          "exec_ms": {
+            "median": 0.3,
+            "min": 0.3,
+            "max": 0.3,
+            "runs": 3
+          }
+        },
+        "llvm_o2": {
+          "exec_ms": {
+            "median": 0.2,
+            "min": 0.2,
+            "max": 0.2,
+            "runs": 2
+          }
+        }
+      },
+      "size": {
+        "clif": {
+          "total_bytes": 2000
+        },
+        "llvm_o2": {
+          "total_bytes": 1000
+        }
+      }
+    },
+    "sha256": {
+      "name": "sha256",
+      "class": "small",
+      "correct": true,
+      "clif": {
+        "compile_warm": {
+          "median": 220,
+          "min": 220,
+          "max": 220,
+          "runs": 3
+        }
+      },
+      "llvm": {},
+      "exec": {
+        "clif": {
+          "exec_ms": {
+            "median": 3.0,
+            "min": 3.0,
+            "max": 3.0,
+            "runs": 3
+          }
+        },
+        "llvm_o2": {
+          "exec_ms": {
+            "median": 2.0,
+            "min": 2.0,
+            "max": 2.0,
+            "runs": 2
+          }
+        }
+      },
+      "size": {
+        "clif": {},
+        "llvm_o2": {
+          "total_bytes": 1000
+        }
+      }
+    }
+  },
+  "ok": true
+}

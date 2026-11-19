@@ -144,7 +144,8 @@ need "$HOST_BIN"
 WORK="$BENCH/work"
 mkdir -p "$WORK"
 PRECOMPILED=
-if [ "$PREPARE_PRECOMPILED" = 1 ] && [ "$MODE" = full ]; then
+STARTUP_PRECOMPILED=
+if [ "$PREPARE_PRECOMPILED" = 1 ]; then
     PRECOMPILE="$HOST_TARGET/release/stage-c-precompile"
     if [ -x "$PRECOMPILE" ]; then
         if [ ! -f "$WORK/rustc.cwasm" ] || [ "$RUSTC_WASM" -nt "$WORK/rustc.cwasm" ]; then
@@ -152,7 +153,14 @@ if [ "$PREPARE_PRECOMPILED" = 1 ] && [ "$MODE" = full ]; then
             "$PRECOMPILE" precompile --wasm "$RUSTC_WASM" \
                 --out "$WORK/rustc.cwasm" --metadata "$WORK/rustc.cwasm.json" >&2
         fi
-        PRECOMPILED="$WORK/rustc.cwasm"
+        if [ "$MODE" = full ]; then
+            PRECOMPILED="$WORK/rustc.cwasm"
+        else
+            # Quick runs keep the program-compile path on the cached load (so
+            # old quick points stay comparable) but still measure the
+            # precompiled compiler load for the trend chart.
+            STARTUP_PRECOMPILED="$WORK/rustc.cwasm"
+        fi
     else
         printf 'note: stage-c-precompile is not built; measuring cached loads only\n' >&2
     fi
@@ -176,6 +184,9 @@ if [ -n "$OUT" ]; then
 fi
 if [ -n "$PRECOMPILED" ]; then
     ARGS+=(--precompiled "$PRECOMPILED")
+fi
+if [ -n "$STARTUP_PRECOMPILED" ]; then
+    ARGS+=(--startup-precompiled "$STARTUP_PRECOMPILED")
 fi
 if [ "$NO_INCREMENTAL" = 1 ]; then
     ARGS+=(--no-incremental)

@@ -1,0 +1,211 @@
+{
+  "schema": 1,
+  "kind": "quick",
+  "generated_at": "2026-01-02T10:00:00Z",
+  "machine": {
+    "kind": "test-linux-x86_64",
+    "os": "Linux",
+    "arch": "x86_64",
+    "cores": 4
+  },
+  "commit": {
+    "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "subject": "shrink the compiler startup"
+  },
+  "ci_point": {
+    "schema": 1,
+    "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "subject": "shrink the compiler startup",
+    "date": "2026-01-02T10:00:00Z",
+    "run_id": "1002",
+    "workflow": "cranelift_wasm",
+    "runner": "test-linux-x86_64",
+    "repo": "TeamNodeCraft/CogWasm"
+  },
+  "settings": {
+    "runs": 3,
+    "llvm_runs": 2,
+    "programs": [
+      "a_add",
+      "b_alloc",
+      "expr"
+    ],
+    "load": "cached"
+  },
+  "startup": {
+    "cached": {
+      "module_load": {
+        "median_ms": 900.0,
+        "runs": 1
+      },
+      "instantiate": {
+        "median_ms": 5.0,
+        "runs": 1
+      },
+      "source": "wasm"
+    },
+    "cold": {
+      "module_load": {
+        "median_ms": 100000.0,
+        "runs": 1
+      },
+      "instantiate": {
+        "median_ms": 5.0,
+        "runs": 1
+      },
+      "source": "wasm"
+    },
+    "precompiled": {
+      "module_load": {
+        "median_ms": 18.0,
+        "runs": 1
+      },
+      "instantiate": {
+        "median_ms": 5.0,
+        "runs": 1
+      },
+      "source": "precompiled"
+    }
+  },
+  "programs": {
+    "a_add": {
+      "name": "a_add",
+      "class": "small",
+      "correct": true,
+      "clif": {
+        "compile_warm": {
+          "median": 90,
+          "min": 90,
+          "max": 90,
+          "runs": 3
+        },
+        "compile_incremental": {
+          "median": 70,
+          "min": 70,
+          "max": 70,
+          "runs": 3
+        }
+      },
+      "llvm": {},
+      "exec": {
+        "clif": {
+          "exec_ms": {
+            "median": 0.3,
+            "min": 0.3,
+            "max": 0.3,
+            "runs": 3
+          }
+        },
+        "llvm_o2": {
+          "exec_ms": {
+            "median": 0.15,
+            "min": 0.15,
+            "max": 0.15,
+            "runs": 2
+          }
+        }
+      },
+      "size": {
+        "clif": {
+          "total_bytes": 1000
+        },
+        "llvm_o2": {
+          "total_bytes": 500
+        }
+      }
+    },
+    "b_alloc": {
+      "name": "b_alloc",
+      "class": "small",
+      "correct": true,
+      "clif": {
+        "compile_warm": {
+          "median": 110,
+          "min": 110,
+          "max": 110,
+          "runs": 3
+        },
+        "compile_incremental": {
+          "median": 80,
+          "min": 80,
+          "max": 80,
+          "runs": 3
+        }
+      },
+      "llvm": {},
+      "exec": {
+        "clif": {
+          "exec_ms": {
+            "median": 0.4,
+            "min": 0.4,
+            "max": 0.4,
+            "runs": 3
+          }
+        },
+        "llvm_o2": {
+          "exec_ms": {
+            "median": 0.2,
+            "min": 0.2,
+            "max": 0.2,
+            "runs": 2
+          }
+        }
+      },
+      "size": {
+        "clif": {
+          "total_bytes": 2000
+        },
+        "llvm_o2": {
+          "total_bytes": 1000
+        }
+      }
+    },
+    "expr": {
+      "name": "expr",
+      "class": "small",
+      "correct": true,
+      "clif": {
+        "compile_warm": {
+          "median": 180,
+          "min": 180,
+          "max": 180,
+          "runs": 3
+        },
+        "compile_incremental": {
+          "median": 130,
+          "min": 130,
+          "max": 130,
+          "runs": 3
+        }
+      },
+      "llvm": {},
+      "exec": {
+        "clif": {
+          "exec_ms": {
+            "median": 1.8,
+            "min": 1.8,
+            "max": 1.8,
+            "runs": 3
+          }
+        },
+        "llvm_o2": {
+          "exec_ms": {
+            "median": 0.9,
+            "min": 0.9,
+            "max": 0.9,
+            "runs": 2
+          }
+        }
+      },
+      "size": {
+        "clif": {
+          "total_bytes": 4000
+        },
+        "llvm_o2": {
+          "total_bytes": 1000
+        }
+      }
+    }
+  },
+  "ok": true
+}
