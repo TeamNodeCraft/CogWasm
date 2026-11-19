@@ -128,6 +128,65 @@ Committed points live in [`history/`](history/), one JSON per machine and
 commit. They are written locally or, for CI, only when the `bench.yml`
 `record_history` input is true.
 
+## Baseline: did the speed batch help?
+
+The suite was run on the same Apple M4 Pro (14 cores, 48 GB, macOS arm64) at
+`59eef93` (the commit before the speed batch) and at `92f976a`, with 5 runs per
+metric, the same seeds and the same machine. The baseline is a detached
+worktree built by its own pinned scripts; the comparison is
+[`history/2026-11-19-darwin-arm64-59eef93.json`](history/2026-11-19-darwin-arm64-59eef93.json)
+against
+[`history/2026-11-19-darwin-arm64-92f976a.json`](history/2026-11-19-darwin-arm64-92f976a.json).
+`59eef93` predates the precompiled and incremental work, so those two rows only
+exist on the current side.
+
+| compiler start | 59eef93 | current |
+| --- | ---: | ---: |
+| module compile, no cache | 38,604 ms | 38,345 ms (0.99×) |
+| Wasmtime cache load | 448.1 ms | 459.5 ms (1.03×) |
+| precompiled `.cwasm` load | — | **17.7 ms** |
+
+The speed batch is a clear compile-time win: the median program compiles in
+**104.9 ms instead of 120.2 ms (0.87×)**, and every measured program improved
+(0.83–0.98×, outside the run-to-run spread for 17 of them). The incremental
+path (new in this batch) brings the same programs to 69–141 ms, 7–47% below
+their own warm compile. Executing the compiled programs, the inliner shows up
+where it was aimed: A.2 maths (e) **8.55 → 6.83 ms (1.25×)** and the libm
+driver **3.33 → 2.76 ms (1.21×)**; the other kernels are within noise. Output
+is smaller too: median total size 65,748 → 63,737 B (0.97×), with `math_e`
+−6.6% and `libm_driver` −6.0% total and code size essentially unchanged. No
+metric regressed beyond its run-to-run spread.
+
+| program | warm compile (ms) | incremental (ms) | exec (ms) | total size (B) | code size (B) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| a_add | 90.8 → 75.2 (0.83×) | 69.1 | 0.0008 → 0.0007 (0.87×) | 35,180 → 34,622 (0.98×) | 12,089 → 12,059 (1.00×) |
+| b_alloc | 122.6 → 104.9 (0.86×) | 86.0 | 0.0149 → 0.0154 (1.04×) | 82,230 → 80,699 (0.98×) | 41,643 → 41,363 (0.99×) |
+| c_plugin | 97.0 → 80.5 (0.83×) | 74.0 | 0.0007 → 0.0008 (1.13×) | 36,853 → 36,295 (0.98×) | 13,205 → 13,175 (1.00×) |
+| smoke | 126.1 → 106.6 (0.85×) | 85.0 | 0.0106 → 0.0117 (1.11×) | 65,748 → 64,638 (0.98×) | 30,932 → 30,902 (1.00×) |
+| int_loops | 95.8 → 81.6 (0.85×) | 73.2 | 0.0031 → 0.0031 (1.00×) | 36,189 → 35,631 (0.98×) | 13,082 → 13,052 (1.00×) |
+| float_sum | 112.6 → 99.9 (0.89×) | 81.5 | 0.0049 → 0.0045 (0.92×) | 51,003 → 50,335 (0.99×) | 24,167 → 24,137 (1.00×) |
+| expr | 156.1 → 142.8 (0.91×) | 102.8 | 0.0411 → 0.0416 (1.01×) | 78,879 → 77,986 (0.99×) | 43,398 → 43,349 (1.00×) |
+| json | 197.8 → 175.0 (0.88×) | 121.8 | 0.0297 → 0.0283 (0.95×) | 113,637 → 111,556 (0.98×) | 63,229 → 62,980 (1.00×) |
+| collections | 281.6 → 264.9 (0.94×) | 141.2 | 0.0876 → 0.0880 (1.00×) | 249,521 → 243,982 (0.98×) | 146,684 → 146,029 (1.00×) |
+| scene | 160.0 → 148.5 (0.93×) | 108.1 | 0.0085 → 0.0080 (0.95×) | 86,100 → 85,375 (0.99×) | 47,751 → 47,721 (1.00×) |
+| nbody | 123.9 → 112.0 (0.90×) | 82.8 | 70.4032 → 70.5451 (1.00×) | 59,737 → 59,069 (0.99×) | 31,338 → 31,308 (1.00×) |
+| mandelbrot | 94.6 → 81.4 (0.86×) | 70.2 | 7.3370 → 7.0487 (0.96×) | 36,783 → 36,225 (0.98×) | 13,498 → 13,468 (1.00×) |
+| sha256 | 108.3 → 93.3 (0.86×) | 79.2 | 2.8287 → 2.7779 (0.98×) | 50,725 → 50,057 (0.99×) | 23,198 → 23,168 (1.00×) |
+| sort | 128.3 → 112.6 (0.88×) | 87.3 | 11.8387 → 11.8971 (1.00×) | 69,931 → 68,709 (0.98×) | 33,835 → 33,786 (1.00×) |
+| matmul | 108.9 → 93.4 (0.86×) | 77.1 | 1.7688 → 1.7860 (1.01×) | 49,750 → 49,082 (0.99×) | 22,878 → 22,848 (1.00×) |
+| strings | 127.3 → 113.1 (0.89×) | 91.1 | 1.6890 → 1.4975 (0.89×) | 70,519 → 69,576 (0.99×) | 36,075 → 36,045 (1.00×) |
+| math_e | 100.5 → 85.1 (0.85×) | 75.3 | 8.5498 → 6.8254 (0.80×) | 61,611 → 57,549 (0.93×) | 29,204 → 28,330 (0.97×) |
+| hostcall_f | 88.5 → 77.6 (0.88×) | 69.8 | 0.5264 → 0.5096 (0.97×) | 36,063 → 35,505 (0.98×) | 12,485 → 12,455 (1.00×) |
+| libm_driver | 96.4 → 85.3 (0.88×) | 76.5 | 3.3348 → 2.7643 (0.83×) | 67,802 → 63,737 (0.94×) | 34,975 → 34,101 (0.98×) |
+| miniz_driver | 120.2 → 105.9 (0.88×) | 92.8 | 1.4413 → 1.4521 (1.01×) | 257,061 → 253,510 (0.99×) | 159,551 → 159,063 (1.00×) |
+| generated_stress | 401.8 → 392.0 (0.98×) | — | 0.0644 → 0.0664 (1.03×) | 165,557 → 164,997 (1.00×) | 83,477 → 83,447 (1.00×) |
+
+The last line of defence is correctness: all 21 programs returned the same
+`run(seed)` values and output bytes in the baseline and current runs, and both
+LLVM builds. The numbers above are therefore not a speed-up from a wrong
+answer. Run-to-run spreads are in the JSON; `bench/compare.py` prints only the
+changes larger than that spread.
+
 ## CI
 
 * `.github/workflows/cranelift_wasm.yml` runs `bench/run.sh --quick` after the

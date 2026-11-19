@@ -1,0 +1,3933 @@
+{
+  "schema": 1,
+  "kind": "full",
+  "generated_at": "2026-11-19T09:00:44.941788+00:00",
+  "machine": {
+    "kind": "darwin-arm64-local",
+    "os": "Darwin 27.0.0",
+    "arch": "arm64",
+    "cpu": "Apple M4 Pro",
+    "cores": 14,
+    "ram_bytes": 51539607552
+  },
+  "commit": {
+    "sha": "92f976a9bfdb08711785ddb405eb83df5836579f",
+    "subject": "bench: keep execution and size on the normal build"
+  },
+  "pins": {
+    "rustc": "rustc 1.101.0-nightly (b6eeb93c9 2026-10-18)",
+    "nightly": "nightly-2026-10-19",
+    "wasmtime": "50.0.2",
+    "libm": "0.2.16",
+    "adler2": "2.0.1",
+    "miniz_oxide": "0.9.1",
+    "wild_sha256": "7de72cd152a09e17476dafa0d978b3ff3cc42840eeafab3438b46e14743c0f2a"
+  },
+  "settings": {
+    "runs": 5,
+    "llvm_runs": 5,
+    "phase_runs": 1,
+    "cold_runs": 5,
+    "seeds": [
+      0,
+      1,
+      42,
+      18446744073709551615
+    ],
+    "programs": [
+      "a_add",
+      "b_alloc",
+      "c_plugin",
+      "smoke",
+      "int_loops",
+      "float_sum",
+      "expr",
+      "json",
+      "collections",
+      "scene",
+      "nbody",
+      "mandelbrot",
+      "sha256",
+      "sort",
+      "matmul",
+      "strings",
+      "math_e",
+      "hostcall_f",
+      "libm_driver",
+      "miniz_driver",
+      "generated_stress"
+    ],
+    "load": "precompiled",
+    "rustc_wasm_bytes": 144051631,
+    "rustc_wasm_sha256": "d2404a865ef00149cc922bd6b9d15548e02d07890391eef3af4587de9376fb91"
+  },
+  "startup": {
+    "cached": {
+      "module_load": {
+        "median_ms": 459.511417,
+        "min_ms": 456.082416,
+        "max_ms": 478.09066700000005,
+        "runs": 5
+      },
+      "instantiate": {
+        "median_ms": 0.979459,
+        "min_ms": 0.928291,
+        "max_ms": 1.07,
+        "runs": 5
+      },
+      "source": "wasm",
+      "fallback_reason": null
+    },
+    "cold": {
+      "module_load": {
+        "median_ms": 38345.116708,
+        "min_ms": 38161.918084,
+        "max_ms": 38494.984208,
+        "runs": 5
+      },
+      "instantiate": {
+        "median_ms": 2.496375,
+        "min_ms": 1.746625,
+        "max_ms": 3.229334,
+        "runs": 5
+      },
+      "source": "wasm",
+      "fallback_reason": null
+    },
+    "precompiled": {
+      "module_load": {
+        "median_ms": 17.7025,
+        "min_ms": 17.449917,
+        "max_ms": 195.928417,
+        "runs": 5
+      },
+      "instantiate": {
+        "median_ms": 0.153334,
+        "min_ms": 0.14458400000000002,
+        "max_ms": 0.17533300000000002,
+        "runs": 5
+      },
+      "source": "precompiled",
+      "fallback_reason": null
+    }
+  },
+  "programs": {
+    "a_add": {
+      "name": "a_add",
+      "class": "small",
+      "source": "bench/programs/small/a_add.rs",
+      "source_lines": 26,
+      "source_bytes": 899,
+      "correct": true,
+      "outcomes": {
+        "0": {
+          "result": 20,
+          "out_len": 4,
+          "out_sha256": "447e12701a0d03cf90a4ad7f02f1a045b35d284e26fe520440edb116d76bf700"
+        },
+        "1": {
+          "result": 21,
+          "out_len": 4,
+          "out_sha256": "44b34ba1e158565cd98b8b42da82ab3da3855b9828ef66847eed4a66a20c22b4"
+        },
+        "18446744073709551615": {
+          "result": 18,
+          "out_len": 4,
+          "out_sha256": "7d8e29fa389a36cca29bc0f07a7892dddd6f9070b9e33d12dce8ce3569f81810"
+        },
+        "42": {
+          "result": 62,
+          "out_len": 4,
+          "out_sha256": "fa802ed35611d044b14e2d95ce6619c2051b5c0d6645459658e1d67fa0af07c7"
+        }
+      },
+      "clif": {
+        "module_load_ms": 19.308374999999998,
+        "load_source": "precompiled",
+        "warmup_ms": 114.95933299999999,
+        "compile_warm": {
+          "median": 75.23125,
+          "min": 75.088583,
+          "max": 83.29683299999999,
+          "runs": 5
+        },
+        "compile_incremental": {
+          "median": 69.096332,
+          "min": 60.286750000000005,
+          "max": 74.19825,
+          "runs": 5
+        },
+        "incremental_cold_ms": 87.629791,
+        "incremental_first_edit_ms": 68.22812499999999,
+        "instantiate": {
+          "median": 0.11804200000000001,
+          "min": 0.110167,
+          "max": 0.12562500000000001,
+          "runs": 5
+        },
+        "link": {
+          "median": 6.424,
+          "min": 6.027583000000001,
+          "max": 6.487292,
+          "runs": 5
+        },
+        "peak_memory_bytes": {
+          "median": 149618688.0,
+          "min": 149618688.0,
+          "max": 149618688.0,
+          "runs": 5
+        },
+        "phases": {
+          "total_ms": 83.0,
+          "frontend_ms": 63.0,
+          "codegen_ms": 7.0,
+          "link_ms": 13.0,
+          "raw": {
+            "MIR_borrow_checking": 6.0,
+            "codegen_crate": 7.0,
+            "expand_crate": 26.0,
+            "finalize_imports": 7.0,
+            "link": 13.0,
+            "link_binary": 13.0,
+            "link_crate": 13.0,
+            "macro_expand_crate": 26.0,
+            "resolve_crate": 8.0,
+            "run_linker": 7.0,
+            "total": 83.0,
+            "type_check_crate": 14.0
+          }
+        },
+        "wasm_bytes": 34622,
+        "wasm_sha256": "012d08358610b1f5d0326a25fefc15ad9caa87cf8025d5b25d0a0dad86399793"
+      },
+      "llvm": {
+        "compile_o0": {
+          "median": 60.3037909604609,
+          "min": 59.26649994216859,
+          "max": 71.41600013710558,
+          "runs": 5
+        },
+        "compile_o2": {
+          "median": 65.03854179754853,
+          "min": 63.60875000245869,
+          "max": 71.60775014199317,
+          "runs": 5
+        },
+        "wasm_o0_bytes": 8875,
+        "wasm_o2_bytes": 4157
+      },
+      "exec": {
+        "clif": {
+          "exec_ms": {
+            "median": 0.0006670000000000001,
+            "min": 0.000458,
+            "max": 0.11275,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0086665,
+            "min": 0.00775,
+            "max": 0.157,
+            "runs": 20
+          }
+        },
+        "llvm_o0": {
+          "exec_ms": {
+            "median": 0.001291,
+            "min": 0.001,
+            "max": 0.0018750000000000001,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0066045,
+            "min": 0.005875,
+            "max": 0.044,
+            "runs": 20
+          }
+        },
+        "llvm_o2": {
+          "exec_ms": {
+            "median": 0.0012915000000000001,
+            "min": 0.001,
+            "max": 0.006084,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0067079999999999996,
+            "min": 0.006167000000000001,
+            "max": 0.036666,
+            "runs": 20
+          }
+        }
+      },
+      "size": {
+        "clif": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/clif/a_add.wasm",
+          "total_bytes": 34622,
+          "code_bytes": 12059,
+          "data_bytes": 18065,
+          "data_segments": 43,
+          "functions": 47,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o0": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o0/a_add.wasm",
+          "total_bytes": 8875,
+          "code_bytes": 4425,
+          "data_bytes": 1856,
+          "data_segments": 1,
+          "functions": 34,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o2": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o2/a_add.wasm",
+          "total_bytes": 4157,
+          "code_bytes": 2741,
+          "data_bytes": 468,
+          "data_segments": 1,
+          "functions": 11,
+          "imports": 0,
+          "exports": 5
+        }
+      }
+    },
+    "b_alloc": {
+      "name": "b_alloc",
+      "class": "small",
+      "source": "bench/programs/small/b_alloc.rs",
+      "source_lines": 62,
+      "source_bytes": 1873,
+      "correct": true,
+      "outcomes": {
+        "0": {
+          "result": 4627736745834093200,
+          "out_len": 8,
+          "out_sha256": "e6126b07475c79051e82136aadc1790f3a91f26e3784e0910dfc5fca55b379b4"
+        },
+        "1": {
+          "result": 4627737689331694954,
+          "out_len": 8,
+          "out_sha256": "7b00c4ccba355a41edd4b2698c8a98a3858647a5bbc1b078ef46af6fa0b94456"
+        },
+        "18446744073709551615": {
+          "result": 4628021168457427188,
+          "out_len": 8,
+          "out_sha256": "e6c35db66ea6e902638ac7cb47e9419417538b352ca7baf7e431fa136210e37b"
+        },
+        "42": {
+          "result": 4627748131134995101,
+          "out_len": 8,
+          "out_sha256": "00ae40bccf505335bfe6818227d15bf1f96da15febd598d0f15504a9a905d03c"
+        }
+      },
+      "clif": {
+        "module_load_ms": 21.197,
+        "load_source": "precompiled",
+        "warmup_ms": 113.463666,
+        "compile_warm": {
+          "median": 104.87475,
+          "min": 104.382667,
+          "max": 109.323584,
+          "runs": 5
+        },
+        "compile_incremental": {
+          "median": 85.95562500000001,
+          "min": 69.300292,
+          "max": 91.602042,
+          "runs": 5
+        },
+        "incremental_cold_ms": 124.24016700000001,
+        "incremental_first_edit_ms": 84.36754200000001,
+        "instantiate": {
+          "median": 0.119708,
+          "min": 0.110375,
+          "max": 0.124125,
+          "runs": 5
+        },
+        "link": {
+          "median": 6.494833,
+          "min": 6.2009170000000005,
+          "max": 7.159667,
+          "runs": 5
+        },
+        "peak_memory_bytes": {
+          "median": 149815296.0,
+          "min": 149815296.0,
+          "max": 149815296.0,
+          "runs": 5
+        },
+        "phases": {
+          "total_ms": 112.0,
+          "frontend_ms": 73.0,
+          "codegen_ms": 27.0,
+          "link_ms": 12.0,
+          "raw": {
+            "MIR_borrow_checking": 10.0,
+            "codegen_crate": 27.0,
+            "expand_crate": 28.0,
+            "finalize_imports": 7.0,
+            "link": 12.0,
+            "link_binary": 12.0,
+            "link_crate": 12.0,
+            "macro_expand_crate": 28.0,
+            "monomorphization_collector_graph_walk": 13.0,
+            "resolve_crate": 8.0,
+            "run_linker": 6.0,
+            "total": 112.0,
+            "type_check_crate": 18.0
+          }
+        },
+        "wasm_bytes": 80699,
+        "wasm_sha256": "521d5c15e947e431e8ed4947e6aa4e7b6efb19ff616dc1e20e52f2db1292a406"
+      },
+      "llvm": {
+        "compile_o0": {
+          "median": 69.21762507408857,
+          "min": 68.45754198729992,
+          "max": 72.62808317318559,
+          "runs": 5
+        },
+        "compile_o2": {
+          "median": 94.86329206265509,
+          "min": 94.3364161066711,
+          "max": 96.71962494030595,
+          "runs": 5
+        },
+        "wasm_o0_bytes": 42894,
+        "wasm_o2_bytes": 11813
+      },
+      "exec": {
+        "clif": {
+          "exec_ms": {
+            "median": 0.015417,
+            "min": 0.013209,
+            "max": 0.039375,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.007875,
+            "min": 0.006583,
+            "max": 0.057584,
+            "runs": 20
+          }
+        },
+        "llvm_o0": {
+          "exec_ms": {
+            "median": 0.012833,
+            "min": 0.011833,
+            "max": 0.025917,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0074585,
+            "min": 0.005959,
+            "max": 0.050083,
+            "runs": 20
+          }
+        },
+        "llvm_o2": {
+          "exec_ms": {
+            "median": 0.0063750000000000005,
+            "min": 0.005208999999999999,
+            "max": 0.017458,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0064785,
+            "min": 0.006,
+            "max": 0.043332999999999997,
+            "runs": 20
+          }
+        }
+      },
+      "size": {
+        "clif": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/clif/b_alloc.wasm",
+          "total_bytes": 80699,
+          "code_bytes": 41363,
+          "data_bytes": 20719,
+          "data_segments": 115,
+          "functions": 175,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o0": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o0/b_alloc.wasm",
+          "total_bytes": 42894,
+          "code_bytes": 17875,
+          "data_bytes": 7786,
+          "data_segments": 1,
+          "functions": 162,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o2": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o2/b_alloc.wasm",
+          "total_bytes": 11813,
+          "code_bytes": 7987,
+          "data_bytes": 973,
+          "data_segments": 1,
+          "functions": 39,
+          "imports": 0,
+          "exports": 5
+        }
+      }
+    },
+    "c_plugin": {
+      "name": "c_plugin",
+      "class": "small",
+      "source": "bench/programs/small/c_plugin.rs",
+      "source_lines": 36,
+      "source_bytes": 1257,
+      "correct": true,
+      "outcomes": {
+        "0": {
+          "result": 4612248968380809216,
+          "out_len": 8,
+          "out_sha256": "a3e247ec83d3cca7577dc8f88278fa35f8cd048b7b13c75e597f0e452582e00c"
+        },
+        "1": {
+          "result": 4612248968380809216,
+          "out_len": 8,
+          "out_sha256": "a3e247ec83d3cca7577dc8f88278fa35f8cd048b7b13c75e597f0e452582e00c"
+        },
+        "18446744073709551615": {
+          "result": 4612248968380809216,
+          "out_len": 8,
+          "out_sha256": "a3e247ec83d3cca7577dc8f88278fa35f8cd048b7b13c75e597f0e452582e00c"
+        },
+        "42": {
+          "result": 4612248968380809216,
+          "out_len": 8,
+          "out_sha256": "a3e247ec83d3cca7577dc8f88278fa35f8cd048b7b13c75e597f0e452582e00c"
+        }
+      },
+      "clif": {
+        "module_load_ms": 19.641541,
+        "load_source": "precompiled",
+        "warmup_ms": 88.953708,
+        "compile_warm": {
+          "median": 80.51879100000001,
+          "min": 79.782041,
+          "max": 84.14862500000001,
+          "runs": 5
+        },
+        "compile_incremental": {
+          "median": 73.955875,
+          "min": 64.09245800000001,
+          "max": 77.065458,
+          "runs": 5
+        },
+        "incremental_cold_ms": 106.544876,
+        "incremental_first_edit_ms": 73.843666,
+        "instantiate": {
+          "median": 0.11316699999999999,
+          "min": 0.108333,
+          "max": 0.14162499999999997,
+          "runs": 5
+        },
+        "link": {
+          "median": 6.480708,
+          "min": 6.237375,
+          "max": 6.682833,
+          "runs": 5
+        },
+        "peak_memory_bytes": {
+          "median": 149684224.0,
+          "min": 149684224.0,
+          "max": 149684224.0,
+          "runs": 5
+        },
+        "phases": {
+          "total_ms": 89.0,
+          "frontend_ms": 64.0,
+          "codegen_ms": 11.0,
+          "link_ms": 14.0,
+          "raw": {
+            "MIR_borrow_checking": 7.0,
+            "codegen_crate": 11.0,
+            "expand_crate": 26.0,
+            "finalize_imports": 7.0,
+            "link": 14.0,
+            "link_binary": 13.0,
+            "link_crate": 14.0,
+            "macro_expand_crate": 26.0,
+            "resolve_crate": 8.0,
+            "run_linker": 6.0,
+            "total": 89.0,
+            "type_check_crate": 15.0
+          }
+        },
+        "wasm_bytes": 36295,
+        "wasm_sha256": "0713616a6ac9da2c1ceea23bacc3d537b28b6af2d95c67705e2caad6cfcd825c"
+      },
+      "llvm": {
+        "compile_o0": {
+          "median": 60.64662500284612,
+          "min": 59.94745809584856,
+          "max": 62.1588749345392,
+          "runs": 5
+        },
+        "compile_o2": {
+          "median": 66.59974996000528,
+          "min": 65.94150001183152,
+          "max": 66.71641697175801,
+          "runs": 5
+        },
+        "wasm_o0_bytes": 13233,
+        "wasm_o2_bytes": 4322
+      },
+      "exec": {
+        "clif": {
+          "exec_ms": {
+            "median": 0.00075,
+            "min": 0.000583,
+            "max": 0.004416,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.00775,
+            "min": 0.006375,
+            "max": 0.052541,
+            "runs": 20
+          }
+        },
+        "llvm_o0": {
+          "exec_ms": {
+            "median": 0.0014375,
+            "min": 0.001167,
+            "max": 0.002375,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0066040000000000005,
+            "min": 0.006084,
+            "max": 0.043708000000000004,
+            "runs": 20
+          }
+        },
+        "llvm_o2": {
+          "exec_ms": {
+            "median": 0.001229,
+            "min": 0.001042,
+            "max": 0.0043749999999999995,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0067079999999999996,
+            "min": 0.006416,
+            "max": 0.034832999999999996,
+            "runs": 20
+          }
+        }
+      },
+      "size": {
+        "clif": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/clif/c_plugin.wasm",
+          "total_bytes": 36295,
+          "code_bytes": 13175,
+          "data_bytes": 18192,
+          "data_segments": 45,
+          "functions": 50,
+          "imports": 1,
+          "exports": 5
+        },
+        "llvm_o0": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o0/c_plugin.wasm",
+          "total_bytes": 13233,
+          "code_bytes": 5821,
+          "data_bytes": 3023,
+          "data_segments": 1,
+          "functions": 48,
+          "imports": 1,
+          "exports": 5
+        },
+        "llvm_o2": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o2/c_plugin.wasm",
+          "total_bytes": 4322,
+          "code_bytes": 2834,
+          "data_bytes": 468,
+          "data_segments": 1,
+          "functions": 11,
+          "imports": 1,
+          "exports": 5
+        }
+      }
+    },
+    "smoke": {
+      "name": "smoke",
+      "class": "small",
+      "source": "bench/programs/small/smoke.rs",
+      "source_lines": 28,
+      "source_bytes": 926,
+      "correct": true,
+      "outcomes": {
+        "0": {
+          "result": 10319317487848130658,
+          "out_len": 520,
+          "out_sha256": "508590721a53833aca0b8d16ddd1cceb53af59c040b970fd92d1b8405e7bac79"
+        },
+        "1": {
+          "result": 14523547598455438857,
+          "out_len": 520,
+          "out_sha256": "f3f3ad9cec190e36ffb0627d4b78ba8af6d7470df3e79dd8f5933187db3f22bc"
+        },
+        "18446744073709551615": {
+          "result": 10232531512586476455,
+          "out_len": 520,
+          "out_sha256": "d12ad55fa969884e50873d180169d99e9a3475e84331dc0079090c9a6df1384b"
+        },
+        "42": {
+          "result": 3482912194998177957,
+          "out_len": 520,
+          "out_sha256": "46be6f9f05599332d8c53f63b2e85c8a35e9ae0a50d5a0029dbb633c55ac8be1"
+        }
+      },
+      "clif": {
+        "module_load_ms": 20.451416000000002,
+        "load_source": "precompiled",
+        "warmup_ms": 118.634708,
+        "compile_warm": {
+          "median": 106.602,
+          "min": 106.26329199999999,
+          "max": 106.948959,
+          "runs": 5
+        },
+        "compile_incremental": {
+          "median": 85.041625,
+          "min": 83.088042,
+          "max": 92.53724899999999,
+          "runs": 5
+        },
+        "incremental_cold_ms": 128.9685,
+        "incremental_first_edit_ms": 85.152125,
+        "instantiate": {
+          "median": 0.119584,
+          "min": 0.117083,
+          "max": 0.12141700000000001,
+          "runs": 5
+        },
+        "link": {
+          "median": 6.489333,
+          "min": 5.816208,
+          "max": 6.567417,
+          "runs": 5
+        },
+        "peak_memory_bytes": {
+          "median": 149618688.0,
+          "min": 149618688.0,
+          "max": 149618688.0,
+          "runs": 5
+        },
+        "phases": {
+          "total_ms": 112.0,
+          "frontend_ms": 65.0,
+          "codegen_ms": 34.0,
+          "link_ms": 13.0,
+          "raw": {
+            "MIR_borrow_checking": 7.0,
+            "codegen_crate": 34.0,
+            "expand_crate": 26.0,
+            "finalize_imports": 7.0,
+            "link": 13.0,
+            "link_binary": 12.0,
+            "link_crate": 13.0,
+            "macro_expand_crate": 26.0,
+            "monomorphization_collector_graph_walk": 13.0,
+            "resolve_crate": 8.0,
+            "run_linker": 6.0,
+            "total": 112.0,
+            "type_check_crate": 14.0
+          }
+        },
+        "wasm_bytes": 64638,
+        "wasm_sha256": "471a30f8cee19f33802d5a2883ec7eb79afb65d7eaabcc97bfd05d067abbc3bd"
+      },
+      "llvm": {
+        "compile_o0": {
+          "median": 72.40679208189249,
+          "min": 70.09658380411565,
+          "max": 75.9963751770556,
+          "runs": 5
+        },
+        "compile_o2": {
+          "median": 130.45916706323624,
+          "min": 129.5018750242889,
+          "max": 136.89025002531707,
+          "runs": 5
+        },
+        "wasm_o0_bytes": 45989,
+        "wasm_o2_bytes": 11320
+      },
+      "exec": {
+        "clif": {
+          "exec_ms": {
+            "median": 0.011688,
+            "min": 0.009125,
+            "max": 0.027208,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.008833500000000001,
+            "min": 0.006833,
+            "max": 0.055083,
+            "runs": 20
+          }
+        },
+        "llvm_o0": {
+          "exec_ms": {
+            "median": 0.0107505,
+            "min": 0.009584,
+            "max": 0.021667000000000002,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0074375,
+            "min": 0.006292,
+            "max": 0.051541000000000003,
+            "runs": 20
+          }
+        },
+        "llvm_o2": {
+          "exec_ms": {
+            "median": 0.003062,
+            "min": 0.0026249999999999997,
+            "max": 0.0051660000000000005,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.006312,
+            "min": 0.0053750000000000004,
+            "max": 0.046625,
+            "runs": 20
+          }
+        }
+      },
+      "size": {
+        "clif": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/clif/smoke.wasm",
+          "total_bytes": 64638,
+          "code_bytes": 30902,
+          "data_bytes": 20377,
+          "data_segments": 94,
+          "functions": 132,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o0": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o0/smoke.wasm",
+          "total_bytes": 45989,
+          "code_bytes": 21834,
+          "data_bytes": 10250,
+          "data_segments": 1,
+          "functions": 147,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o2": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o2/smoke.wasm",
+          "total_bytes": 11320,
+          "code_bytes": 8204,
+          "data_bytes": 900,
+          "data_segments": 1,
+          "functions": 26,
+          "imports": 0,
+          "exports": 5
+        }
+      }
+    },
+    "int_loops": {
+      "name": "int_loops",
+      "class": "small",
+      "source": "bench/programs/small/int_loops.rs",
+      "source_lines": 64,
+      "source_bytes": 1904,
+      "correct": true,
+      "outcomes": {
+        "0": {
+          "result": 0,
+          "out_len": 392,
+          "out_sha256": "09652f42d088522b9179a3451053a599db5c181a16f8c5e46859730390118eb6"
+        },
+        "1": {
+          "result": 0,
+          "out_len": 392,
+          "out_sha256": "c183a9565a0e926acb99cdc33f69f59c69879410a1afbac334f5853ebdb859dd"
+        },
+        "18446744073709551615": {
+          "result": 0,
+          "out_len": 392,
+          "out_sha256": "4c76f9755f742097c77d563108d0856a1b0c3cc380965656412c5b60793d0e5e"
+        },
+        "42": {
+          "result": 0,
+          "out_len": 392,
+          "out_sha256": "5c7697f1aea324123709e869262bc851d607b65a1f6f406af6bcbd531274549e"
+        }
+      },
+      "clif": {
+        "module_load_ms": 20.874666,
+        "load_source": "precompiled",
+        "warmup_ms": 91.084,
+        "compile_warm": {
+          "median": 81.631209,
+          "min": 81.063459,
+          "max": 83.427792,
+          "runs": 5
+        },
+        "compile_incremental": {
+          "median": 73.21091600000001,
+          "min": 71.499958,
+          "max": 79.87666599999999,
+          "runs": 5
+        },
+        "incremental_cold_ms": 93.485834,
+        "incremental_first_edit_ms": 72.49779099999999,
+        "instantiate": {
+          "median": 0.124583,
+          "min": 0.11649999999999999,
+          "max": 0.141042,
+          "runs": 5
+        },
+        "link": {
+          "median": 6.396417,
+          "min": 6.311875,
+          "max": 6.616375,
+          "runs": 5
+        },
+        "peak_memory_bytes": {
+          "median": 149684224.0,
+          "min": 149684224.0,
+          "max": 149684224.0,
+          "runs": 5
+        },
+        "phases": {
+          "total_ms": 88.0,
+          "frontend_ms": 65.0,
+          "codegen_ms": 10.0,
+          "link_ms": 13.0,
+          "raw": {
+            "MIR_borrow_checking": 7.0,
+            "codegen_crate": 10.0,
+            "expand_crate": 26.0,
+            "finalize_imports": 7.0,
+            "link": 13.0,
+            "link_binary": 13.0,
+            "link_crate": 13.0,
+            "macro_expand_crate": 26.0,
+            "resolve_crate": 8.0,
+            "run_linker": 6.0,
+            "total": 88.0,
+            "type_check_crate": 15.0
+          }
+        },
+        "wasm_bytes": 35631,
+        "wasm_sha256": "8a9cab9be235c9f158b22652c8cbc33ce0574619e45e183fdcf266ce55e53c86"
+      },
+      "llvm": {
+        "compile_o0": {
+          "median": 61.526082921773195,
+          "min": 60.063916025683284,
+          "max": 64.79766685515642,
+          "runs": 5
+        },
+        "compile_o2": {
+          "median": 76.64400013163686,
+          "min": 75.93545806594193,
+          "max": 77.00074999593198,
+          "runs": 5
+        },
+        "wasm_o0_bytes": 11505,
+        "wasm_o2_bytes": 5224
+      },
+      "exec": {
+        "clif": {
+          "exec_ms": {
+            "median": 0.003125,
+            "min": 0.0024159999999999997,
+            "max": 0.008166,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0077705,
+            "min": 0.0067079999999999996,
+            "max": 0.048458,
+            "runs": 20
+          }
+        },
+        "llvm_o0": {
+          "exec_ms": {
+            "median": 0.005124999999999999,
+            "min": 0.004458,
+            "max": 0.014083,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0066035,
+            "min": 0.00575,
+            "max": 0.040209,
+            "runs": 20
+          }
+        },
+        "llvm_o2": {
+          "exec_ms": {
+            "median": 0.0030205,
+            "min": 0.002291,
+            "max": 0.004958,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0066665000000000006,
+            "min": 0.005625000000000001,
+            "max": 0.041417,
+            "runs": 20
+          }
+        }
+      },
+      "size": {
+        "clif": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/clif/int_loops.wasm",
+          "total_bytes": 35631,
+          "code_bytes": 13052,
+          "data_bytes": 18065,
+          "data_segments": 43,
+          "functions": 47,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o0": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o0/int_loops.wasm",
+          "total_bytes": 11505,
+          "code_bytes": 5642,
+          "data_bytes": 2296,
+          "data_segments": 1,
+          "functions": 43,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o2": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o2/int_loops.wasm",
+          "total_bytes": 5224,
+          "code_bytes": 3804,
+          "data_bytes": 468,
+          "data_segments": 1,
+          "functions": 11,
+          "imports": 0,
+          "exports": 5
+        }
+      }
+    },
+    "float_sum": {
+      "name": "float_sum",
+      "class": "small",
+      "source": "bench/programs/small/float_sum.rs",
+      "source_lines": 108,
+      "source_bytes": 2709,
+      "correct": true,
+      "outcomes": {
+        "0": {
+          "result": 7592610940328084997,
+          "out_len": 88,
+          "out_sha256": "4e632d6e418d5acbff5bb76f171c46f71d79f7ff09b79142947cd3404fd08d41"
+        },
+        "1": {
+          "result": 15096295053091407364,
+          "out_len": 88,
+          "out_sha256": "46d9ef41ee525f21484e173f9fc1962b6888976f5a6f53e58d7dcd212e96c82a"
+        },
+        "18446744073709551615": {
+          "result": 15047456713680619013,
+          "out_len": 88,
+          "out_sha256": "748fe3542d55023450b88c04fdc67f6a4e8988472873f4b2b75b8ca469b39c2e"
+        },
+        "42": {
+          "result": 5462510085831918086,
+          "out_len": 88,
+          "out_sha256": "1ebfd0590dd29de444f75b434003582aa1280f447f0ea6ea2246c5a0df31128c"
+        }
+      },
+      "clif": {
+        "module_load_ms": 20.164458,
+        "load_source": "precompiled",
+        "warmup_ms": 107.868708,
+        "compile_warm": {
+          "median": 99.94275,
+          "min": 98.7975,
+          "max": 103.669709,
+          "runs": 5
+        },
+        "compile_incremental": {
+          "median": 81.473876,
+          "min": 65.87266600000001,
+          "max": 85.446708,
+          "runs": 5
+        },
+        "incremental_cold_ms": 114.10829199999999,
+        "incremental_first_edit_ms": 79.81220900000001,
+        "instantiate": {
+          "median": 0.12033400000000001,
+          "min": 0.116333,
+          "max": 0.135084,
+          "runs": 5
+        },
+        "link": {
+          "median": 6.6028340000000005,
+          "min": 6.280416,
+          "max": 6.692292,
+          "runs": 5
+        },
+        "peak_memory_bytes": {
+          "median": 149749760.0,
+          "min": 149749760.0,
+          "max": 149749760.0,
+          "runs": 5
+        },
+        "phases": {
+          "total_ms": 106.0,
+          "frontend_ms": 71.0,
+          "codegen_ms": 22.0,
+          "link_ms": 13.0,
+          "raw": {
+            "MIR_borrow_checking": 10.0,
+            "codegen_crate": 22.0,
+            "expand_crate": 27.0,
+            "finalize_imports": 7.0,
+            "link": 13.0,
+            "link_binary": 13.0,
+            "link_crate": 13.0,
+            "macro_expand_crate": 27.0,
+            "monomorphization_collector_graph_walk": 11.0,
+            "resolve_crate": 8.0,
+            "run_linker": 7.0,
+            "total": 106.0,
+            "type_check_crate": 17.0
+          }
+        },
+        "wasm_bytes": 50335,
+        "wasm_sha256": "c4c8265590e8e72f21e1c8e49e8cf069f35f2f6278ff0b95d5166d8f87d59c74"
+      },
+      "llvm": {
+        "compile_o0": {
+          "median": 66.93954207003117,
+          "min": 66.72958401031792,
+          "max": 72.94337498024106,
+          "runs": 5
+        },
+        "compile_o2": {
+          "median": 110.37437478080392,
+          "min": 109.60070788860321,
+          "max": 112.11054120212793,
+          "runs": 5
+        },
+        "wasm_o0_bytes": 30709,
+        "wasm_o2_bytes": 10993
+      },
+      "exec": {
+        "clif": {
+          "exec_ms": {
+            "median": 0.0045205,
+            "min": 0.003958,
+            "max": 0.010416,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.007313,
+            "min": 0.006041,
+            "max": 0.046875,
+            "runs": 20
+          }
+        },
+        "llvm_o0": {
+          "exec_ms": {
+            "median": 0.006167,
+            "min": 0.005292000000000001,
+            "max": 0.012625,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0070834999999999995,
+            "min": 0.006,
+            "max": 0.049416999999999996,
+            "runs": 20
+          }
+        },
+        "llvm_o2": {
+          "exec_ms": {
+            "median": 0.003417,
+            "min": 0.003125,
+            "max": 0.008416,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.006458,
+            "min": 0.005875,
+            "max": 0.039083,
+            "runs": 20
+          }
+        }
+      },
+      "size": {
+        "clif": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/clif/float_sum.wasm",
+          "total_bytes": 50335,
+          "code_bytes": 24137,
+          "data_bytes": 18691,
+          "data_segments": 63,
+          "functions": 85,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o0": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o0/float_sum.wasm",
+          "total_bytes": 30709,
+          "code_bytes": 14719,
+          "data_bytes": 5827,
+          "data_segments": 1,
+          "functions": 118,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o2": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o2/float_sum.wasm",
+          "total_bytes": 10993,
+          "code_bytes": 8586,
+          "data_bytes": 712,
+          "data_segments": 1,
+          "functions": 22,
+          "imports": 0,
+          "exports": 5
+        }
+      }
+    },
+    "expr": {
+      "name": "expr",
+      "class": "medium",
+      "source": "bench/programs/medium/expr.rs",
+      "source_lines": 481,
+      "source_bytes": 12575,
+      "correct": true,
+      "outcomes": {
+        "0": {
+          "result": 17555796957457413476,
+          "out_len": 80,
+          "out_sha256": "2a47476fff27da073b5b41223fea2b0672ac7753b7d80676e18fe38d6599b5c7"
+        },
+        "1": {
+          "result": 11442994911553581334,
+          "out_len": 80,
+          "out_sha256": "076bff901f9f7261ee2aab3b82a08d39c3422ba768ee05b317384c24c48aa7af"
+        },
+        "18446744073709551615": {
+          "result": 15392527600390385633,
+          "out_len": 80,
+          "out_sha256": "0286f7b6c088eb356df3c0b535aa9eba1071ba9574146c446a55ee095e6e0f28"
+        },
+        "42": {
+          "result": 14782251343608828397,
+          "out_len": 80,
+          "out_sha256": "bad7c9bd90f7ff430922079988d9e49cc68a1672f8bc872b721bcbfbabdb0fb1"
+        }
+      },
+      "clif": {
+        "module_load_ms": 21.862666,
+        "load_source": "precompiled",
+        "warmup_ms": 150.49795799999998,
+        "compile_warm": {
+          "median": 142.813083,
+          "min": 141.75775,
+          "max": 145.97225,
+          "runs": 5
+        },
+        "compile_incremental": {
+          "median": 102.769792,
+          "min": 75.02258300000001,
+          "max": 108.41912500000001,
+          "runs": 5
+        },
+        "incremental_cold_ms": 165.049791,
+        "incremental_first_edit_ms": 108.83245799999999,
+        "instantiate": {
+          "median": 0.11425,
+          "min": 0.110167,
+          "max": 0.120708,
+          "runs": 5
+        },
+        "link": {
+          "median": 6.424875,
+          "min": 6.0763750000000005,
+          "max": 6.767874999999999,
+          "runs": 5
+        },
+        "peak_memory_bytes": {
+          "median": 150142976.0,
+          "min": 150142976.0,
+          "max": 150142976.0,
+          "runs": 5
+        },
+        "phases": {
+          "total_ms": 147.0,
+          "frontend_ms": 94.0,
+          "codegen_ms": 41.0,
+          "link_ms": 12.0,
+          "raw": {
+            "MIR_borrow_checking": 18.0,
+            "codegen_crate": 41.0,
+            "expand_crate": 27.0,
+            "finalize_imports": 7.0,
+            "link": 12.0,
+            "link_binary": 12.0,
+            "link_crate": 12.0,
+            "macro_expand_crate": 27.0,
+            "monomorphization_collector_graph_walk": 19.0,
+            "resolve_crate": 9.0,
+            "run_linker": 6.0,
+            "total": 147.0,
+            "type_check_crate": 26.0
+          }
+        },
+        "wasm_bytes": 77986,
+        "wasm_sha256": "394c6f016accd4010b74652658ac8fb851a9d0b4df0b88cfd3cc90f226ae0093"
+      },
+      "llvm": {
+        "compile_o0": {
+          "median": 83.35179090499878,
+          "min": 81.7921671550721,
+          "max": 86.55058406293392,
+          "runs": 5
+        },
+        "compile_o2": {
+          "median": 163.87670813128352,
+          "min": 163.16637489944696,
+          "max": 169.5213329512626,
+          "runs": 5
+        },
+        "wasm_o0_bytes": 55344,
+        "wasm_o2_bytes": 18960
+      },
+      "exec": {
+        "clif": {
+          "exec_ms": {
+            "median": 0.0416455,
+            "min": 0.040042,
+            "max": 0.061417,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.007917,
+            "min": 0.006834,
+            "max": 0.05125,
+            "runs": 20
+          }
+        },
+        "llvm_o0": {
+          "exec_ms": {
+            "median": 0.0462295,
+            "min": 0.045167000000000006,
+            "max": 0.06612499999999999,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.00775,
+            "min": 0.006375,
+            "max": 0.057541999999999996,
+            "runs": 20
+          }
+        },
+        "llvm_o2": {
+          "exec_ms": {
+            "median": 0.0097915,
+            "min": 0.009082999999999999,
+            "max": 0.021792000000000002,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.006729499999999999,
+            "min": 0.006167000000000001,
+            "max": 0.046833,
+            "runs": 20
+          }
+        }
+      },
+      "size": {
+        "clif": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/clif/expr.wasm",
+          "total_bytes": 77986,
+          "code_bytes": 43349,
+          "data_bytes": 21106,
+          "data_segments": 151,
+          "functions": 148,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o0": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o0/expr.wasm",
+          "total_bytes": 55344,
+          "code_bytes": 28005,
+          "data_bytes": 8382,
+          "data_segments": 1,
+          "functions": 214,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o2": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o2/expr.wasm",
+          "total_bytes": 18960,
+          "code_bytes": 14916,
+          "data_bytes": 1540,
+          "data_segments": 1,
+          "functions": 35,
+          "imports": 0,
+          "exports": 5
+        }
+      }
+    },
+    "json": {
+      "name": "json",
+      "class": "medium",
+      "source": "bench/programs/medium/json.rs",
+      "source_lines": 568,
+      "source_bytes": 16023,
+      "correct": true,
+      "outcomes": {
+        "0": {
+          "result": 845234825047339478,
+          "out_len": 1007,
+          "out_sha256": "667c7ee36a531569878c4f0d4b6045954304b7b193f7edad175c2b6081431d3d"
+        },
+        "1": {
+          "result": 15261062531747531218,
+          "out_len": 988,
+          "out_sha256": "785064eb3c72b2661c213ae0dbdf4fa1be9867842f9b3600971be9673693d2a2"
+        },
+        "18446744073709551615": {
+          "result": 16900317369961268279,
+          "out_len": 590,
+          "out_sha256": "2c070869f8a78babc37d1f06dcd87261cda7e3cc0eb4f66d0e6e9000820c6cf2"
+        },
+        "42": {
+          "result": 10716485318369452823,
+          "out_len": 667,
+          "out_sha256": "c2decff195f593242f75049212ee217dd5053debe81834968ec05b33dd38f1ff"
+        }
+      },
+      "clif": {
+        "module_load_ms": 21.075166,
+        "load_source": "precompiled",
+        "warmup_ms": 182.60166600000002,
+        "compile_warm": {
+          "median": 174.98025,
+          "min": 173.955917,
+          "max": 178.914333,
+          "runs": 5
+        },
+        "compile_incremental": {
+          "median": 121.81679100000002,
+          "min": 84.930999,
+          "max": 125.69241599999998,
+          "runs": 5
+        },
+        "incremental_cold_ms": 204.354709,
+        "incremental_first_edit_ms": 119.248625,
+        "instantiate": {
+          "median": 0.12375,
+          "min": 0.117958,
+          "max": 0.14024999999999999,
+          "runs": 5
+        },
+        "link": {
+          "median": 6.571040999999999,
+          "min": 6.145416,
+          "max": 6.601583000000001,
+          "runs": 5
+        },
+        "peak_memory_bytes": {
+          "median": 150142976.0,
+          "min": 150142976.0,
+          "max": 150142976.0,
+          "runs": 5
+        },
+        "phases": {
+          "total_ms": 185.0,
+          "frontend_ms": 103.0,
+          "codegen_ms": 70.0,
+          "link_ms": 12.0,
+          "raw": {
+            "MIR_borrow_checking": 23.0,
+            "codegen_crate": 70.0,
+            "codegen_to_LLVM_IR": 9.0,
+            "expand_crate": 27.0,
+            "finalize_imports": 8.0,
+            "link": 12.0,
+            "link_binary": 12.0,
+            "link_crate": 12.0,
+            "macro_expand_crate": 27.0,
+            "monomorphization_collector_graph_walk": 31.0,
+            "resolve_crate": 9.0,
+            "total": 185.0,
+            "type_check_crate": 30.0
+          }
+        },
+        "wasm_bytes": 111556,
+        "wasm_sha256": "7939562139631370911f59494524c081e690618b9ab873477b0e657edd9a65ee"
+      },
+      "llvm": {
+        "compile_o0": {
+          "median": 89.91962485015392,
+          "min": 89.2864998895675,
+          "max": 92.56949997507036,
+          "runs": 5
+        },
+        "compile_o2": {
+          "median": 183.10808390378952,
+          "min": 182.16704204678535,
+          "max": 188.5707920882851,
+          "runs": 5
+        },
+        "wasm_o0_bytes": 88641,
+        "wasm_o2_bytes": 28779
+      },
+      "exec": {
+        "clif": {
+          "exec_ms": {
+            "median": 0.0282705,
+            "min": 0.0255,
+            "max": 0.05875,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0075835,
+            "min": 0.006833,
+            "max": 0.06241699999999999,
+            "runs": 20
+          }
+        },
+        "llvm_o0": {
+          "exec_ms": {
+            "median": 0.029333,
+            "min": 0.026541,
+            "max": 0.053917,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.006999999999999999,
+            "min": 0.006417,
+            "max": 0.054459,
+            "runs": 20
+          }
+        },
+        "llvm_o2": {
+          "exec_ms": {
+            "median": 0.0077495,
+            "min": 0.006792,
+            "max": 0.022834,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.006396,
+            "min": 0.005958000000000001,
+            "max": 0.048458999999999995,
+            "runs": 20
+          }
+        }
+      },
+      "size": {
+        "clif": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/clif/json.wasm",
+          "total_bytes": 111556,
+          "code_bytes": 62980,
+          "data_bytes": 24086,
+          "data_segments": 188,
+          "functions": 229,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o0": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o0/json.wasm",
+          "total_bytes": 88641,
+          "code_bytes": 44473,
+          "data_bytes": 14254,
+          "data_segments": 1,
+          "functions": 297,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o2": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o2/json.wasm",
+          "total_bytes": 28779,
+          "code_bytes": 21811,
+          "data_bytes": 2296,
+          "data_segments": 1,
+          "functions": 50,
+          "imports": 0,
+          "exports": 5
+        }
+      }
+    },
+    "collections": {
+      "name": "collections",
+      "class": "medium",
+      "source": "bench/programs/medium/collections.rs",
+      "source_lines": 315,
+      "source_bytes": 8781,
+      "correct": true,
+      "outcomes": {
+        "0": {
+          "result": 14330719842896545865,
+          "out_len": 359,
+          "out_sha256": "2589292acc514f266f6c2b34da9ab1d6235578d6d7d97ad105ebed58283f5f2c"
+        },
+        "1": {
+          "result": 8094743567982700196,
+          "out_len": 376,
+          "out_sha256": "ee96766394dfdd68ac1876a6883109a26489f645ff133926e8045662ebbc4ff1"
+        },
+        "18446744073709551615": {
+          "result": 12546174074476869547,
+          "out_len": 381,
+          "out_sha256": "4f041e54d1ae04f94fd9322b6f1766e5009b3aa94c89f0caf52787e954e2b33c"
+        },
+        "42": {
+          "result": 12432855907506947807,
+          "out_len": 419,
+          "out_sha256": "d7487a535265e4af85110f7b891080c37a6f9a8cd8ead3140608e4f0fa7050a2"
+        }
+      },
+      "clif": {
+        "module_load_ms": 20.112541,
+        "load_source": "precompiled",
+        "warmup_ms": 271.570208,
+        "compile_warm": {
+          "median": 264.873916,
+          "min": 261.023167,
+          "max": 270.842166,
+          "runs": 5
+        },
+        "compile_incremental": {
+          "median": 141.190125,
+          "min": 105.04983299999999,
+          "max": 155.245834,
+          "runs": 5
+        },
+        "incremental_cold_ms": 303.690916,
+        "incremental_first_edit_ms": 139.801583,
+        "instantiate": {
+          "median": 0.1215,
+          "min": 0.115167,
+          "max": 0.127667,
+          "runs": 5
+        },
+        "link": {
+          "median": 6.693290999999999,
+          "min": 6.1599580000000005,
+          "max": 6.825,
+          "runs": 5
+        },
+        "peak_memory_bytes": {
+          "median": 149946368.0,
+          "min": 149946368.0,
+          "max": 149946368.0,
+          "runs": 5
+        },
+        "phases": {
+          "total_ms": 269.0,
+          "frontend_ms": 99.0,
+          "codegen_ms": 157.0,
+          "link_ms": 13.0,
+          "raw": {
+            "MIR_borrow_checking": 20.0,
+            "codegen_crate": 157.0,
+            "codegen_to_LLVM_IR": 26.0,
+            "expand_crate": 27.0,
+            "finalize_imports": 7.0,
+            "link": 13.0,
+            "link_binary": 13.0,
+            "link_crate": 13.0,
+            "macro_expand_crate": 27.0,
+            "monomorphization_collector_graph_walk": 52.0,
+            "resolve_crate": 9.0,
+            "run_linker": 7.0,
+            "total": 269.0,
+            "type_check_crate": 30.0
+          }
+        },
+        "wasm_bytes": 243982,
+        "wasm_sha256": "6575bde6ec0e00a9437623b8c2d94aec836aa8d693e2c9c1f75e9062768a7e9e"
+      },
+      "llvm": {
+        "compile_o0": {
+          "median": 100.44758301228285,
+          "min": 100.33820802345872,
+          "max": 101.08191706240177,
+          "runs": 5
+        },
+        "compile_o2": {
+          "median": 258.6355418898165,
+          "min": 257.9522079322487,
+          "max": 260.4732499457896,
+          "runs": 5
+        },
+        "wasm_o0_bytes": 197927,
+        "wasm_o2_bytes": 53484
+      },
+      "exec": {
+        "clif": {
+          "exec_ms": {
+            "median": 0.087979,
+            "min": 0.077875,
+            "max": 0.129959,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0085415,
+            "min": 0.00825,
+            "max": 0.07058299999999999,
+            "runs": 20
+          }
+        },
+        "llvm_o0": {
+          "exec_ms": {
+            "median": 0.073083,
+            "min": 0.067042,
+            "max": 0.106,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.009396000000000002,
+            "min": 0.008124999999999999,
+            "max": 0.061542,
+            "runs": 20
+          }
+        },
+        "llvm_o2": {
+          "exec_ms": {
+            "median": 0.009604,
+            "min": 0.007833,
+            "max": 0.030667000000000003,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0072085,
+            "min": 0.006083,
+            "max": 0.059667000000000005,
+            "runs": 20
+          }
+        }
+      },
+      "size": {
+        "clif": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/clif/collections.wasm",
+          "total_bytes": 243982,
+          "code_bytes": 146029,
+          "data_bytes": 32903,
+          "data_segments": 348,
+          "functions": 469,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o0": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o0/collections.wasm",
+          "total_bytes": 197927,
+          "code_bytes": 103715,
+          "data_bytes": 21706,
+          "data_segments": 1,
+          "functions": 525,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o2": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o2/collections.wasm",
+          "total_bytes": 53484,
+          "code_bytes": 42237,
+          "data_bytes": 2904,
+          "data_segments": 1,
+          "functions": 67,
+          "imports": 0,
+          "exports": 5
+        }
+      }
+    },
+    "scene": {
+      "name": "scene",
+      "class": "medium",
+      "source": "bench/programs/medium/scene.rs",
+      "source_lines": 505,
+      "source_bytes": 13626,
+      "correct": true,
+      "outcomes": {
+        "0": {
+          "result": 1342955736787366524,
+          "out_len": 200,
+          "out_sha256": "b273cca3d13f691df3251ff2a8a18285e114c82f821d5e40bbdf88792383c019"
+        },
+        "1": {
+          "result": 8186353442181211680,
+          "out_len": 200,
+          "out_sha256": "d5c5c54ae5fd508237a77005164ab14d86983cdc5bd737ed942a668e6efe46a4"
+        },
+        "18446744073709551615": {
+          "result": 14590635249448326253,
+          "out_len": 200,
+          "out_sha256": "21bdb5966dca3fa84eb72a26dcc1ce4fa9436a34fb32a3c9a0bdf584c2d287e8"
+        },
+        "42": {
+          "result": 204220518995545974,
+          "out_len": 200,
+          "out_sha256": "83459907ee35e09f1b1f9efa7eb80f88463bbcb28668d34d2d625bb697ae485f"
+        }
+      },
+      "clif": {
+        "module_load_ms": 21.357999999999997,
+        "load_source": "precompiled",
+        "warmup_ms": 156.068792,
+        "compile_warm": {
+          "median": 148.503125,
+          "min": 147.887458,
+          "max": 151.376332,
+          "runs": 5
+        },
+        "compile_incremental": {
+          "median": 108.139209,
+          "min": 81.279458,
+          "max": 117.667709,
+          "runs": 5
+        },
+        "incremental_cold_ms": 171.559209,
+        "incremental_first_edit_ms": 108.925792,
+        "instantiate": {
+          "median": 0.123834,
+          "min": 0.113875,
+          "max": 0.135542,
+          "runs": 5
+        },
+        "link": {
+          "median": 6.632959,
+          "min": 6.413625,
+          "max": 6.827125,
+          "runs": 5
+        },
+        "peak_memory_bytes": {
+          "median": 150142976.0,
+          "min": 150142976.0,
+          "max": 150142976.0,
+          "runs": 5
+        },
+        "phases": {
+          "total_ms": 154.0,
+          "frontend_ms": 93.0,
+          "codegen_ms": 48.0,
+          "link_ms": 13.0,
+          "raw": {
+            "MIR_borrow_checking": 18.0,
+            "codegen_crate": 48.0,
+            "expand_crate": 27.0,
+            "finalize_imports": 7.0,
+            "link": 13.0,
+            "link_binary": 13.0,
+            "link_crate": 13.0,
+            "macro_expand_crate": 27.0,
+            "monomorphization_collector_graph_walk": 18.0,
+            "resolve_crate": 9.0,
+            "run_linker": 7.0,
+            "total": 154.0,
+            "type_check_crate": 27.0
+          }
+        },
+        "wasm_bytes": 85375,
+        "wasm_sha256": "8efd5f3e3152ae075359df3316b24d2ce06029b8ba1f0d9e7e5de973b0b9ddae"
+      },
+      "llvm": {
+        "compile_o0": {
+          "median": 83.74787494540215,
+          "min": 83.39045802131295,
+          "max": 88.46712484955788,
+          "runs": 5
+        },
+        "compile_o2": {
+          "median": 177.36120894551277,
+          "min": 176.47449998185039,
+          "max": 180.64329214394093,
+          "runs": 5
+        },
+        "wasm_o0_bytes": 59599,
+        "wasm_o2_bytes": 20326
+      },
+      "exec": {
+        "clif": {
+          "exec_ms": {
+            "median": 0.008021,
+            "min": 0.005917,
+            "max": 0.025041,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.008521,
+            "min": 0.007208,
+            "max": 0.06241599999999999,
+            "runs": 20
+          }
+        },
+        "llvm_o0": {
+          "exec_ms": {
+            "median": 0.010146,
+            "min": 0.00825,
+            "max": 0.025707999999999998,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0064375,
+            "min": 0.005875,
+            "max": 0.052583,
+            "runs": 20
+          }
+        },
+        "llvm_o2": {
+          "exec_ms": {
+            "median": 0.004791500000000001,
+            "min": 0.0037500000000000003,
+            "max": 0.011916999999999999,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0073545,
+            "min": 0.006125,
+            "max": 0.055583,
+            "runs": 20
+          }
+        }
+      },
+      "size": {
+        "clif": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/clif/scene.wasm",
+          "total_bytes": 85375,
+          "code_bytes": 47721,
+          "data_bytes": 20078,
+          "data_segments": 130,
+          "functions": 192,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o0": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o0/scene.wasm",
+          "total_bytes": 59599,
+          "code_bytes": 28339,
+          "data_bytes": 8127,
+          "data_segments": 1,
+          "functions": 260,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o2": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o2/scene.wasm",
+          "total_bytes": 20326,
+          "code_bytes": 15267,
+          "data_bytes": 1260,
+          "data_segments": 1,
+          "functions": 53,
+          "imports": 0,
+          "exports": 5
+        }
+      }
+    },
+    "nbody": {
+      "name": "nbody",
+      "class": "kernels",
+      "source": "bench/programs/kernels/nbody.rs",
+      "source_lines": 154,
+      "source_bytes": 4764,
+      "correct": true,
+      "outcomes": {
+        "0": {
+          "result": 11224406975805289231,
+          "out_len": 96,
+          "out_sha256": "a6ad6101fdd97243634d82b6951dc95ef381db4c0fb6f4b2cd199818ca0afc8b"
+        },
+        "1": {
+          "result": 4373391809972975737,
+          "out_len": 96,
+          "out_sha256": "493b300fd8ee44de1e8074ca87c432f9dffa176b25543837a22256a36863e975"
+        },
+        "18446744073709551615": {
+          "result": 17937931627253721966,
+          "out_len": 96,
+          "out_sha256": "e599c2198fa402dfd01219a40c61c22a2f3acd26b58a8c5a95833f566ec412fb"
+        },
+        "42": {
+          "result": 3289794197984240677,
+          "out_len": 96,
+          "out_sha256": "7bf3f12786aae33bd1c90eece80839dac85dbf6962a84b77e73d564479fd6c38"
+        }
+      },
+      "clif": {
+        "module_load_ms": 19.532332999999998,
+        "load_source": "precompiled",
+        "warmup_ms": 119.31720899999999,
+        "compile_warm": {
+          "median": 112.01920900000002,
+          "min": 111.32608400000001,
+          "max": 120.20404099999999,
+          "runs": 5
+        },
+        "compile_incremental": {
+          "median": 82.842334,
+          "min": 67.03649999999999,
+          "max": 87.864167,
+          "runs": 5
+        },
+        "incremental_cold_ms": 123.40925000000001,
+        "incremental_first_edit_ms": 82.41054100000001,
+        "instantiate": {
+          "median": 0.119208,
+          "min": 0.11299999999999999,
+          "max": 0.130583,
+          "runs": 5
+        },
+        "link": {
+          "median": 6.5091660000000005,
+          "min": 6.37225,
+          "max": 6.707583,
+          "runs": 5
+        },
+        "peak_memory_bytes": {
+          "median": 149815296.0,
+          "min": 149815296.0,
+          "max": 149815296.0,
+          "runs": 5
+        },
+        "phases": {
+          "total_ms": 121.0,
+          "frontend_ms": 79.0,
+          "codegen_ms": 30.0,
+          "link_ms": 12.0,
+          "raw": {
+            "MIR_borrow_checking": 12.0,
+            "codegen_crate": 30.0,
+            "expand_crate": 27.0,
+            "finalize_imports": 7.0,
+            "link": 12.0,
+            "link_binary": 12.0,
+            "link_crate": 12.0,
+            "macro_expand_crate": 27.0,
+            "monomorphization_collector_graph_walk": 14.0,
+            "resolve_crate": 8.0,
+            "run_linker": 6.0,
+            "total": 121.0,
+            "type_check_crate": 21.0
+          }
+        },
+        "wasm_bytes": 59069,
+        "wasm_sha256": "87c3c3d1ce91d9960bbc0b41c41bc7567bc80b821db62103334c2321244bb8ef"
+      },
+      "llvm": {
+        "compile_o0": {
+          "median": 69.93445893749595,
+          "min": 69.44254110567272,
+          "max": 73.04691686294973,
+          "runs": 5
+        },
+        "compile_o2": {
+          "median": 112.0966668240726,
+          "min": 111.86012509278953,
+          "max": 115.4081670101732,
+          "runs": 5
+        },
+        "wasm_o0_bytes": 34647,
+        "wasm_o2_bytes": 10925
+      },
+      "exec": {
+        "clif": {
+          "exec_ms": {
+            "median": 70.545146,
+            "min": 69.47325000000001,
+            "max": 71.564375,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.018417,
+            "min": 0.011875,
+            "max": 0.064583,
+            "runs": 20
+          }
+        },
+        "llvm_o0": {
+          "exec_ms": {
+            "median": 80.0378335,
+            "min": 79.721833,
+            "max": 80.633458,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0157295,
+            "min": 0.011167,
+            "max": 0.045959,
+            "runs": 20
+          }
+        },
+        "llvm_o2": {
+          "exec_ms": {
+            "median": 13.9084585,
+            "min": 13.550375,
+            "max": 14.474333000000001,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.010771,
+            "min": 0.007666999999999999,
+            "max": 0.047208,
+            "runs": 20
+          }
+        }
+      },
+      "size": {
+        "clif": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/clif/nbody.wasm",
+          "total_bytes": 59069,
+          "code_bytes": 31308,
+          "data_bytes": 19539,
+          "data_segments": 118,
+          "functions": 85,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o0": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o0/nbody.wasm",
+          "total_bytes": 34647,
+          "code_bytes": 17208,
+          "data_bytes": 6755,
+          "data_segments": 1,
+          "functions": 122,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o2": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o2/nbody.wasm",
+          "total_bytes": 10925,
+          "code_bytes": 8197,
+          "data_bytes": 948,
+          "data_segments": 1,
+          "functions": 23,
+          "imports": 0,
+          "exports": 5
+        }
+      }
+    },
+    "mandelbrot": {
+      "name": "mandelbrot",
+      "class": "kernels",
+      "source": "bench/programs/kernels/mandelbrot.rs",
+      "source_lines": 78,
+      "source_bytes": 2517,
+      "correct": true,
+      "outcomes": {
+        "0": {
+          "result": 4846820156877250067,
+          "out_len": 176,
+          "out_sha256": "d1a033f8d3b578b003ce9354af196036e29c2d20502e5b760a437d261f60a4fe"
+        },
+        "1": {
+          "result": 12205896220606677245,
+          "out_len": 176,
+          "out_sha256": "20d62cc3d702dc0473d732bcb4854d01d6e4722dc1b2ea0217cb137a3b1c3b1f"
+        },
+        "18446744073709551615": {
+          "result": 4584230841505449361,
+          "out_len": 176,
+          "out_sha256": "a3d89581252501c9478c77484110be0ccee1f3a1960a89dd56503a8703c327eb"
+        },
+        "42": {
+          "result": 1704827208983244057,
+          "out_len": 176,
+          "out_sha256": "2912c699dc85dd31384cda88db0d92d9418bac5a5776c3372d7c79bf544ff542"
+        }
+      },
+      "clif": {
+        "module_load_ms": 20.03275,
+        "load_source": "precompiled",
+        "warmup_ms": 89.43375,
+        "compile_warm": {
+          "median": 81.443875,
+          "min": 80.626667,
+          "max": 81.600458,
+          "runs": 5
+        },
+        "compile_incremental": {
+          "median": 70.234667,
+          "min": 66.15787499999999,
+          "max": 74.98645800000001,
+          "runs": 5
+        },
+        "incremental_cold_ms": 92.968333,
+        "incremental_first_edit_ms": 70.77708399999999,
+        "instantiate": {
+          "median": 0.120542,
+          "min": 0.106083,
+          "max": 0.131417,
+          "runs": 5
+        },
+        "link": {
+          "median": 6.326207999999999,
+          "min": 6.022875,
+          "max": 6.368542,
+          "runs": 5
+        },
+        "peak_memory_bytes": {
+          "median": 149684224.0,
+          "min": 149684224.0,
+          "max": 149684224.0,
+          "runs": 5
+        },
+        "phases": {
+          "total_ms": 88.0,
+          "frontend_ms": 65.0,
+          "codegen_ms": 10.0,
+          "link_ms": 13.0,
+          "raw": {
+            "MIR_borrow_checking": 7.0,
+            "codegen_crate": 10.0,
+            "expand_crate": 26.0,
+            "finalize_imports": 7.0,
+            "link": 13.0,
+            "link_binary": 13.0,
+            "link_crate": 13.0,
+            "macro_expand_crate": 26.0,
+            "resolve_crate": 8.0,
+            "run_linker": 7.0,
+            "total": 88.0,
+            "type_check_crate": 15.0
+          }
+        },
+        "wasm_bytes": 36225,
+        "wasm_sha256": "ac92f5220e131e958765ea1ca12122b6edad3ef640b8a1c4e2ef44b8f8ed662f"
+      },
+      "llvm": {
+        "compile_o0": {
+          "median": 63.9746249653399,
+          "min": 60.24637492373586,
+          "max": 65.18974993377924,
+          "runs": 5
+        },
+        "compile_o2": {
+          "median": 73.7066250294447,
+          "min": 73.30866693519056,
+          "max": 73.91625014133751,
+          "runs": 5
+        },
+        "wasm_o0_bytes": 11914,
+        "wasm_o2_bytes": 5387
+      },
+      "exec": {
+        "clif": {
+          "exec_ms": {
+            "median": 7.0487085,
+            "min": 6.8350420000000005,
+            "max": 7.533709,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.009812,
+            "min": 0.007709000000000001,
+            "max": 0.052375,
+            "runs": 20
+          }
+        },
+        "llvm_o0": {
+          "exec_ms": {
+            "median": 8.285854500000001,
+            "min": 8.006499999999999,
+            "max": 8.819541000000001,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0083535,
+            "min": 0.006958,
+            "max": 0.043583,
+            "runs": 20
+          }
+        },
+        "llvm_o2": {
+          "exec_ms": {
+            "median": 6.6383335,
+            "min": 6.280791,
+            "max": 7.659417,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0083125,
+            "min": 0.0065,
+            "max": 0.041458999999999996,
+            "runs": 20
+          }
+        }
+      },
+      "size": {
+        "clif": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/clif/mandelbrot.wasm",
+          "total_bytes": 36225,
+          "code_bytes": 13468,
+          "data_bytes": 18212,
+          "data_segments": 46,
+          "functions": 47,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o0": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o0/mandelbrot.wasm",
+          "total_bytes": 11914,
+          "code_bytes": 6335,
+          "data_bytes": 2230,
+          "data_segments": 1,
+          "functions": 43,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o2": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o2/mandelbrot.wasm",
+          "total_bytes": 5387,
+          "code_bytes": 3966,
+          "data_bytes": 468,
+          "data_segments": 1,
+          "functions": 11,
+          "imports": 0,
+          "exports": 5
+        }
+      }
+    },
+    "sha256": {
+      "name": "sha256",
+      "class": "kernels",
+      "source": "bench/programs/kernels/sha256.rs",
+      "source_lines": 200,
+      "source_bytes": 4602,
+      "correct": true,
+      "outcomes": {
+        "0": {
+          "result": 14283963037047064801,
+          "out_len": 48,
+          "out_sha256": "0ff2b5a2034c992b732cd23fee4121d525dbaa19e1686218e33364a271efb5c9"
+        },
+        "1": {
+          "result": 1952224860990130006,
+          "out_len": 48,
+          "out_sha256": "dc3619a336b6a15a44845ae4f5870ff323960e17eccc3a492314388d81606181"
+        },
+        "18446744073709551615": {
+          "result": 10422693836847268004,
+          "out_len": 48,
+          "out_sha256": "e9586ade7b3cde7eea99a346dc1ab4ac20dadfecef7f898b38f087d614055c0a"
+        },
+        "42": {
+          "result": 5087414968702203861,
+          "out_len": 48,
+          "out_sha256": "22722326c0b93a2316ad66d1bb32cf52d394b27569695f085e08c2ffcb2c6073"
+        }
+      },
+      "clif": {
+        "module_load_ms": 21.483041,
+        "load_source": "precompiled",
+        "warmup_ms": 102.923291,
+        "compile_warm": {
+          "median": 93.267625,
+          "min": 93.13495800000001,
+          "max": 93.532333,
+          "runs": 5
+        },
+        "compile_incremental": {
+          "median": 79.17566599999999,
+          "min": 67.16533299999999,
+          "max": 83.96058199999999,
+          "runs": 5
+        },
+        "incremental_cold_ms": 108.835916,
+        "incremental_first_edit_ms": 85.002667,
+        "instantiate": {
+          "median": 0.112458,
+          "min": 0.10925,
+          "max": 0.12025,
+          "runs": 5
+        },
+        "link": {
+          "median": 6.5795829999999995,
+          "min": 6.371209,
+          "max": 6.922834,
+          "runs": 5
+        },
+        "peak_memory_bytes": {
+          "median": 149815296.0,
+          "min": 149815296.0,
+          "max": 149815296.0,
+          "runs": 5
+        },
+        "phases": {
+          "total_ms": 99.0,
+          "frontend_ms": 70.0,
+          "codegen_ms": 17.0,
+          "link_ms": 12.0,
+          "raw": {
+            "MIR_borrow_checking": 8.0,
+            "codegen_crate": 17.0,
+            "expand_crate": 26.0,
+            "finalize_imports": 7.0,
+            "link": 12.0,
+            "link_binary": 12.0,
+            "link_crate": 12.0,
+            "macro_expand_crate": 26.0,
+            "monomorphization_collector_graph_walk": 8.0,
+            "resolve_crate": 8.0,
+            "run_linker": 6.0,
+            "total": 99.0,
+            "type_check_crate": 18.0
+          }
+        },
+        "wasm_bytes": 50057,
+        "wasm_sha256": "786ec61553325cacb39d51afcec7d1d0c7817c458997295f38b1491490cdc428"
+      },
+      "llvm": {
+        "compile_o0": {
+          "median": 65.63929212279618,
+          "min": 64.79533412493765,
+          "max": 67.70429201424122,
+          "runs": 5
+        },
+        "compile_o2": {
+          "median": 93.16299995407462,
+          "min": 92.67654200084507,
+          "max": 94.69516691751778,
+          "runs": 5
+        },
+        "wasm_o0_bytes": 26656,
+        "wasm_o2_bytes": 9390
+      },
+      "exec": {
+        "clif": {
+          "exec_ms": {
+            "median": 2.777854,
+            "min": 2.582958,
+            "max": 2.9560839999999997,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0095205,
+            "min": 0.007666000000000001,
+            "max": 0.050624999999999996,
+            "runs": 20
+          }
+        },
+        "llvm_o0": {
+          "exec_ms": {
+            "median": 1.0818535000000002,
+            "min": 1.023209,
+            "max": 1.167167,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.008042,
+            "min": 0.006416,
+            "max": 0.05,
+            "runs": 20
+          }
+        },
+        "llvm_o2": {
+          "exec_ms": {
+            "median": 0.2253755,
+            "min": 0.209041,
+            "max": 0.254917,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.008354,
+            "min": 0.006542,
+            "max": 0.051666000000000004,
+            "runs": 20
+          }
+        }
+      },
+      "size": {
+        "clif": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/clif/sha256.wasm",
+          "total_bytes": 50057,
+          "code_bytes": 23168,
+          "data_bytes": 19328,
+          "data_segments": 82,
+          "functions": 83,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o0": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o0/sha256.wasm",
+          "total_bytes": 26656,
+          "code_bytes": 12762,
+          "data_bytes": 5855,
+          "data_segments": 1,
+          "functions": 97,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o2": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o2/sha256.wasm",
+          "total_bytes": 9390,
+          "code_bytes": 6817,
+          "data_bytes": 968,
+          "data_segments": 1,
+          "functions": 22,
+          "imports": 0,
+          "exports": 5
+        }
+      }
+    },
+    "sort": {
+      "name": "sort",
+      "class": "kernels",
+      "source": "bench/programs/kernels/sort.rs",
+      "source_lines": 120,
+      "source_bytes": 2981,
+      "correct": true,
+      "outcomes": {
+        "0": {
+          "result": 9591102524396385901,
+          "out_len": 305,
+          "out_sha256": "5e61f3fde0f35f8600c8972be034eaa65f2c74e622fc88fc0411851bb3685596"
+        },
+        "1": {
+          "result": 8735674387332762881,
+          "out_len": 305,
+          "out_sha256": "ba06ffafe7bd6baa90a94022ecec21ad54a5a05413fc8ee85061bfd59b5cac9e"
+        },
+        "18446744073709551615": {
+          "result": 7757932051837636840,
+          "out_len": 305,
+          "out_sha256": "d6b554245738f5642c32e3729dc570ca2f9b54076027215757505dcd929cefbe"
+        },
+        "42": {
+          "result": 4038159485772949114,
+          "out_len": 305,
+          "out_sha256": "c5b8422e646569280ad15e35ecb947081751731fc37becac8582fbf351ed1527"
+        }
+      },
+      "clif": {
+        "module_load_ms": 20.661292,
+        "load_source": "precompiled",
+        "warmup_ms": 125.85629199999998,
+        "compile_warm": {
+          "median": 112.611958,
+          "min": 111.971125,
+          "max": 113.858875,
+          "runs": 5
+        },
+        "compile_incremental": {
+          "median": 87.341333,
+          "min": 79.46391600000001,
+          "max": 94.093374,
+          "runs": 5
+        },
+        "incremental_cold_ms": 139.738,
+        "incremental_first_edit_ms": 88.23791600000001,
+        "instantiate": {
+          "median": 0.11425,
+          "min": 0.11029199999999999,
+          "max": 0.12258399999999998,
+          "runs": 5
+        },
+        "link": {
+          "median": 6.381958,
+          "min": 5.922333999999999,
+          "max": 6.731,
+          "runs": 5
+        },
+        "peak_memory_bytes": {
+          "median": 149749760.0,
+          "min": 149749760.0,
+          "max": 149749760.0,
+          "runs": 5
+        },
+        "phases": {
+          "total_ms": 119.0,
+          "frontend_ms": 69.0,
+          "codegen_ms": 37.0,
+          "link_ms": 13.0,
+          "raw": {
+            "MIR_borrow_checking": 8.0,
+            "codegen_crate": 37.0,
+            "expand_crate": 27.0,
+            "finalize_imports": 7.0,
+            "link": 13.0,
+            "link_binary": 13.0,
+            "link_crate": 13.0,
+            "macro_expand_crate": 27.0,
+            "monomorphization_collector_graph_walk": 14.0,
+            "resolve_crate": 8.0,
+            "run_linker": 6.0,
+            "total": 119.0,
+            "type_check_crate": 16.0
+          }
+        },
+        "wasm_bytes": 68709,
+        "wasm_sha256": "766df60bfb8be87181b407714cfc5892cfb412dbfd52bca5a640d941b3ab1e74"
+      },
+      "llvm": {
+        "compile_o0": {
+          "median": 73.5353329218924,
+          "min": 71.75124995410442,
+          "max": 75.39383298717439,
+          "runs": 5
+        },
+        "compile_o2": {
+          "median": 151.14991599693894,
+          "min": 149.93212488479912,
+          "max": 152.5559169240296,
+          "runs": 5
+        },
+        "wasm_o0_bytes": 49276,
+        "wasm_o2_bytes": 13860
+      },
+      "exec": {
+        "clif": {
+          "exec_ms": {
+            "median": 11.8971455,
+            "min": 11.74825,
+            "max": 12.223125,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.009187500000000001,
+            "min": 0.008,
+            "max": 0.057333999999999996,
+            "runs": 20
+          }
+        },
+        "llvm_o0": {
+          "exec_ms": {
+            "median": 10.9244375,
+            "min": 10.824291,
+            "max": 11.153209,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0087505,
+            "min": 0.007292,
+            "max": 0.049458,
+            "runs": 20
+          }
+        },
+        "llvm_o2": {
+          "exec_ms": {
+            "median": 0.9738119999999999,
+            "min": 0.895917,
+            "max": 1.108542,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0082705,
+            "min": 0.007042,
+            "max": 0.047833,
+            "runs": 20
+          }
+        }
+      },
+      "size": {
+        "clif": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/clif/sort.wasm",
+          "total_bytes": 68709,
+          "code_bytes": 33786,
+          "data_bytes": 21077,
+          "data_segments": 117,
+          "functions": 138,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o0": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o0/sort.wasm",
+          "total_bytes": 49276,
+          "code_bytes": 24447,
+          "data_bytes": 10726,
+          "data_segments": 1,
+          "functions": 155,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o2": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o2/sort.wasm",
+          "total_bytes": 13860,
+          "code_bytes": 10433,
+          "data_bytes": 1116,
+          "data_segments": 1,
+          "functions": 29,
+          "imports": 0,
+          "exports": 5
+        }
+      }
+    },
+    "matmul": {
+      "name": "matmul",
+      "class": "kernels",
+      "source": "bench/programs/kernels/matmul.rs",
+      "source_lines": 94,
+      "source_bytes": 2354,
+      "correct": true,
+      "outcomes": {
+        "0": {
+          "result": 4404046743029964198,
+          "out_len": 64,
+          "out_sha256": "d12ac0124a0eea76d1d24056013e2b0f5e7a77cda9d5325d058258d38854207c"
+        },
+        "1": {
+          "result": 9547670995751556571,
+          "out_len": 64,
+          "out_sha256": "bbaeebf732c2bbd681b819aac36896d9e4b870b6c5076c53d51da22b1c84c096"
+        },
+        "18446744073709551615": {
+          "result": 15310396317985572840,
+          "out_len": 64,
+          "out_sha256": "416c09d8c886d156a9073633555f9e4bdddeab1cdffa4544c07c95b2e73fc030"
+        },
+        "42": {
+          "result": 16968660701559136273,
+          "out_len": 64,
+          "out_sha256": "dbbb061ab7717ceee81a201a03601f55325ef90586553faa48bb2943042b7247"
+        }
+      },
+      "clif": {
+        "module_load_ms": 18.159625,
+        "load_source": "precompiled",
+        "warmup_ms": 103.44375,
+        "compile_warm": {
+          "median": 93.360251,
+          "min": 91.272042,
+          "max": 99.717209,
+          "runs": 5
+        },
+        "compile_incremental": {
+          "median": 77.097,
+          "min": 70.469041,
+          "max": 81.84762500000001,
+          "runs": 5
+        },
+        "incremental_cold_ms": 105.589375,
+        "incremental_first_edit_ms": 76.01720800000001,
+        "instantiate": {
+          "median": 0.11787500000000001,
+          "min": 0.11012499999999999,
+          "max": 0.129917,
+          "runs": 5
+        },
+        "link": {
+          "median": 6.170833,
+          "min": 5.878125,
+          "max": 6.31375,
+          "runs": 5
+        },
+        "peak_memory_bytes": {
+          "median": 149749760.0,
+          "min": 149749760.0,
+          "max": 149749760.0,
+          "runs": 5
+        },
+        "phases": {
+          "total_ms": 99.0,
+          "frontend_ms": 67.0,
+          "codegen_ms": 19.0,
+          "link_ms": 13.0,
+          "raw": {
+            "MIR_borrow_checking": 8.0,
+            "codegen_crate": 19.0,
+            "expand_crate": 26.0,
+            "finalize_imports": 7.0,
+            "link": 13.0,
+            "link_binary": 13.0,
+            "link_crate": 13.0,
+            "macro_expand_crate": 27.0,
+            "monomorphization_collector_graph_walk": 8.0,
+            "resolve_crate": 8.0,
+            "run_linker": 6.0,
+            "total": 99.0,
+            "type_check_crate": 16.0
+          }
+        },
+        "wasm_bytes": 49082,
+        "wasm_sha256": "9bdc5c09a85d75ce10db75d2616cce19c815cc7cca3c3d6ea653a0b2e20e45d6"
+      },
+      "llvm": {
+        "compile_o0": {
+          "median": 65.73629193007946,
+          "min": 64.41112491302192,
+          "max": 67.76062515564263,
+          "runs": 5
+        },
+        "compile_o2": {
+          "median": 96.58454195596278,
+          "min": 96.05520917102695,
+          "max": 98.27087493613362,
+          "runs": 5
+        },
+        "wasm_o0_bytes": 27764,
+        "wasm_o2_bytes": 8877
+      },
+      "exec": {
+        "clif": {
+          "exec_ms": {
+            "median": 1.785979,
+            "min": 1.698292,
+            "max": 1.821708,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.008854,
+            "min": 0.007500000000000001,
+            "max": 0.05375,
+            "runs": 20
+          }
+        },
+        "llvm_o0": {
+          "exec_ms": {
+            "median": 2.164125,
+            "min": 2.113625,
+            "max": 2.215792,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0084165,
+            "min": 0.006958,
+            "max": 0.048708999999999995,
+            "runs": 20
+          }
+        },
+        "llvm_o2": {
+          "exec_ms": {
+            "median": 1.141875,
+            "min": 1.131125,
+            "max": 1.193125,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.007396,
+            "min": 0.006875,
+            "max": 0.0385,
+            "runs": 20
+          }
+        }
+      },
+      "size": {
+        "clif": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/clif/matmul.wasm",
+          "total_bytes": 49082,
+          "code_bytes": 22848,
+          "data_bytes": 18888,
+          "data_segments": 70,
+          "functions": 81,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o0": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o0/matmul.wasm",
+          "total_bytes": 27764,
+          "code_bytes": 13522,
+          "data_bytes": 5711,
+          "data_segments": 1,
+          "functions": 101,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o2": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o2/matmul.wasm",
+          "total_bytes": 8877,
+          "code_bytes": 6250,
+          "data_bytes": 932,
+          "data_segments": 1,
+          "functions": 22,
+          "imports": 0,
+          "exports": 5
+        }
+      }
+    },
+    "strings": {
+      "name": "strings",
+      "class": "kernels",
+      "source": "bench/programs/kernels/strings.rs",
+      "source_lines": 171,
+      "source_bytes": 4960,
+      "correct": true,
+      "outcomes": {
+        "0": {
+          "result": 12138143686488184263,
+          "out_len": 216,
+          "out_sha256": "e4979476c72195a0ec1788fdfe3b296a32b97500b8d8acfca38a983178de60e1"
+        },
+        "1": {
+          "result": 14880659818678041391,
+          "out_len": 216,
+          "out_sha256": "ba5c8527af0b33e5750d9c6350b4938aeb3e965ff65209d159de2dc83a8a604a"
+        },
+        "18446744073709551615": {
+          "result": 14842934446077382574,
+          "out_len": 216,
+          "out_sha256": "3265427aaf41bf3c8bd5630c5f0660a1d35ca801644674955f393b6c1bb73961"
+        },
+        "42": {
+          "result": 6379618752955351183,
+          "out_len": 216,
+          "out_sha256": "e170651bc00dc3c26780cd2df938351b935b776b20e69d1877689c4826c46e03"
+        }
+      },
+      "clif": {
+        "module_load_ms": 21.878833,
+        "load_source": "precompiled",
+        "warmup_ms": 121.963667,
+        "compile_warm": {
+          "median": 113.068708,
+          "min": 112.43908400000001,
+          "max": 117.461293,
+          "runs": 5
+        },
+        "compile_incremental": {
+          "median": 91.059625,
+          "min": 69.171376,
+          "max": 97.00225,
+          "runs": 5
+        },
+        "incremental_cold_ms": 135.184042,
+        "incremental_first_edit_ms": 93.36749999999999,
+        "instantiate": {
+          "median": 0.115,
+          "min": 0.110958,
+          "max": 0.127458,
+          "runs": 5
+        },
+        "link": {
+          "median": 6.499042,
+          "min": 6.2729159999999995,
+          "max": 6.805916000000001,
+          "runs": 5
+        },
+        "peak_memory_bytes": {
+          "median": 149815296.0,
+          "min": 149815296.0,
+          "max": 149815296.0,
+          "runs": 5
+        },
+        "phases": {
+          "total_ms": 120.0,
+          "frontend_ms": 74.0,
+          "codegen_ms": 33.0,
+          "link_ms": 13.0,
+          "raw": {
+            "MIR_borrow_checking": 11.0,
+            "codegen_crate": 33.0,
+            "expand_crate": 27.0,
+            "finalize_imports": 7.0,
+            "link": 13.0,
+            "link_binary": 13.0,
+            "link_crate": 13.0,
+            "macro_expand_crate": 27.0,
+            "monomorphization_collector_graph_walk": 14.0,
+            "resolve_crate": 8.0,
+            "run_linker": 7.0,
+            "total": 120.0,
+            "type_check_crate": 19.0
+          }
+        },
+        "wasm_bytes": 69576,
+        "wasm_sha256": "26d56f544f0e43f700453190ac8350bbb05320e2523345c04b2499c45e771e65"
+      },
+      "llvm": {
+        "compile_o0": {
+          "median": 72.95716693624854,
+          "min": 72.8275419678539,
+          "max": 73.46087484620512,
+          "runs": 5
+        },
+        "compile_o2": {
+          "median": 135.99033397622406,
+          "min": 135.51337481476367,
+          "max": 139.80887504294515,
+          "runs": 5
+        },
+        "wasm_o0_bytes": 47662,
+        "wasm_o2_bytes": 11996
+      },
+      "exec": {
+        "clif": {
+          "exec_ms": {
+            "median": 1.4975,
+            "min": 1.468708,
+            "max": 1.5337910000000001,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0086455,
+            "min": 0.008,
+            "max": 0.055041,
+            "runs": 20
+          }
+        },
+        "llvm_o0": {
+          "exec_ms": {
+            "median": 1.4033335,
+            "min": 1.372375,
+            "max": 1.510958,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0075,
+            "min": 0.00675,
+            "max": 0.054334,
+            "runs": 20
+          }
+        },
+        "llvm_o2": {
+          "exec_ms": {
+            "median": 0.1627705,
+            "min": 0.14416700000000002,
+            "max": 0.185541,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0071875,
+            "min": 0.006333,
+            "max": 0.049,
+            "runs": 20
+          }
+        }
+      },
+      "size": {
+        "clif": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/clif/strings.wasm",
+          "total_bytes": 69576,
+          "code_bytes": 36045,
+          "data_bytes": 21226,
+          "data_segments": 138,
+          "functions": 122,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o0": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o0/strings.wasm",
+          "total_bytes": 47662,
+          "code_bytes": 23719,
+          "data_bytes": 9407,
+          "data_segments": 1,
+          "functions": 153,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o2": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o2/strings.wasm",
+          "total_bytes": 11996,
+          "code_bytes": 8568,
+          "data_bytes": 1404,
+          "data_segments": 1,
+          "functions": 24,
+          "imports": 0,
+          "exports": 5
+        }
+      }
+    },
+    "math_e": {
+      "name": "math_e",
+      "class": "kernels",
+      "source": "bench/programs/kernels/math_e.rs",
+      "source_lines": 40,
+      "source_bytes": 1411,
+      "correct": true,
+      "outcomes": {
+        "0": {
+          "result": 15112907599441326054,
+          "out_len": 24,
+          "out_sha256": "62b8c80a416e5772f83b9f3289e578fac68682288bdb816866d0ed272550a358"
+        },
+        "1": {
+          "result": 15087939962445563895,
+          "out_len": 24,
+          "out_sha256": "f84248d60d3eedab9f2f8e4765cc4a6e3e26d62c4e6cb23c849afec757ee2723"
+        },
+        "18446744073709551615": {
+          "result": 15067979812408367273,
+          "out_len": 24,
+          "out_sha256": "c811454ba83c3a95342cdee80783a8377be2f48eeeeb947931d82568104e082c"
+        },
+        "42": {
+          "result": 15266672302302440485,
+          "out_len": 24,
+          "out_sha256": "99d5c3d3314b96775eaf934cb558176669906cd1206058a0b57c03a08b49313e"
+        }
+      },
+      "clif": {
+        "module_load_ms": 19.353208,
+        "load_source": "precompiled",
+        "warmup_ms": 93.46770900000001,
+        "compile_warm": {
+          "median": 85.14200000000001,
+          "min": 84.349249,
+          "max": 91.327541,
+          "runs": 5
+        },
+        "compile_incremental": {
+          "median": 75.29258399999999,
+          "min": 66.59795799999999,
+          "max": 79.52550099999999,
+          "runs": 5
+        },
+        "incremental_cold_ms": 97.062375,
+        "incremental_first_edit_ms": 75.070583,
+        "instantiate": {
+          "median": 0.12208400000000001,
+          "min": 0.107042,
+          "max": 0.127291,
+          "runs": 5
+        },
+        "link": {
+          "median": 6.660209,
+          "min": 6.249042,
+          "max": 6.914791,
+          "runs": 5
+        },
+        "peak_memory_bytes": {
+          "median": 152043520.0,
+          "min": 152043520.0,
+          "max": 152043520.0,
+          "runs": 5
+        },
+        "phases": {
+          "total_ms": 92.0,
+          "frontend_ms": 67.0,
+          "codegen_ms": 10.0,
+          "link_ms": 15.0,
+          "raw": {
+            "MIR_borrow_checking": 7.0,
+            "codegen_crate": 10.0,
+            "expand_crate": 28.0,
+            "finalize_imports": 7.0,
+            "link": 15.0,
+            "link_binary": 15.0,
+            "link_crate": 15.0,
+            "macro_expand_crate": 28.0,
+            "resolve_crate": 8.0,
+            "run_linker": 7.0,
+            "total": 92.0,
+            "type_check_crate": 14.0
+          }
+        },
+        "wasm_bytes": 57549,
+        "wasm_sha256": "5c1117bbd78d7d77b20b7bc4db69af887a3a6c8a70182e4b6d3f5d8d0b219457"
+      },
+      "llvm": {
+        "compile_o0": {
+          "median": 61.02995900437236,
+          "min": 60.73695910163224,
+          "max": 61.68620800599456,
+          "runs": 5
+        },
+        "compile_o2": {
+          "median": 69.90000000223517,
+          "min": 68.9613341819495,
+          "max": 72.7836659643799,
+          "runs": 5
+        },
+        "wasm_o0_bytes": 20515,
+        "wasm_o2_bytes": 13886
+      },
+      "exec": {
+        "clif": {
+          "exec_ms": {
+            "median": 6.825396,
+            "min": 6.78525,
+            "max": 6.851,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.00975,
+            "min": 0.008209000000000001,
+            "max": 0.0535,
+            "runs": 20
+          }
+        },
+        "llvm_o0": {
+          "exec_ms": {
+            "median": 3.5418545000000003,
+            "min": 3.507,
+            "max": 3.587042,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.007146,
+            "min": 0.006334,
+            "max": 0.047458,
+            "runs": 20
+          }
+        },
+        "llvm_o2": {
+          "exec_ms": {
+            "median": 2.522417,
+            "min": 2.437459,
+            "max": 2.560708,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0080625,
+            "min": 0.007209,
+            "max": 0.04425,
+            "runs": 20
+          }
+        }
+      },
+      "size": {
+        "clif": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/clif/math_e.wasm",
+          "total_bytes": 57549,
+          "code_bytes": 28330,
+          "data_bytes": 20192,
+          "data_segments": 77,
+          "functions": 102,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o0": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o0/math_e.wasm",
+          "total_bytes": 20515,
+          "code_bytes": 13782,
+          "data_bytes": 2760,
+          "data_segments": 1,
+          "functions": 53,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o2": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o2/math_e.wasm",
+          "total_bytes": 13886,
+          "code_bytes": 11585,
+          "data_bytes": 1072,
+          "data_segments": 1,
+          "functions": 17,
+          "imports": 0,
+          "exports": 5
+        }
+      }
+    },
+    "hostcall_f": {
+      "name": "hostcall_f",
+      "class": "kernels",
+      "source": "bench/programs/kernels/hostcall_f.rs",
+      "source_lines": 47,
+      "source_bytes": 1615,
+      "correct": true,
+      "outcomes": {
+        "0": {
+          "result": 4630977655031901229,
+          "out_len": 8,
+          "out_sha256": "f7cbcdbae56c27e3b4dba5eaa0856debd2bddd767494f760c1288b297c226f8b"
+        },
+        "1": {
+          "result": 4630977655060966456,
+          "out_len": 8,
+          "out_sha256": "085130ba27bff51ae5f6469fe4008276485ecf1149b713686fa583f2859caf1c"
+        },
+        "18446744073709551615": {
+          "result": 4630977655031901229,
+          "out_len": 8,
+          "out_sha256": "f7cbcdbae56c27e3b4dba5eaa0856debd2bddd767494f760c1288b297c226f8b"
+        },
+        "42": {
+          "result": 4630977655264548851,
+          "out_len": 8,
+          "out_sha256": "01c36162cc6473c2f57aaecf3d4c280aebbab0ae50c4a743cce57c74706247f5"
+        }
+      },
+      "clif": {
+        "module_load_ms": 20.237542,
+        "load_source": "precompiled",
+        "warmup_ms": 85.127334,
+        "compile_warm": {
+          "median": 77.5695,
+          "min": 76.90420900000001,
+          "max": 77.88950000000001,
+          "runs": 5
+        },
+        "compile_incremental": {
+          "median": 69.78175,
+          "min": 61.45879099999999,
+          "max": 73.347917,
+          "runs": 5
+        },
+        "incremental_cold_ms": 94.973249,
+        "incremental_first_edit_ms": 70.16625,
+        "instantiate": {
+          "median": 0.121792,
+          "min": 0.117625,
+          "max": 0.12504200000000001,
+          "runs": 5
+        },
+        "link": {
+          "median": 6.4542910000000004,
+          "min": 6.333291,
+          "max": 6.6823749999999995,
+          "runs": 5
+        },
+        "peak_memory_bytes": {
+          "median": 149684224.0,
+          "min": 149684224.0,
+          "max": 149684224.0,
+          "runs": 5
+        },
+        "phases": {
+          "total_ms": 85.0,
+          "frontend_ms": 64.0,
+          "codegen_ms": 8.0,
+          "link_ms": 13.0,
+          "raw": {
+            "MIR_borrow_checking": 7.0,
+            "codegen_crate": 8.0,
+            "expand_crate": 26.0,
+            "finalize_imports": 7.0,
+            "link": 13.0,
+            "link_binary": 13.0,
+            "link_crate": 13.0,
+            "macro_expand_crate": 26.0,
+            "resolve_crate": 8.0,
+            "run_linker": 7.0,
+            "total": 85.0,
+            "type_check_crate": 14.0
+          }
+        },
+        "wasm_bytes": 35505,
+        "wasm_sha256": "34a476da12d6f60de0a72ade215afb41a7bd6edb8ffd7b407dbd11dffaa5834d"
+      },
+      "llvm": {
+        "compile_o0": {
+          "median": 60.84454199299216,
+          "min": 59.37295802868903,
+          "max": 65.30666700564325,
+          "runs": 5
+        },
+        "compile_o2": {
+          "median": 66.3505841512233,
+          "min": 65.9428748767823,
+          "max": 66.56358297914267,
+          "runs": 5
+        },
+        "wasm_o0_bytes": 10070,
+        "wasm_o2_bytes": 4810
+      },
+      "exec": {
+        "clif": {
+          "exec_ms": {
+            "median": 0.5096040000000001,
+            "min": 0.479,
+            "max": 0.552334,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.008917,
+            "min": 0.006875,
+            "max": 0.054208,
+            "runs": 20
+          }
+        },
+        "llvm_o0": {
+          "exec_ms": {
+            "median": 0.551646,
+            "min": 0.5460419999999999,
+            "max": 0.575875,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.007167,
+            "min": 0.006709,
+            "max": 0.048083,
+            "runs": 20
+          }
+        },
+        "llvm_o2": {
+          "exec_ms": {
+            "median": 0.512021,
+            "min": 0.478375,
+            "max": 0.5568329999999999,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0081045,
+            "min": 0.00675,
+            "max": 0.05725,
+            "runs": 20
+          }
+        }
+      },
+      "size": {
+        "clif": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/clif/hostcall_f.wasm",
+          "total_bytes": 35505,
+          "code_bytes": 12455,
+          "data_bytes": 18340,
+          "data_segments": 47,
+          "functions": 47,
+          "imports": 5,
+          "exports": 5
+        },
+        "llvm_o0": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o0/hostcall_f.wasm",
+          "total_bytes": 10070,
+          "code_bytes": 4867,
+          "data_bytes": 2095,
+          "data_segments": 1,
+          "functions": 35,
+          "imports": 5,
+          "exports": 5
+        },
+        "llvm_o2": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o2/hostcall_f.wasm",
+          "total_bytes": 4810,
+          "code_bytes": 2946,
+          "data_bytes": 600,
+          "data_segments": 1,
+          "functions": 11,
+          "imports": 5,
+          "exports": 5
+        }
+      }
+    },
+    "libm_driver": {
+      "name": "libm_driver",
+      "class": "large",
+      "source": "bench/programs/large/libm_driver.rs",
+      "source_lines": 37,
+      "source_bytes": 1432,
+      "correct": true,
+      "outcomes": {
+        "0": {
+          "result": 896897898850961008,
+          "out_len": 56,
+          "out_sha256": "b2abef4a7974bf499303b744fb0ea8d93a8ac9a4be584ccc0d89360f55c9eb52"
+        },
+        "1": {
+          "result": 5757164006303436537,
+          "out_len": 56,
+          "out_sha256": "c89f5bbac03ebb19982ab65c167f0d7e18498ea1e3ee4032e44610c07a65d282"
+        },
+        "18446744073709551615": {
+          "result": 4410630854845183736,
+          "out_len": 56,
+          "out_sha256": "edecc1bd2e9c4806dd936b46cc3e5bac242cdf8d041172241f858c763db9752b"
+        },
+        "42": {
+          "result": 3377105507783488917,
+          "out_len": 56,
+          "out_sha256": "c70cc2b0abd6aa7234e740e5667b432185f3d426299edd62bdf75d39ded93a88"
+        }
+      },
+      "clif": {
+        "module_load_ms": 19.596125,
+        "load_source": "precompiled",
+        "warmup_ms": 94.420833,
+        "compile_warm": {
+          "median": 85.25770800000001,
+          "min": 84.457125,
+          "max": 92.329458,
+          "runs": 5
+        },
+        "compile_incremental": {
+          "median": 76.452875,
+          "min": 65.61895899999999,
+          "max": 81.683667,
+          "runs": 5
+        },
+        "incremental_cold_ms": 98.02658299999999,
+        "incremental_first_edit_ms": 74.954667,
+        "instantiate": {
+          "median": 0.12779100000000002,
+          "min": 0.111,
+          "max": 0.141333,
+          "runs": 5
+        },
+        "link": {
+          "median": 6.59475,
+          "min": 6.459124999999999,
+          "max": 7.0377920000000005,
+          "runs": 5
+        },
+        "peak_memory_bytes": {
+          "median": 152043520.0,
+          "min": 152043520.0,
+          "max": 152043520.0,
+          "runs": 5
+        },
+        "phases": {
+          "total_ms": 91.0,
+          "frontend_ms": 67.0,
+          "codegen_ms": 9.0,
+          "link_ms": 15.0,
+          "raw": {
+            "MIR_borrow_checking": 7.0,
+            "codegen_crate": 9.0,
+            "expand_crate": 28.0,
+            "finalize_imports": 7.0,
+            "link": 15.0,
+            "link_binary": 15.0,
+            "link_crate": 15.0,
+            "macro_expand_crate": 28.0,
+            "resolve_crate": 8.0,
+            "run_linker": 7.0,
+            "total": 91.0,
+            "type_check_crate": 14.0
+          }
+        },
+        "wasm_bytes": 63737,
+        "wasm_sha256": "542b40c6941638eb0cbc048eec868b95d92a4e25d0aa75e76c697e8ce46f7f0d"
+      },
+      "llvm": {
+        "compile_o0": {
+          "median": 60.981374932453036,
+          "min": 60.23275014013052,
+          "max": 61.23141688294709,
+          "runs": 5
+        },
+        "compile_o2": {
+          "median": 71.37766713276505,
+          "min": 70.40324993431568,
+          "max": 75.1821668818593,
+          "runs": 5
+        },
+        "wasm_o0_bytes": 24985,
+        "wasm_o2_bytes": 18457
+      },
+      "exec": {
+        "clif": {
+          "exec_ms": {
+            "median": 2.7642915,
+            "min": 2.6796670000000002,
+            "max": 2.839875,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.008854,
+            "min": 0.007708,
+            "max": 0.062375,
+            "runs": 20
+          }
+        },
+        "llvm_o0": {
+          "exec_ms": {
+            "median": 1.1260835,
+            "min": 1.100458,
+            "max": 1.181208,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0068330000000000005,
+            "min": 0.006166,
+            "max": 0.050124999999999996,
+            "runs": 20
+          }
+        },
+        "llvm_o2": {
+          "exec_ms": {
+            "median": 0.850625,
+            "min": 0.831833,
+            "max": 0.897041,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0069169999999999995,
+            "min": 0.005917,
+            "max": 0.045250000000000005,
+            "runs": 20
+          }
+        }
+      },
+      "size": {
+        "clif": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/clif/libm_driver.wasm",
+          "total_bytes": 63737,
+          "code_bytes": 34101,
+          "data_bytes": 20368,
+          "data_segments": 86,
+          "functions": 105,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o0": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o0/libm_driver.wasm",
+          "total_bytes": 24985,
+          "code_bytes": 17813,
+          "data_bytes": 2888,
+          "data_segments": 1,
+          "functions": 56,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o2": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o2/libm_driver.wasm",
+          "total_bytes": 18457,
+          "code_bytes": 15784,
+          "data_bytes": 1200,
+          "data_segments": 1,
+          "functions": 22,
+          "imports": 0,
+          "exports": 5
+        }
+      }
+    },
+    "miniz_driver": {
+      "name": "miniz_driver",
+      "class": "large",
+      "source": "bench/programs/large/miniz_driver.rs",
+      "source_lines": 40,
+      "source_bytes": 1643,
+      "correct": true,
+      "outcomes": {
+        "0": {
+          "result": 2724117488310662350,
+          "out_len": 21,
+          "out_sha256": "fe4e0075944f9e218669ea85a17e6e494aabaa4aa64f06419e3f1f6da428206e"
+        },
+        "1": {
+          "result": 3274109836155926573,
+          "out_len": 21,
+          "out_sha256": "ba94cb940a9f7ca4b63388f125578768c793c6c27873fb8f87d00aa7ce1ce3d7"
+        },
+        "18446744073709551615": {
+          "result": 7096853537782251092,
+          "out_len": 21,
+          "out_sha256": "cfbfc7fc841d822882831027f8f821f11b60e9f6ed9d9c15c647560ff5c31ff4"
+        },
+        "42": {
+          "result": 4790591640281036429,
+          "out_len": 21,
+          "out_sha256": "216d8e9255e74933921ce5ce4b1f5435f274c0ff38ddf402f57962d2c14eadf9"
+        }
+      },
+      "clif": {
+        "module_load_ms": 19.553541,
+        "load_source": "precompiled",
+        "warmup_ms": 115.803958,
+        "compile_warm": {
+          "median": 105.850125,
+          "min": 104.57575,
+          "max": 106.937625,
+          "runs": 5
+        },
+        "compile_incremental": {
+          "median": 92.795959,
+          "min": 78.10891699999999,
+          "max": 96.67108400000001,
+          "runs": 5
+        },
+        "incremental_cold_ms": 121.081084,
+        "incremental_first_edit_ms": 91.49487500000001,
+        "instantiate": {
+          "median": 0.120917,
+          "min": 0.111375,
+          "max": 0.134625,
+          "runs": 5
+        },
+        "link": {
+          "median": 6.729375,
+          "min": 6.3583750000000006,
+          "max": 7.1496249999999995,
+          "runs": 5
+        },
+        "peak_memory_bytes": {
+          "median": 150339584.0,
+          "min": 150339584.0,
+          "max": 150339584.0,
+          "runs": 5
+        },
+        "phases": {
+          "total_ms": 115.0,
+          "frontend_ms": 81.0,
+          "codegen_ms": 18.0,
+          "link_ms": 16.0,
+          "raw": {
+            "MIR_borrow_checking": 9.0,
+            "codegen_crate": 18.0,
+            "expand_crate": 35.0,
+            "finalize_imports": 8.0,
+            "link": 16.0,
+            "link_binary": 16.0,
+            "link_crate": 16.0,
+            "macro_expand_crate": 35.0,
+            "monomorphization_collector_graph_walk": 10.0,
+            "resolve_crate": 9.0,
+            "run_linker": 7.0,
+            "total": 115.0,
+            "type_check_crate": 17.0
+          }
+        },
+        "wasm_bytes": 253510,
+        "wasm_sha256": "da58114a795f13bad4d413308c077d3bacb414ca073cfb58f8815fde5c576e97"
+      },
+      "llvm": {
+        "compile_o0": {
+          "median": 64.87020803615451,
+          "min": 64.72595920786262,
+          "max": 66.11045799218118,
+          "runs": 5
+        },
+        "compile_o2": {
+          "median": 81.71570813283324,
+          "min": 80.67633304744959,
+          "max": 85.26391698978841,
+          "runs": 5
+        },
+        "wasm_o0_bytes": 70137,
+        "wasm_o2_bytes": 50394
+      },
+      "exec": {
+        "clif": {
+          "exec_ms": {
+            "median": 1.452083,
+            "min": 1.418042,
+            "max": 1.505375,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0096875,
+            "min": 0.008917,
+            "max": 0.062583,
+            "runs": 20
+          }
+        },
+        "llvm_o0": {
+          "exec_ms": {
+            "median": 0.7892710000000001,
+            "min": 0.748417,
+            "max": 0.897667,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.006958,
+            "min": 0.006167000000000001,
+            "max": 0.059750000000000004,
+            "runs": 20
+          }
+        },
+        "llvm_o2": {
+          "exec_ms": {
+            "median": 0.49816649999999996,
+            "min": 0.48875,
+            "max": 0.546209,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0075415,
+            "min": 0.00675,
+            "max": 0.067291,
+            "runs": 20
+          }
+        }
+      },
+      "size": {
+        "clif": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/clif/miniz_driver.wasm",
+          "total_bytes": 253510,
+          "code_bytes": 159063,
+          "data_bytes": 41912,
+          "data_segments": 739,
+          "functions": 430,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o0": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o0/miniz_driver.wasm",
+          "total_bytes": 70137,
+          "code_bytes": 46814,
+          "data_bytes": 10811,
+          "data_segments": 1,
+          "functions": 139,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o2": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o2/miniz_driver.wasm",
+          "total_bytes": 50394,
+          "code_bytes": 40922,
+          "data_bytes": 5640,
+          "data_segments": 1,
+          "functions": 50,
+          "imports": 0,
+          "exports": 5
+        }
+      }
+    },
+    "generated_stress": {
+      "name": "generated_stress",
+      "class": "large",
+      "source": "bench/work/generated_stress.rs",
+      "source_lines": 6272,
+      "source_bytes": 141738,
+      "correct": true,
+      "outcomes": {
+        "0": {
+          "result": 10064900552452098048,
+          "out_len": 136,
+          "out_sha256": "f5ce1d8a5d1d64faee077fd3c43eb6b339b45fa7b5a8b64ef9b7867f3a0444d8"
+        },
+        "1": {
+          "result": 16030345349070310400,
+          "out_len": 136,
+          "out_sha256": "ad429533c7308c9a28727326fa1b9f59294c30c12505e68d5b1722f1cb2e702a"
+        },
+        "18446744073709551615": {
+          "result": 10727129198077043712,
+          "out_len": 136,
+          "out_sha256": "d00688670e8a2def02b00ccc29474e2c25f5d00a1227a08acf9ac937a9256c5e"
+        },
+        "42": {
+          "result": 2359164978483294208,
+          "out_len": 136,
+          "out_sha256": "b777bba0801372a12232f4611fb8b72a4419be935b7a371d5556eedd8068092d"
+        }
+      },
+      "clif": {
+        "module_load_ms": 19.769499999999997,
+        "load_source": "precompiled",
+        "warmup_ms": 405.9865,
+        "compile_warm": {
+          "median": 391.998917,
+          "min": 389.28899999999993,
+          "max": 394.108125,
+          "runs": 5
+        },
+        "compile_incremental": null,
+        "incremental_cold_ms": null,
+        "incremental_first_edit_ms": null,
+        "instantiate": {
+          "median": 0.11770800000000001,
+          "min": 0.11495899999999999,
+          "max": 0.143667,
+          "runs": 5
+        },
+        "link": {
+          "median": 6.699666,
+          "min": 6.370375,
+          "max": 7.17525,
+          "runs": 5
+        },
+        "peak_memory_bytes": {
+          "median": 155648000.0,
+          "min": 155648000.0,
+          "max": 155648000.0,
+          "runs": 5
+        },
+        "phases": {
+          "total_ms": 397.0,
+          "frontend_ms": 285.0,
+          "codegen_ms": 98.0,
+          "link_ms": 14.0,
+          "raw": {
+            "MIR_borrow_checking": 89.0,
+            "codegen_crate": 98.0,
+            "codegen_to_LLVM_IR": 13.0,
+            "coherence_checking": 13.0,
+            "expand_crate": 29.0,
+            "finalize_imports": 7.0,
+            "late_resolve_crate": 6.0,
+            "link": 14.0,
+            "link_binary": 14.0,
+            "link_crate": 14.0,
+            "macro_expand_crate": 29.0,
+            "misc_checking_3": 9.0,
+            "monomorphization_collector_graph_walk": 45.0,
+            "parse_crate": 9.0,
+            "resolve_crate": 14.0,
+            "run_linker": 7.0,
+            "total": 397.0,
+            "type_check_crate": 107.0
+          }
+        },
+        "wasm_bytes": 164997,
+        "wasm_sha256": "4d18b884dc85aa753455cfee770284eb4964dc6f4ea89e5b7177103b6a4f45bc"
+      },
+      "llvm": {
+        "compile_o0": {
+          "median": 162.1173748280853,
+          "min": 160.55966587737203,
+          "max": 166.86283284798265,
+          "runs": 5
+        },
+        "compile_o2": {
+          "median": 315.74166589416564,
+          "min": 314.85729198902845,
+          "max": 317.9369589779526,
+          "runs": 5
+        },
+        "wasm_o0_bytes": 150029,
+        "wasm_o2_bytes": 126642
+      },
+      "exec": {
+        "clif": {
+          "exec_ms": {
+            "median": 0.06643750000000001,
+            "min": 0.063667,
+            "max": 0.08975,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0099795,
+            "min": 0.008167,
+            "max": 0.076959,
+            "runs": 20
+          }
+        },
+        "llvm_o0": {
+          "exec_ms": {
+            "median": 0.0682915,
+            "min": 0.067583,
+            "max": 0.115667,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.00825,
+            "min": 0.007375,
+            "max": 0.065041,
+            "runs": 20
+          }
+        },
+        "llvm_o2": {
+          "exec_ms": {
+            "median": 0.060417,
+            "min": 0.055084,
+            "max": 0.094041,
+            "runs": 20
+          },
+          "instantiate_ms": {
+            "median": 0.0081875,
+            "min": 0.006916,
+            "max": 0.069292,
+            "runs": 20
+          }
+        }
+      },
+      "size": {
+        "clif": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/clif/generated_stress.wasm",
+          "total_bytes": 164997,
+          "code_bytes": 83447,
+          "data_bytes": 22304,
+          "data_segments": 46,
+          "functions": 1143,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o0": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o0/generated_stress.wasm",
+          "total_bytes": 150029,
+          "code_bytes": 85854,
+          "data_bytes": 6035,
+          "data_segments": 1,
+          "functions": 1137,
+          "imports": 0,
+          "exports": 5
+        },
+        "llvm_o2": {
+          "wasm": "/Users/alexandermitchell/Documents/github/rust-wasm-compiler/rust_wasm/bench/work/wasm/llvm_o2/generated_stress.wasm",
+          "total_bytes": 126642,
+          "code_bytes": 70525,
+          "data_bytes": 4564,
+          "data_segments": 1,
+          "functions": 1043,
+          "imports": 0,
+          "exports": 5
+        }
+      }
+    }
+  },
+  "ok": true
+}
