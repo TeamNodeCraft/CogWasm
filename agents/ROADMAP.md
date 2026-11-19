@@ -37,9 +37,11 @@ to native code with the same Cranelift backend. So the whole gap is in the wasm
 we hand it. Roughly in order of cost for idiomatic Rust:
 
 1. **Operations done in software.** Most of A.2 (e)'s gap was `sqrt` (about
-   52 ns per point against LLVM's 12): LLVM emits wasm's `f64.sqrt`, we call a
-   routine. The same may hold for `min`/`max`/`abs`/`copysign`/`floor`/`ceil`/
-   `trunc`, bit counts and rotates.
+   52 ns per point against LLVM's 12), but the attribution in
+   [bench/gap/REPORT.md](../bench/gap/REPORT.md) found that LLVM also calls
+   the software `libm::sqrt` there. A wasm `f64.sqrt` instruction therefore
+   would not close that gap; the first real memory win is the constant-copy /
+   `memcpy` lowering below.
 2. **Values in memory instead of registers.** Wasm has no addressable stack,
    so any local whose address is taken (structs, tuples, `Option`, iterator
    state) lives in linear memory and every use is a load or store. LLVM's SROA
@@ -63,9 +65,9 @@ next starts.
 | **done** | First code-generation wins in clif-to-wasm (tiny-leaf inlining; 1.25× on A.2 (e), LLVM gap 3.76× → 3.00×) | Measured improvement on the A.2 maths benchmark; difftest green |
 | **in progress** | A benchmark suite against LLVM `-O0` and `-O2` (small, medium and large programs plus compute kernels), run in CI, results published | A table in the README updated by CI |
 | **done** | 1. Gap attribution: for each benchmark's hot loops, diff our wasm against LLVM's and assign every extra instruction to one of the five causes above | A published per-benchmark breakdown that names the next fix |
-| **open** | 2. Map built-in operations 1:1 to wasm instructions (`sqrt` first, then the rest of the list in point 1) | No software routine where wasm has an instruction; A.2 (e) gap measured |
-| **open** | 3. Turn up rustc's own pure-Rust MIR optimisations (`-Zmir-opt-level`, `-Zinline-mir`: MIR inlining, SROA, GVN, copy propagation) for the optimising tier | Speed and compile-time change measured per benchmark; difftest green |
-| **open** | 4. Tidy loads and stores: fold constant offsets into wasm's load/store offset, drop redundant extends and address arithmetic | Instruction counts in hot loops measured before/after |
+| **done** | 2. Lower constant and small `memcpy`/`memmove`/`memset` (the real memory gap; A.2 (e) is software `libm`, not a missing wasm `sqrt`): address read-only constant aggregates in place, inline constant copies up to 64 bytes, use wasm bulk-memory for larger or runtime lengths, and omit all-zero data segments in Wild | `sha256` 12.33× → 1.50×, `sort` 12.22× → 3.51×; no software `copy_forward` in their hot functions; difftest green |
+| **open** | 3. Turn up rustc's own pure-Rust MIR optimisations (`-Zmir-opt-level`, `-Zinline-mir`: MIR inlining, SROA, GVN, copy propagation) for the optimising tier. **Measured no win:** 0.997× / 1.012× execution geomean, +1% compile, −0.4% size, outputs green; deprioritised behind backend SROA/inliner (step 5) | Speed and compile-time change measured per benchmark; difftest green |
+| **done** | 4. Tidy loads and stores: fold constant offsets into wasm's load/store offset, drop redundant extends and address arithmetic where the 32-bit wrap cannot change the address | `strings` 111.2M → 107.2M and `miniz_driver` 216.4M → 216.1M executed instructions, no program regressed; suite geomean unchanged at 2.49× |
 | **open** | 5. A cost-model inliner plus SROA/mem2reg on Cranelift IR (inline, promote non-escaping stack slots to SSA values, repeat) | Iterator-heavy benchmarks within 1.2× of LLVM `-O2` |
 | **open** | 6. Bounds-check removal from simple range facts (loop indices against slice lengths) | Measured on the benchmarks that index slices in loops |
 | **open** | Tier 2: run steps 3–6 in a background optimising build and swap the result in when ready, keeping the fast tier for the edit loop | Scalar parity (within 1.1× of LLVM `-O2`, `simd128` off) with edit-to-result unchanged |
@@ -75,7 +77,7 @@ next starts.
 | **research** | Specialisation of hot functions on runtime-constant inputs | Measured win, with a fallback when inputs change |
 | **research** | Bulk maths offloaded to the GPU (host-compiled kernels via wgpu) | Beats LLVM-built wasm by an order of magnitude on large arrays |
 
-Step 1 is done: [bench/gap/REPORT.md](../bench/gap/REPORT.md) attributes every program over 0.1 ms, with dynamic counts, hot-function WAT and the size breakdown. The next fix it names is small/constant `memcpy`/`memmove` lowering (84% of sort's and 91% of sha256's extra instructions), then SROA/mem2reg plus a cost-model inliner.
+Step 1 is done: [bench/gap/REPORT.md](../bench/gap/REPORT.md) attributes every program over 0.1 ms, with dynamic counts, hot-function WAT and the size breakdown. Batch 1 (19 Nov 2026) then did the fix it ranked first: small/constant `memcpy`/`memmove` lowering, constant aggregates addressed in place, zero-data omission in Wild and safe address folding. The suite geomean went from **3.53× to 2.49×** of LLVM `-O2`; `sha256` 12.33× → 1.50×, `sort` 12.22× → 3.51×, total size median 63.7 KB → 46.5 KB, and the compile-time median stayed flat (104.9 → 102.0 ms). The next step is SROA/mem2reg plus a cost-model inliner (step 5); the MIR-optimisation experiment (step 3) measured no execution win.
 
 ## Goal 2 — Near-instant compiler start
 

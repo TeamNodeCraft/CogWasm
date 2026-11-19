@@ -50,16 +50,16 @@ and output size, and checks every result bit-for-bit before reporting a timing.
 | Compile time | About 79 ms to compile a small `no_std` program inside `rustc.wasm`, about 96 ms from edit to result with the compiler kept loaded (Apple M-series; about 2–3× that on a CI runner) |
 | Incremental | One-line edits reuse rustc's incremental cache in the resident compiler: about 12–14% faster edit to result for 12–18% larger output; opt-in (`--incremental`), off by default |
 | First load | 37.6 s to compile the 137 MiB `rustc.wasm`, 0.46 s from Wasmtime's cache, **18.7 ms** from a per-host precompiled `.cwasm` (282 MiB); the release bundle ships one per host |
-| Output | A small module of about 35 KB for a typical program, with a growable heap |
+| Output | A small module of about 18 KB for a typical program (46 KB median over the suite, down from 64 KB), with a growable heap |
 | Performance suite | [`bench/run.sh --quick`](bench/README.md) in CI on every compiler change; the full suite is published from the `bench-results` release |
 
 Known limits:
 
 - LLVM is still used **once at build time** to compile rustc itself into
   `rustc.wasm`. Nothing that ships uses it; removing it means self-hosting.
-- Cranelift favours compile speed: tight numeric loops run about 3× slower
-  than LLVM `-O2` output (down from about 4× after the tiny-leaf inliner); code
-  that mostly calls its host runs at parity.
+- Cranelift favours compile speed: the suite's geomean is about 2.5× LLVM
+  `-O2` execution (down from 3.5× before the memory fixes; `sha256` is 1.5×
+  and `sort` 3.5×), and code that mostly calls its host runs at parity.
 - Procedural macros can't run inside `rustc.wasm` yet, and there is no debug
   info.
 - The first load of the 137 MB `rustc.wasm` compiles it to native code
@@ -74,8 +74,10 @@ Known limits:
   series from
   [rust-playground-inbrowser](https://github.com/ryancbuckley/rust-playground-inbrowser)
   (built on bjorn3's work), plus small patches of our own: run the compiler on
-  the calling thread, return `f128` through a pointer on wasm, and support
-  `memory.grow` / `memory.size`.
+  the calling thread, return `f128` through a pointer on wasm, support
+  `memory.grow` / `memory.size`, address read-only constant aggregates in
+  place, inline small constant memory copies with wasm bulk-memory, and fold
+  constant addresses. Wild gets a patch to omit all-zero data segments.
 - **[rustc_codegen_cranelift](https://github.com/rust-lang/rustc_codegen_cranelift)**
   lowers Rust to Cranelift IR.
 - **[clif-to-wasm](https://github.com/ryancbuckley/clif-to-wasm)** turns
