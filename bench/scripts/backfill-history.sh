@@ -25,7 +25,7 @@ tmp=$(mktemp -d)
 trap 'rm -rf "${tmp:?}"' EXIT
 mkdir -p "$tmp/history" "$tmp/download"
 : > "$tmp/known.txt"
-max_run=0
+: > "$tmp/known-runs.txt"
 
 ensure_history_release() {
     if ! gh release view "$history_tag" >/dev/null 2>&1; then
@@ -40,13 +40,12 @@ ensure_history_release() {
 if gh release view "$history_tag" >/dev/null 2>&1; then
     gh release download "$history_tag" --pattern '*-*.json' \
         --dir "$tmp/history" --clobber >/dev/null 2>&1 || true
-    max_run=$(python3 - "$tmp/history" <<'PY'
+    python3 - "$tmp/history" > "$tmp/known-runs.txt" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-highest = 0
-for path in Path(sys.argv[1]).glob("*-*.json"):
+for path in sorted(Path(sys.argv[1]).glob("*-*.json")):
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -54,10 +53,8 @@ for path in Path(sys.argv[1]).glob("*-*.json"):
     ci = raw.get("ci_point") if isinstance(raw, dict) else None
     run_id = str(ci.get("run_id") or "") if isinstance(ci, dict) else ""
     if run_id.isdigit():
-        highest = max(highest, int(run_id))
-print(highest)
+        print(run_id)
 PY
-)
     python3 - "$tmp/history" > "$tmp/known.txt" <<'PY'
 import json
 import sys
@@ -86,15 +83,16 @@ if ! gh release view "$ci_tag" >/dev/null 2>&1; then
 fi
 
 gh release view "$ci_tag" --json assets --jq '.assets[].name' > "$tmp/ci-assets.txt"
-python3 - "$tmp/ci-assets.txt" "$max_run" > "$tmp/candidates.txt" <<'PY'
+python3 - "$tmp/ci-assets.txt" "$tmp/known-runs.txt" > "$tmp/candidates.txt" <<'PY'
 import re
 import sys
 
-floor = int(sys.argv[2])
+with open(sys.argv[2], encoding="utf-8") as known_file:
+    known_runs = {line.strip() for line in known_file if line.strip()}
 run_ids = []
 for line in open(sys.argv[1], encoding="utf-8"):
     match = re.fullmatch(r"bench-quick-([0-9]+)\.json", line.strip())
-    if match and int(match.group(1)) > floor:
+    if match and match.group(1) not in known_runs:
         run_ids.append(int(match.group(1)))
 for run_id in sorted(run_ids):
     print(f"bench-quick-{run_id}.json")
@@ -153,6 +151,7 @@ print(parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"))
     gh release upload "$history_tag" "$tmp/$point_asset" --clobber
     printf 'backfilled %s from %s (run %s)\n' "$point_asset" "$ci_tag" "$run_id"
     printf '%s\n' "$short" >> "$tmp/known.txt"
+    printf '%s\n' "$run_id" >> "$tmp/known-runs.txt"
     imported=$((imported + 1))
 done < "$tmp/candidates.txt"
 
