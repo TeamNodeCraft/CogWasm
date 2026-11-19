@@ -202,7 +202,10 @@ impl Clone for HostState {
         // `WasiP1Ctx` is not cloneable. A fresh context with the same
         // arguments, environment and preopens is enough for rustc's compiler
         // thread: it opens files by path, and the host filesystem is shared.
-        let wasi = self.spec.build().expect("rebuilding WASI context for thread");
+        let wasi = self
+            .spec
+            .build()
+            .expect("rebuilding WASI context for thread");
         HostState {
             wasi: Some(wasi),
             spec: Arc::clone(&self.spec),
@@ -213,11 +216,7 @@ impl Clone for HostState {
     }
 }
 
-fn new_store(
-    engine: &Engine,
-    o: &Opts,
-    args: Vec<String>,
-) -> Result<Store<HostState>> {
+fn new_store(engine: &Engine, o: &Opts, args: Vec<String>) -> Result<Store<HostState>> {
     let spec = Arc::new(WasiSpec {
         args,
         env: vec![
@@ -538,8 +537,7 @@ fn run_rustc(o: &Opts, expect: f64, measure_plugin: bool) -> Result<(RunResult, 
 fn eval_plugin(o: &Opts, expect: f64) -> Result<(f64, f64, i32, f64)> {
     let engine = engine(None)?;
     let t = Instant::now();
-    let module =
-        Module::from_file(&engine, &o.out).wt("loading plugin")?;
+    let module = Module::from_file(&engine, &o.out).wt("loading plugin")?;
     let load_ms = t.elapsed().as_secs_f64() * 1e3;
 
     let mut linker = Linker::new(&engine);
@@ -632,9 +630,10 @@ fn inspect_wasm(path: &Path) -> Result<Inspect> {
             }
             wasmparser::Payload::CustomSection(c) => {
                 if c.name() == "name" {
-                    let mut r = wasmparser::NameSectionReader::new(
-                        wasmparser::BinaryReader::new(c.data(), c.data_offset()),
-                    );
+                    let mut r = wasmparser::NameSectionReader::new(wasmparser::BinaryReader::new(
+                        c.data(),
+                        c.data_offset(),
+                    ));
                     while let Some(Ok(entry)) = r.next() {
                         if let wasmparser::Name::Function(n) = entry {
                             for ass in n {
@@ -670,7 +669,10 @@ fn inspect_wasm(path: &Path) -> Result<Inspect> {
 }
 
 fn count_llvm(bytes: &[u8]) -> usize {
-    bytes.windows(4).filter(|w| w.eq_ignore_ascii_case(b"llvm")).count()
+    bytes
+        .windows(4)
+        .filter(|w| w.eq_ignore_ascii_case(b"llvm"))
+        .count()
 }
 
 // ---------------------------------------------------------------------------
@@ -724,7 +726,10 @@ fn sha256_hex(bytes: &[u8]) -> String {
         for i in 16..64 {
             let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
             let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
-            w[i] = w[i - 16].wrapping_add(s0).wrapping_add(w[i - 7]).wrapping_add(s1);
+            w[i] = w[i - 16]
+                .wrapping_add(s0)
+                .wrapping_add(w[i - 7])
+                .wrapping_add(s1);
         }
         let (mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut hh) =
             (h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7]);
@@ -907,7 +912,10 @@ fn bench(o: &Opts) -> Result<Bench> {
         median(&runs.iter().map(|r| r.instantiate_ms).collect::<Vec<_>>()),
     );
     for (name, f) in [
-        ("rustc_total_ms", (|r: &RunResult| r.rustc_total_ms) as fn(&RunResult) -> f64),
+        (
+            "rustc_total_ms",
+            (|r: &RunResult| r.rustc_total_ms) as fn(&RunResult) -> f64,
+        ),
         ("compile_ms", |r: &RunResult| r.compile_ms),
         ("link_ms", |r: &RunResult| r.link_ms),
         ("plugin_load_ms", |r: &RunResult| r.plugin_load_ms),
@@ -920,7 +928,9 @@ fn bench(o: &Opts) -> Result<Bench> {
     let ok = (result - o.expect).abs() < 1e-9;
     let out = Bench {
         rustc_bytes: rustc_bytes.len(),
-        plugin_bytes: std::fs::metadata(&o.out).map(|m| m.len() as usize).unwrap_or(0),
+        plugin_bytes: std::fs::metadata(&o.out)
+            .map(|m| m.len() as usize)
+            .unwrap_or(0),
         rustc_sha256: sha,
         module_load_cold_no_cache_ms: cold,
         module_load_cached_ms: cached,

@@ -31,7 +31,9 @@ impl<T> Wt<T> for std::result::Result<T, wasmtime::Error> {
 
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
-    let cmd = args.next().context("usage: a2-harness <inspect|load|bench_math|bench_geom> ...")?;
+    let cmd = args
+        .next()
+        .context("usage: a2-harness <inspect|load|bench_math|bench_geom> ...")?;
     match cmd.as_str() {
         "inspect" => inspect(&args.next().context("wasm path")?),
         "load" => load(&args.next().context("wasm path")?),
@@ -99,8 +101,16 @@ fn inspect(path: &str) -> Result<()> {
             _ => {}
         }
     }
-    let imports_json = imports.iter().map(|s| format!("\"{}\"", esc(s))).collect::<Vec<_>>().join(",");
-    let exports_json = exports.iter().map(|s| format!("\"{}\"", esc(s))).collect::<Vec<_>>().join(",");
+    let imports_json = imports
+        .iter()
+        .map(|s| format!("\"{}\"", esc(s)))
+        .collect::<Vec<_>>()
+        .join(",");
+    let exports_json = exports
+        .iter()
+        .map(|s| format!("\"{}\"", esc(s)))
+        .collect::<Vec<_>>()
+        .join(",");
     println!(
         "INSPECT {{\"valid\":true,\"size\":{},\"code_bytes\":{},\"data_bytes\":{},\"data_segments\":{},\"functions\":{},\"imports\":[{}],\"exports\":[{}]}}",
         bytes.len(), code_bytes, data_bytes, data_segments, functions, imports_json, exports_json
@@ -111,27 +121,41 @@ fn inspect(path: &str) -> Result<()> {
 fn link_geometry(linker: &mut Linker<()>) -> Result<()> {
     // The five imports used by f_geometry::run. Every definition is here; a
     // missing import would make instantiation fail loudly.
-    linker.func_wrap("nodecraft", "dot2", |x1: f64, y1: f64, x2: f64, y2: f64| -> f64 {
-        x1 * x2 + y1 * y2
-    }).wt()?;
-    linker.func_wrap("nodecraft", "length2", |x: f64, y: f64| -> f64 {
-        (x * x + y * y).sqrt()
-    }).wt()?;
-    linker.func_wrap("nodecraft", "clamp01", |x: f64| -> f64 {
-        if x < 0.0 { 0.0 } else if x > 1.0 { 1.0 } else { x }
-    }).wt()?;
-    linker.func_wrap("nodecraft", "scale", |x: f64, k: f64| -> f64 { x * k }).wt()?;
-    linker.func_wrap("nodecraft", "mix", |a: f64, b: f64, t: f64| -> f64 {
-        a + (b - a) * t
-    }).wt()?;
+    linker
+        .func_wrap(
+            "nodecraft",
+            "dot2",
+            |x1: f64, y1: f64, x2: f64, y2: f64| -> f64 { x1 * x2 + y1 * y2 },
+        )
+        .wt()?;
+    linker
+        .func_wrap("nodecraft", "length2", |x: f64, y: f64| -> f64 {
+            (x * x + y * y).sqrt()
+        })
+        .wt()?;
+    linker
+        .func_wrap("nodecraft", "clamp01", |x: f64| -> f64 {
+            if x < 0.0 {
+                0.0
+            } else if x > 1.0 {
+                1.0
+            } else {
+                x
+            }
+        })
+        .wt()?;
+    linker
+        .func_wrap("nodecraft", "scale", |x: f64, k: f64| -> f64 { x * k })
+        .wt()?;
+    linker
+        .func_wrap("nodecraft", "mix", |a: f64, b: f64, t: f64| -> f64 {
+            a + (b - a) * t
+        })
+        .wt()?;
     Ok(())
 }
 
-fn instantiate<'a>(
-    engine: &Engine,
-    module: &Module,
-    store: &'a mut Store<()>,
-) -> Result<Instance> {
+fn instantiate<'a>(engine: &Engine, module: &Module, store: &'a mut Store<()>) -> Result<Instance> {
     let mut linker = Linker::new(engine);
     link_geometry(&mut linker)?;
     linker.instantiate(store, module).wtc("instantiate")
@@ -199,7 +223,9 @@ fn check_math(path: &str) -> Result<()> {
     let mut store = Store::new(&engine, ());
     let instance = instantiate(&engine, &module, &mut store)?;
 
-    let memory: Memory = instance.get_memory(&mut store, "memory").context("memory export")?;
+    let memory: Memory = instance
+        .get_memory(&mut store, "memory")
+        .context("memory export")?;
     let alloc = instance
         .get_typed_func::<(i32, i32), i32>(&mut store, "wasm_alloc")
         .wtc("wasm_alloc export")?;
@@ -249,7 +275,9 @@ fn check_math(path: &str) -> Result<()> {
     assert_close("e_math min", min, ref_min, 1e-9)?;
     assert_close("e_math max", max, ref_max, 1e-9)?;
 
-    let rc = eval.call(&mut store, (in_ptr, n as i32, out_ptr)).wtc("eval")?;
+    let rc = eval
+        .call(&mut store, (in_ptr, n as i32, out_ptr))
+        .wtc("eval")?;
     if rc != 0 {
         bail!("e_math eval returned {rc}");
     }
@@ -288,7 +316,10 @@ fn check_geom(path: &str) -> Result<()> {
     let got = run.call(&mut store, n).wtc("run")?;
     let want = geom_ref(n);
     assert_close("f_geometry run", got, want, 1e-12)?;
-    println!("GEOM_CHECK PASS n={n} value={got:.17e} ref={want:.17e} calls={}", 5u64 * n as u64);
+    println!(
+        "GEOM_CHECK PASS n={n} value={got:.17e} ref={want:.17e} calls={}",
+        5u64 * n as u64
+    );
     Ok(())
 }
 
@@ -299,7 +330,9 @@ fn bench_math(path: &str, n: usize, reps: usize) -> Result<()> {
     let mut store = Store::new(&engine, ());
     let instance = instantiate(&engine, &module, &mut store)?;
 
-    let memory: Memory = instance.get_memory(&mut store, "memory").context("memory export")?;
+    let memory: Memory = instance
+        .get_memory(&mut store, "memory")
+        .context("memory export")?;
     let alloc = instance
         .get_typed_func::<(i32, i32), i32>(&mut store, "wasm_alloc")
         .wtc("wasm_alloc export")?;
@@ -333,7 +366,9 @@ fn bench_math(path: &str, n: usize, reps: usize) -> Result<()> {
     let ref_mean = ref_sum / n as f64;
 
     // Warm-up call, then read the result once.
-    let rc = eval.call(&mut store, (in_ptr, n as i32, out_ptr)).wtc("eval warmup")?;
+    let rc = eval
+        .call(&mut store, (in_ptr, n as i32, out_ptr))
+        .wtc("eval warmup")?;
     let mut out = [0u8; 8];
     memory.read(&store, out_ptr as usize, &mut out)?;
     println!(
@@ -342,7 +377,9 @@ fn bench_math(path: &str, n: usize, reps: usize) -> Result<()> {
 
     for r in 0..reps {
         let t = Instant::now();
-        let rc = eval.call(&mut store, (in_ptr, n as i32, out_ptr)).wtc("eval")?;
+        let rc = eval
+            .call(&mut store, (in_ptr, n as i32, out_ptr))
+            .wtc("eval")?;
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         memory.read(&store, out_ptr as usize, &mut out)?;
         let val = f64::from_le_bytes(out);
@@ -353,7 +390,9 @@ fn bench_math(path: &str, n: usize, reps: usize) -> Result<()> {
     if let Some(f) = eval_stats {
         let stats_ptr = alloc.call(&mut store, (24, 8)).wtc("alloc stats")?;
         if stats_ptr != 0 {
-            let rc = f.call(&mut store, (in_ptr, n as i32, stats_ptr)).wtc("eval_stats")?;
+            let rc = f
+                .call(&mut store, (in_ptr, n as i32, stats_ptr))
+                .wtc("eval_stats")?;
             let mut stats = [0u8; 24];
             memory.read(&store, stats_ptr as usize, &mut stats)?;
             let mean = f64::from_le_bytes(stats[0..8].try_into().unwrap());
@@ -367,10 +406,18 @@ fn bench_math(path: &str, n: usize, reps: usize) -> Result<()> {
 
 fn geom_ref(n: u32) -> f64 {
     const PTS: [f64; 16] = [
-        0.0, 1.0, -1.0, 0.5, -0.5, 2.0, -2.0, 0.25, 0.75, -0.75, 1.5, -1.5, 0.125, -0.125,
-        3.0, -3.0,
+        0.0, 1.0, -1.0, 0.5, -0.5, 2.0, -2.0, 0.25, 0.75, -0.75, 1.5, -1.5, 0.125, -0.125, 3.0,
+        -3.0,
     ];
-    let clamp01 = |x: f64| if x < 0.0 { 0.0 } else if x > 1.0 { 1.0 } else { x };
+    let clamp01 = |x: f64| {
+        if x < 0.0 {
+            0.0
+        } else if x > 1.0 {
+            1.0
+        } else {
+            x
+        }
+    };
     let mut acc = 0.0f64;
     for i in 0..n {
         let j = (i as usize) & 7;
