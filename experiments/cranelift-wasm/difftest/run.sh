@@ -182,6 +182,11 @@ compile_clif() {
     if [ "${DIFFTEST_MIR_HOIST:-0}" = "1" ]; then
         extra=(-Zmir-hoist-loop-field-reads)
     fi
+    # Goal 1 step 5b experiment: opt the clif compile into the loop-aware MIR
+    # inliner. The LLVM reference compiler has no such pass.
+    if [ "${DIFFTEST_INLINE_WASM:-0}" = "1" ]; then
+        extra+=(-Zmir-inline-wasm)
+    fi
     if ! "$STAGE_C_HOST" raw \
         --rustc "$RUSTC_WASM" --sysroot "$SYSROOT" --linker "$WILD" \
         --cache-dir "$CACHE_DIR" -- \

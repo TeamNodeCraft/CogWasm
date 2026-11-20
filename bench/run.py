@@ -389,6 +389,14 @@ def compile_clif(
         # hoist. The LLVM reference compiler does not have the pass, so this is
         # not added to compile_llvm.
         command.extend(["--rustc-arg", "-Zmir-hoist-loop-field-reads"])
+    if os.environ.get("BENCH_INLINE_WASM") == "1":
+        # Goal 1 step 5b experiment: opt the clif compile into the loop-aware
+        # MIR inliner. The LLVM reference compiler has no such pass, so this is
+        # not added to compile_llvm.
+        command.extend(["--rustc-arg", "-Zmir-inline-wasm"])
+        threshold = os.environ.get("BENCH_INLINE_WASM_THRESHOLD")
+        if threshold:
+            command.extend(["--rustc-arg", f"-Zmir-inline-wasm-threshold={threshold}"])
     if fuel:
         # Two samples per program: the host fails if they disagree, so a
         # non-deterministic compiler work count stops the run.
