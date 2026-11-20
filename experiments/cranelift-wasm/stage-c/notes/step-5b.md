@@ -293,11 +293,14 @@ did not bind on any suite program.
 
 ### What is not done
 
-The difftest has not been run with this pass, the `int_loops` layout
-regression is unexplained, the threshold and growth constants are first
-estimates, and the pass still has to be measured on a machine other than this
-one. Every program except `strings` moves within run-to-run noise, so the
-suite geomean is not yet a speed claim.
+The `int_loops` layout regression is unexplained, the threshold and growth
+constants are first estimates, and the pass still has to be measured on a
+machine other than this one. Every program except `strings` moves within
+run-to-run noise, so the suite geomean is not yet a speed claim.
+
+The full difftest corpus is green with the pass enabled: 49 handwritten +
+24 generated programs, seeds `0,1,42,0x9e3779b97f4a7c15`, every `run(seed)`
+and output buffer identical to the LLVM build.
 
 ## What remains for step 5b
 
