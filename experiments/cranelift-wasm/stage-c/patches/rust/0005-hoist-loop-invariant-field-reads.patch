@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Stage C <stage-c@example.invalid>
-Date: Thu, 20 Nov 2026 11:30:00 +1030
+Date: Thu, 20 Nov 2026 13:30:00 +1030
 Subject: [PATCH] hoist loop-invariant aggregate field reads
 
 sroa promotes a local only when its address is never taken, so a `Vec`
@@ -16,11 +16,18 @@ cannot write a `Freeze` base. Raw pointers are outside those guarantees,
 so a raw pointer to a local (not through a dereference), a cast to a raw
 pointer from a reference, or an integer-to-pointer cast skips the
 function. That is not yet enough for unsafe code: a call can still hand
-back a raw pointer into the base. The pass is therefore opt-in at
-`-Zmir-opt-level=3` and must stay opt-in until a real escape/alias
-analysis exists. At level 2 the stage-1 compiler runs it over rustc's
-own crates while building rustc.wasm, and it miscompiled the compiler (a
-dataflow bounds panic while building the pure sysroot in CI).
+back a raw pointer into the base.
+
+The pass is therefore opt-in through the unstable flag
+`-Zmir-hoist-loop-field-reads`, off by default. It must not run in the
+compiler, sysroot or default benchmark builds: at level 2 the stage-1
+compiler runs it over rustc's own crates while building rustc.wasm, and
+an earlier always-on version miscompiled the compiler (a dataflow bounds
+panic while building the pure sysroot in CI). The benchmark and difftest
+scripts opt the clif compile in through BENCH_MIR_HOIST=1 and
+DIFFTEST_MIR_HOIST=1, and the cranelift_wasm workflow exposes the same
+switch as the `mir_hoist` workflow_dispatch input. Experiment points are
+not published to the benchmark chart.
 
 This is the first SROA increment from Goal 1 step 5b. The cost-model
 inliner and the suite measurement are still to come; the pass makes no
@@ -29,6 +36,18 @@ upstream contribution; its code and comments are LLM-generated under the
 personal-use exemption and a human must review and own it.
 
 ---
+diff --git a/compiler/rustc_session/src/options.rs b/compiler/rustc_session/src/options.rs
+--- a/compiler/rustc_session/src/options.rs
++++ b/compiler/rustc_session/src/options.rs
+@@ -2686,6 +2686,8 @@
+     mir_include_spans: MirIncludeSpans = (MirIncludeSpans::default(), parse_mir_include_spans, [UNTRACKED],
+         "include extra comments in mir pretty printing, like line numbers and statement indices, \
+          details about types, etc. (boolean for all passes, 'nll' to enable in NLL MIR only, default: 'nll')"),
++    mir_hoist_loop_field_reads: bool = (false, parse_bool, [TRACKED],
++        "hoist loop-invariant field reads out of loops; CogWasm step 5b experiment (default: no)"),
+     mir_move_elimination: bool = (false, parse_bool, [TRACKED],
+         "enable the experimental MIR move elimination pass (default: no)"),
+     mir_opt_bisect_limit: Option<usize> = (None, parse_opt_number, [TRACKED],
 diff --git a/compiler/rustc_mir_transform/src/lib.rs b/compiler/rustc_mir_transform/src/lib.rs
 --- a/compiler/rustc_mir_transform/src/lib.rs
 +++ b/compiler/rustc_mir_transform/src/lib.rs
@@ -52,7 +71,7 @@ diff --git a/compiler/rustc_mir_transform/src/loop_field_hoist.rs b/compiler/rus
 new file mode 100644
 --- /dev/null
 +++ b/compiler/rustc_mir_transform/src/loop_field_hoist.rs
-@@ -0,0 +1,380 @@
+@@ -0,0 +1,382 @@
 +//! Hoist loop-invariant field reads out of loops.
 +//!
 +//! `sroa` only promotes a local whose address is never taken, so a `Vec` local
@@ -83,7 +102,9 @@ new file mode 100644
 +//!
 +//! This is deliberately conservative: the calls that keep `Vec`'s address
 +//! escaping limit what it can see until the cost-model inliner from Goal 1
-+//! step 5b removes them.
++//! step 5b removes them. The pass is opt-in through the unstable flag
++//! `-Zmir-hoist-loop-field-reads`; it must not run in the compiler, sysroot or
++//! default benchmark builds.
 +
 +use rustc_data_structures::graph::dominators::Dominators;
 +use rustc_index::bit_set::DenseBitSet;
@@ -97,7 +118,7 @@ new file mode 100644
 +
 +impl<'tcx> crate::MirPass<'tcx> for LoopFieldHoist {
 +    fn policy(&self, ctx: &crate::PassCtx<'_>) -> PassPolicy {
-+        PassPolicy::optional(ctx.mir_opt_level() >= 3)
++        PassPolicy::optional(ctx.opts.unstable_opts.mir_hoist_loop_field_reads)
 +    }
 +
 +    fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {

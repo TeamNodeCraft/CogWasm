@@ -384,6 +384,11 @@ def compile_clif(
     ]
     if precompiled is not None:
         command.extend(["--precompiled", str(precompiled)])
+    if os.environ.get("BENCH_MIR_HOIST") == "1":
+        # Goal 1 step 5b experiment: opt the clif compile into the loop-field
+        # hoist. The LLVM reference compiler does not have the pass, so this is
+        # not added to compile_llvm.
+        command.extend(["--rustc-arg", "-Zmir-hoist-loop-field-reads"])
     if fuel:
         # Two samples per program: the host fails if they disagree, so a
         # non-deterministic compiler work count stops the run.

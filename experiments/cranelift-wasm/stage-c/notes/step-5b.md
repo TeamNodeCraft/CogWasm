@@ -11,9 +11,10 @@ and the benchmark measurement are not. No performance claim is made yet.
 ## What landed
 
 `stage-c/patches/rust/0005-hoist-loop-invariant-field-reads.patch` adds
-`LoopFieldHoist`, a MIR pass after GVN that is opt-in at
-`-Zmir-opt-level=3`. The compiler build, the pure sysroot and the default
-benchmark compiles all stay at level 2 and do not run it.
+`LoopFieldHoist`, a MIR pass after GVN that is opt-in through
+`-Zmir-hoist-loop-field-reads`, off by default. The compiler build, the pure
+sysroot and the default benchmark compiles do not pass the flag and do not run
+it.
 
 `sroa` promotes a local only when its address is not taken, so a `Vec` or struct
 local that was written before a loop stays in its stack slot and every field
@@ -81,12 +82,13 @@ index out of bounds: the len is 9 but the index is 10
 query stack: mir_const_qualif ... `iter::...::rfind::check::{closure#0}`
 ```
 
-At level 2 the stage-1 compiler also runs the pass when it builds rustc.wasm,
-so the pass had transformed rustc's own unsafe-heavy crates and miscompiled the
-compiler. The narrowed raw-pointer guard is not strong enough for unsafe code: a
-call can still return a raw pointer into the base. The pass is therefore opt-in
-at level 3, which the compiler, sysroot and default benchmark builds do not use.
-A real escape/alias analysis is the way back to level 2.
+The earlier version ran at level 2 by default. At that level the stage-1
+compiler also ran the pass when it built rustc.wasm, so it transformed rustc's
+own unsafe-heavy crates and miscompiled the compiler. The narrowed raw-pointer
+guard is not strong enough for unsafe code: a call can still return a raw
+pointer into the base. The pass is therefore behind an explicit unstable flag,
+which the compiler, sysroot and default benchmark builds do not pass. A real
+escape/alias analysis is the way back to a default-on pass.
 
 The level-3 version has **not** been measured on the suite. `rustc.wasm` cannot
 be run in this environment (only paths outside the checkout work inside its WASI
@@ -100,7 +102,8 @@ then this is an implementation increment, not a speed result.
 experiments/cranelift-wasm/toolchain/stage-b/rust/x build --stage 1 \
     --host aarch64-apple-darwin --target aarch64-apple-darwin library rustc
 RUSTC_BOOTSTRAP=1 build/host/stage1/bin/rustc --edition 2024 -O \
-    -Zmir-opt-level=3 -Zdump-mir=LoopFieldHoist -Zdump-mir-dir=/tmp/mirdump \
+    -Zmir-hoist-loop-field-reads \
+    -Zdump-mir=LoopFieldHoist -Zdump-mir-dir=/tmp/mirdump \
     --crate-type lib test.rs
 ls /tmp/mirdump
 ```
@@ -112,17 +115,23 @@ bench/run.sh --quick --runs 3 --fuel
 bench/gap/run.sh --no-mir nbody
 ```
 
-The pipeline builds programs at level 2, so the pass is off there. An experiment
-has to pass `-Zmir-opt-level=3` on the program compiles (bench and difftest) and
-compare against a level-3 build without the pass.
+The pipeline builds programs without the flag, so the pass is off there. The
+bench and difftest scripts opt the clif compile in with `BENCH_MIR_HOIST=1` and
+`DIFFTEST_MIR_HOIST=1`; the `cranelift_wasm` workflow exposes the same switch as
+the `mir_hoist` workflow_dispatch input. That run still publishes its quick JSON
+and Markdown asset, but skips publishing the point to the benchmark history, so
+an experiment cannot pollute the chart. Because the compiler inputs do not
+change, a dispatch after the normal run can reuse the cached compiler outputs
+and skip the ~26-minute build.
 
 ## What remains for step 5b
 
 1. A sound escape/alias analysis for raw pointers, including pointers returned
    by calls, so the pass can run in the default optimised build without
    miscompiling the compiler or unsafe user code.
-2. An experiment that enables level 3 for the program compile only (clif side)
-   and compares against the level-3 baseline, without changing the default CI.
+2. Run the opt-in experiment (the `mir_hoist` dispatch) and record per-program
+   and suite instruction counts, runner time and compile fuel against the
+   default baseline.
 3. The cost-model inliner, which is the other half of 5a's winner and what
    removes the calls keeping `Vec`'s address escaping. Inlining before this
    pass should widen what the SROA half can see.
@@ -131,5 +140,5 @@ compare against a level-3 build without the pass.
 5. Repeat inlining and promotion in a loop.
 6. Measure executed instructions and runner time on the suite, and the compile
    time cost, before claiming any of it. The 5a notes say the +5% warm compile
-   belongs in the tier-2 build; at level 2 the pass would run in the default
-   optimised build, so that cost is real until tier 2 exists.
+   belongs in the tier-2 build; a default-on pass would pay that in the fast
+   tier, so it stays opt-in until tier 2 exists.

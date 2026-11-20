@@ -24,6 +24,11 @@ on:
       - '!bench/history/**'
       - '!bench/gap/results/**'
   workflow_dispatch:
+    inputs:
+      mir_hoist:
+        description: "Enable the experimental loop-field hoist in clif program compiles"
+        type: boolean
+        default: false
 
 # A newer push to main supersedes an older build: only the newest commit's
 # result matters, so cancel the older run instead of building both. A
@@ -141,6 +146,8 @@ jobs:
           # Only the exact-input cache hit is allowed to skip the build; the id
           # is unset on a miss, and build-and-test.sh then builds from source.
           CI_REUSE_COMPILER: ${{ steps.cache-compiler.outputs.cache-hit }}
+          # Goal 1 step 5b experiment: opt difftest into the loop-field hoist.
+          DIFFTEST_MIR_HOIST: ${{ github.event.inputs.mir_hoist == 'true' && '1' || '' }}
         run: |
           bash ci/build-with-diagnostics.sh \
             "${RUNNER_TEMP}/cranelift-wasm.log" \
@@ -166,6 +173,10 @@ jobs:
       # programs hit the Wasmtime cache).
       - name: quick performance suite
         if: success()
+        env:
+          # Goal 1 step 5b experiment: opt the clif program compiles into the
+          # loop-field hoist. The LLVM reference compiler is unchanged.
+          BENCH_MIR_HOIST: ${{ github.event.inputs.mir_hoist == 'true' && '1' || '' }}
         run: |
           bash bench/run.sh --quick --runs 3 --fuel \
             --out "bench/results/quick-${GITHUB_RUN_ID}.json"
@@ -218,7 +229,9 @@ jobs:
       # re-run's own point), then rebuild the chart. PRs never get here: the
       # workflow only runs on main pushes and manual main dispatches.
       - name: publish benchmark history and chart
-        if: success() && github.ref == 'refs/heads/main'
+        # An experiment run compiles programs with an opt-in pass, so it must
+        # not add a point that the chart would compare with the default build.
+        if: success() && github.ref == 'refs/heads/main' && github.event.inputs.mir_hoist != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}

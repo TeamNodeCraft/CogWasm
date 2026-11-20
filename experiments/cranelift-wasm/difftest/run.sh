@@ -176,11 +176,18 @@ compile_llvm() {
 
 compile_clif() {
     local name=$1 src=$2 out=$3 log="$WORK/logs/$1.clif.log"
+    # Goal 1 step 5b experiment: opt the clif compile into the loop-field
+    # hoist. The LLVM reference compiler has no such pass.
+    local extra=()
+    if [ "${DIFFTEST_MIR_HOIST:-0}" = "1" ]; then
+        extra=(-Zmir-hoist-loop-field-reads)
+    fi
     if ! "$STAGE_C_HOST" raw \
         --rustc "$RUSTC_WASM" --sysroot "$SYSROOT" --linker "$WILD" \
         --cache-dir "$CACHE_DIR" -- \
         --target wasm32-unknown-unknown --sysroot "$SYSROOT" \
         --edition=2021 --crate-type cdylib -C panic=abort -C opt-level=2 \
+        ${extra[@]+"${extra[@]}"} \
         -Zcodegen-backend=cranelift "-Clinker=$WILD" -Clinker-flavor=wasm-ld \
         "$src" -o "$out" >"$log" 2>&1; then
         printf 'error: Cranelift compile failed for %s\n' "$name" >&2
