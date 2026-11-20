@@ -108,8 +108,30 @@ flag for all four quick seeds, and its module was 413 bytes smaller (41,707 to
 41,294). Instrumenting both modules and counting executed wasm instructions
 reproduces the step-5a result exactly: **6,204,745,840 -> 5,550,101,348**
 (-10.55%, the same total the 5a prototype reported). The no-flag count matches
-the CI pre-pass baseline exactly, so the local compiler is representative. The
-suite-wide deltas are pending the next dispatch.
+the CI pre-pass baseline exactly, so the local compiler is representative.
+
+### Second experiment run
+
+Run 44676541954 (dispatch on `fe8cad0`, hoist on, `--fuel` off for the reason
+above) completed in **24 minutes** on a compiler-cache hit. Difftest and the
+codegen structure checks passed with the pass enabled; the chart point was
+skipped.
+
+| program | instructions, default | with hoist | change | module bytes |
+|---|---:|---:|---:|---:|
+| `nbody` | 6,204,745,840 | 5,550,101,348 | **-10.55%** | 41,304 -> 40,896 |
+| `b_alloc` | 1,632,952 | 1,604,658 | -1.73% | 62,062 -> 62,050 |
+| `matmul` | 380,350,388 | 380,153,792 | -0.05% | 31,290 |
+| `sha256` | 70,417,340 | 70,400,948 | -0.02% | 32,185 -> 32,182 |
+| `expr` | 2,666,213 | 2,666,401 | **+0.01%** | 59,450 -> 59,454 |
+| other seven | | unchanged | 0 | |
+
+Quick-suite instruction geomean: **1.84366 -> 1.80274** (-2.2% relative).
+
+The win is real but narrow: one kernel and a small allocation program. `expr`
+is the only regression, 188 instructions (+0.01%), from a hoist whose in-loop
+copy costs more than the load it removes. The compiler-work metric is absent
+because the fuel determinism guard flakes on `sha256` with the pass.
 
 The suite numbers above are still **not measured**. `rustc.wasm` cannot be run
 in this environment (only paths outside the checkout work inside its WASI
@@ -167,3 +189,7 @@ and skip the ~26-minute build.
    on `sha256` (1 in 3 local runs) before considering a default-on pass; it
    may be a nondeterministic hash-order path in rustc that the changed MIR
    reaches.
+8. Add a profitability cost to the hoist. `expr` regressed by 0.01% because the
+   in-loop copy can cost more than the load it removes; the win is only worth
+   it when the read is hot enough (nested loops, or a loop body large enough
+   that the load is the cheaper part).
