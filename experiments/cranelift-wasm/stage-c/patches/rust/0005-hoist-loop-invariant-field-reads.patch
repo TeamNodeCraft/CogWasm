@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Stage C <stage-c@example.invalid>
-Date: Thu, 20 Nov 2026 10:30:00 +1030
+Date: Thu, 20 Nov 2026 11:30:00 +1030
 Subject: [PATCH] hoist loop-invariant aggregate field reads
 
 sroa promotes a local only when its address is never taken, so a `Vec`
@@ -15,14 +15,16 @@ cannot coexist with a live unique borrow of `base`, and a shared borrow
 cannot write a `Freeze` base. Raw pointers are outside those guarantees,
 so a raw pointer to a local (not through a dereference), a cast to a raw
 pointer from a reference, or an integer-to-pointer cast skips the
-function; pointers into a buffer the local points at do not alias its own
-fields and are allowed. Borrows, moves, discriminant writes and storage
-changes inside the loop reject the base.
+function. That is not yet enough for unsafe code: a call can still hand
+back a raw pointer into the base. The pass is therefore opt-in at
+`-Zmir-opt-level=3` and must stay opt-in until a real escape/alias
+analysis exists. At level 2 the stage-1 compiler runs it over rustc's
+own crates while building rustc.wasm, and it miscompiled the compiler (a
+dataflow bounds panic while building the pure sysroot in CI).
 
-This is the first SROA increment from Goal 1 step 5b. It runs at
-`-Zmir-opt-level=2` (the default for optimised builds); the cost-model
-inliner is what will remove the calls that keep `Vec`'s address escaping
-until then. It is a local experiment for the CogWasm pipeline, not an
+This is the first SROA increment from Goal 1 step 5b. The cost-model
+inliner and the suite measurement are still to come; the pass makes no
+speed claim. It is a local experiment for the CogWasm pipeline, not an
 upstream contribution; its code and comments are LLM-generated under the
 personal-use exemption and a human must review and own it.
 
@@ -95,7 +97,7 @@ new file mode 100644
 +
 +impl<'tcx> crate::MirPass<'tcx> for LoopFieldHoist {
 +    fn policy(&self, ctx: &crate::PassCtx<'_>) -> PassPolicy {
-+        PassPolicy::optional(ctx.mir_opt_level() >= 2)
++        PassPolicy::optional(ctx.mir_opt_level() >= 3)
 +    }
 +
 +    fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
