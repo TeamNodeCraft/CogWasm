@@ -1,0 +1,429 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Stage C <stage-c@example.invalid>
+Date: Fri, 21 Nov 2026 02:50:00 +1030
+Subject: [PATCH] inline loop-contained calls the normal MIR inliner declines
+
+Every call in the wasm we emit is expensive: arguments and results travel
+through linear memory or a stack slot rather than registers, and the call
+hides the callee's state from the later MIR passes. Iterator and string code
+is a chain of small calls per element, so leaving a few of them out of line
+keeps the iterator in memory and the per-element work in calls.
+
+rustc's inliner already runs in the benchmark's warm compiles; passing
+`-Zinline-mir=yes` produces byte-identical modules, so this pass cannot be
+"turn inlining on". The problem is the size-based cost model, which is tuned
+for LLVM: it declines the string iterator chain. `strings::body` is 1,676
+MIR lines over 161 blocks by default, 3,171 at `-Zinline-mir-threshold=200`,
+and 6,614 over 583 blocks at 400 as the chain is inlined. Threshold 100
+leaves it unchanged, which is why the step-3 experiment saw no win there.
+
+This pass reuses the inlining machinery and changes only the decision:
+
+- a call site in a cyclic block of the caller gets a 300 cost threshold
+  (`-Zmir-inline-wasm-threshold`), against the normal 50/100;
+- calls outside loops are left to rustc's inliner, so cold code does not pay
+  the code-size and compile-time cost;
+- bodies without a back edge are skipped before the inliner runs;
+- the inliner may recurse deeper than the normal pass (20 rather than 5
+  levels) because the iterator chain is nested, and inlining stops once the
+  caller has grown to four times its original block count, which bounds the
+  body instead.
+
+Native MIR validation (stage-1 compiler, `--emit=obj`, wasm32 target):
+`strings::body` 1,676 -> 5,072 lines over 409 blocks, `json` 1,183 -> 3,312,
+`scene` 1,608 -> 4,723, and `expr` and `collections` unchanged at `body`.
+
+Measured through the product pipeline with the rebuilt `rustc.wasm` on the
+full suite (off against on, same compiler, 3 runs x 4 seeds):
+
+| program | off | on | change | ours/LLVM-O2 |
+| --- | ---: | ---: | ---: | ---: |
+| `strings` | 1.422 ms | 0.804 ms | -43.5% | 8.40x -> 4.62x |
+| `sort` | 3.530 ms | 3.297 ms | -6.6% | 3.55x -> 3.34x |
+| `scene` | 0.0089 ms | 0.0084 ms | -5.4% | 1.86x -> 1.62x |
+| `collections` | 0.0694 ms | 0.0659 ms | -5.1% | 5.74x -> 4.69x |
+| `json` | 0.0266 ms | 0.0254 ms | -4.4% | 3.38x -> 3.06x |
+| `nbody` | 72.31 ms | 71.86 ms | -0.6% | 5.06x -> 4.99x |
+| `smoke` | 0.0074 ms | 0.0079 ms | +6.7% | 2.38x -> 2.70x |
+| `hostcall_f` | 0.527 ms | 0.562 ms | +6.6% | 0.99x -> 1.09x |
+| `generated_stress` | 0.0619 ms | 0.0780 ms | +26.1% | 0.99x -> 1.20x |
+| `int_loops` | 0.0033 ms | 0.0047 ms | +43.7% | 0.88x -> 1.30x |
+
+Execution geomean -2.3%, warm compile +3.3%, module size +0.1% to +5.9%, and
+every output identical; the flag-off modules are byte-identical to the
+unpatched compiler. `strings` is the robust win. The `int_loops` and
+`generated_stress` regressions repeat across runs but are micro-programs
+whose sample ranges overlap, so they need the deterministic instruction
+counts before this pass carries a speed claim.
+
+The pass is opt-in through `-Zmir-inline-wasm`; the compiler, the sysroot and
+the default benchmark builds do not pass it. This is a local CogWasm
+experiment, not an upstream contribution; its code and comments are
+LLM-generated and a human must review and own it.
+
+---
+diff --git a/compiler/rustc_mir_transform/src/inline.rs b/compiler/rustc_mir_transform/src/inline.rs
+index 367e16d..eaa7010 100644
+--- a/compiler/rustc_mir_transform/src/inline.rs
++++ b/compiler/rustc_mir_transform/src/inline.rs
+@@ -31,10 +31,10 @@ const HISTORY_DEPTH_LIMIT: usize = 20;
+ const TOP_DOWN_DEPTH_LIMIT: usize = 5;
+ 
+ #[derive(Clone, Debug)]
+-struct CallSite<'tcx> {
+-    callee: Instance<'tcx>,
++pub(crate) struct CallSite<'tcx> {
++    pub(crate) callee: Instance<'tcx>,
+     fn_sig: ty::PolyFnSig<'tcx>,
+-    block: BasicBlock,
++    pub(crate) block: BasicBlock,
+     source_info: SourceInfo,
+ }
+ 
+@@ -95,7 +95,7 @@ impl<'tcx> crate::MirPass<'tcx> for ForceInline {
+     }
+ }
+ 
+-trait Inliner<'tcx> {
++pub(crate) trait Inliner<'tcx> {
+     fn new(tcx: TyCtxt<'tcx>, def_id: DefId, body: &Body<'tcx>) -> Self;
+ 
+     fn tcx(&self) -> TyCtxt<'tcx>;
+@@ -476,7 +476,7 @@ impl<'tcx> Inliner<'tcx> for NormalInliner<'tcx> {
+     fn on_inline_failure(&self, _: &CallSite<'tcx>, _: &'static str) {}
+ }
+ 
+-fn inline<'tcx, T: Inliner<'tcx>>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) -> bool {
++pub(crate) fn inline<'tcx, T: Inliner<'tcx>>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) -> bool {
+     let def_id = body.source.def_id();
+ 
+     // Only do inlining into fn bodies.
+@@ -494,7 +494,7 @@ fn inline<'tcx, T: Inliner<'tcx>>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) -> b
+     inliner.changed()
+ }
+ 
+-fn process_blocks<'tcx, I: Inliner<'tcx>>(
++pub(crate) fn process_blocks<'tcx, I: Inliner<'tcx>>(
+     inliner: &mut I,
+     caller_body: &mut Body<'tcx>,
+     blocks: Range<BasicBlock>,
+diff --git a/compiler/rustc_mir_transform/src/inline_wasm.rs b/compiler/rustc_mir_transform/src/inline_wasm.rs
+new file mode 100644
+index 0000000..1fa30de
+--- /dev/null
++++ b/compiler/rustc_mir_transform/src/inline_wasm.rs
+@@ -0,0 +1,279 @@
++//! Inline loop-contained calls that rustc's cost model declines.
++//!
++//! Every call in the wasm we emit is expensive: arguments and results travel
++//! through linear memory or a stack slot rather than registers, and a call
++//! blocks the later MIR passes (SROA, reference propagation) from seeing the
++//! callee's state. Iterator and string code is a chain of small calls per
++//! element, so leaving even a few of them out of line keeps the iterator state
++//! in memory and the per-element work in calls.
++//!
++//! rustc's own inliner runs before this pass with a size-based cost model that
++//! is tuned for LLVM, which has a cheap register ABI and an inliner of its own.
++//! Its default threshold declines calls that this target wants inline. This
++//! pass reuses the inlining machinery and only changes the decision:
++//!
++//! - A call site inside a loop in the caller's CFG gets a much higher cost
++//!   threshold. Calls outside loops are left to rustc's inliner, so cold code
++//!   does not pay the code-size and compile-time cost.
++//! - Inlining stops once the caller has grown past a fixed multiple of its
++//!   original block count, so a chain of calls cannot blow up the body.
++//!
++//! The pass runs after the normal inliner, so it only sees calls that rustc
++//! declined. It is opt-in through the unstable flag `-Zmir-inline-wasm`: the
++//! growth budget and the loop threshold are first approximations, and the
++//! compiler, sysroot and default benchmark builds must not run it until the
++//! suite measurement says they should.
++
++use std::ops::Range;
++
++use rustc_attr_ir::InlineAttr;
++use rustc_hir::def_id::DefId;
++use rustc_index::IndexVec;
++use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrs;
++use rustc_middle::mir::visit::Visitor;
++use rustc_middle::mir::*;
++use rustc_middle::ty::{self, TyCtxt};
++use tracing::debug;
++
++use crate::cost_checker::{CostChecker, is_call_like};
++use crate::inline::{CallSite, Inliner, inline, process_blocks};
++use crate::simplify::simplify_cfg;
++use crate::{PassCtx, PassPolicy};
++
++/// The history depth mirrors `inline.rs`. The top-down limit is higher here:
++/// the iterator chain is nested, and the growth budget rather than this limit
++/// is what bounds the body.
++const HISTORY_DEPTH_LIMIT: usize = 20;
++const TOP_DOWN_DEPTH_LIMIT: usize = 20;
++
++/// How many times the caller's original block count the pass may grow it to.
++const GROWTH_FACTOR: usize = 4;
++
++/// The cost threshold for a call site inside a loop. Units are the cost
++/// checker's: an instruction is 5, a call 25. The string iterator chain
++/// (`CharIndices::next` and friends) needs at least 200 to start inlining and
++/// is nearly fully inlined at 300; 150 leaves it alone. 300 keeps the win
++/// while inlining fewer large callees than 400 does.
++const DEFAULT_LOOP_THRESHOLD: usize = 300;
++
++pub(super) struct InlineWasm;
++
++/// Whether the body has a back edge (a successor that dominates the block
++/// pointing at it), i.e. any loop at all.
++fn has_loop(body: &Body<'_>) -> bool {
++    let dominators = body.basic_blocks.dominators();
++    body.basic_blocks
++        .indices()
++        .any(|bb| body[bb].terminator().successors().any(|to| dominators.dominates(to, bb)))
++}
++
++impl<'tcx> crate::MirPass<'tcx> for InlineWasm {
++    fn policy(&self, ctx: &PassCtx<'_>) -> PassPolicy {
++        PassPolicy::optional(ctx.opts.unstable_opts.mir_inline_wasm)
++    }
++
++    fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
++        // Every decision this pass makes needs a loop, so a body without a back
++        // edge has nothing to do. Skipping it avoids running the inliner over
++        // the many loop-free functions in a crate.
++        if !has_loop(body) {
++            return;
++        }
++        if inline::<WasmInliner<'tcx>>(tcx, body) {
++            debug!("running simplify cfg on {:?}", body.source);
++            simplify_cfg(tcx, body);
++        }
++    }
++}
++
++struct WasmInliner<'tcx> {
++    tcx: TyCtxt<'tcx>,
++    typing_env: ty::TypingEnv<'tcx>,
++    /// `DefId` of the caller.
++    def_id: DefId,
++    /// Stack of inlined instances, to stop polymorphic recursion.
++    history: Vec<DefId>,
++    /// How many multi-call bodies have been inlined for the top-level call.
++    /// Limits super-linear growth, like the normal inliner's counter.
++    top_down_counter: usize,
++    /// Indicates that the caller body has been modified.
++    changed: bool,
++    /// Whether each caller block is in a cycle of the CFG. Blocks created by
++    /// inlining inherit the flag of the call site they replace.
++    in_loop: IndexVec<BasicBlock, bool>,
++    /// The caller's block count, and the count at which inlining stops.
++    current_blocks: usize,
++    max_blocks: usize,
++}
++
++impl<'tcx> WasmInliner<'tcx> {
++    fn past_depth_limit(&self) -> bool {
++        self.history.len() > HISTORY_DEPTH_LIMIT || self.top_down_counter > TOP_DOWN_DEPTH_LIMIT
++    }
++
++    fn threshold(&self) -> usize {
++        self.tcx
++            .sess
++            .opts
++            .unstable_opts
++            .mir_inline_wasm_threshold
++            .unwrap_or(DEFAULT_LOOP_THRESHOLD)
++    }
++
++    /// Blocks in a natural loop: every block a loop header dominates, where a
++    /// header is a successor that dominates the block pointing at it.
++    fn loop_membership(body: &Body<'tcx>) -> IndexVec<BasicBlock, bool> {
++        let dominators = body.basic_blocks.dominators();
++        let mut in_loop = IndexVec::from_elem_n(false, body.basic_blocks.len());
++        for bb in body.basic_blocks.indices() {
++            for header in body[bb].terminator().successors() {
++                if !dominators.dominates(header, bb) {
++                    continue;
++                }
++                for member in body.basic_blocks.indices() {
++                    if dominators.dominates(header, member) {
++                        in_loop[member] = true;
++                    }
++                }
++            }
++        }
++        in_loop
++    }
++}
++
++impl<'tcx> Inliner<'tcx> for WasmInliner<'tcx> {
++    fn new(tcx: TyCtxt<'tcx>, def_id: DefId, body: &Body<'tcx>) -> Self {
++        let initial_blocks = body.basic_blocks.len();
++        Self {
++            tcx,
++            typing_env: body.typing_env(tcx),
++            def_id,
++            history: Vec::new(),
++            top_down_counter: 0,
++            changed: false,
++            in_loop: Self::loop_membership(body),
++            current_blocks: initial_blocks,
++            max_blocks: initial_blocks.saturating_mul(GROWTH_FACTOR),
++        }
++    }
++
++    fn tcx(&self) -> TyCtxt<'tcx> {
++        self.tcx
++    }
++
++    fn typing_env(&self) -> ty::TypingEnv<'tcx> {
++        self.typing_env
++    }
++
++    fn history(&self) -> &[DefId] {
++        &self.history
++    }
++
++    fn caller_def_id(&self) -> DefId {
++        self.def_id
++    }
++
++    fn changed(self) -> bool {
++        self.changed
++    }
++
++    fn should_inline_for_callee(&self, _: DefId) -> bool {
++        true
++    }
++
++    fn check_codegen_attributes_extra(
++        &self,
++        callee_attrs: &CodegenFnAttrs,
++    ) -> Result<(), &'static str> {
++        if self.past_depth_limit() && matches!(callee_attrs.inline, InlineAttr::None) {
++            Err("Past depth limit so not inspecting unmarked callee")
++        } else {
++            Ok(())
++        }
++    }
++
++    fn check_caller_mir_body(&self, body: &Body<'tcx>) -> bool {
++        // Coroutine bodies are used for layout, so inlining into them can
++        // create a query cycle.
++        body.coroutine.is_none()
++    }
++
++    fn check_callee_mir_body(
++        &self,
++        callsite: &CallSite<'tcx>,
++        callee_body: &Body<'tcx>,
++        callee_attrs: &CodegenFnAttrs,
++    ) -> Result<(), &'static str> {
++        let tcx = self.tcx;
++
++        if callee_body.tainted_by_errors.is_some() {
++            return Err("body has errors");
++        }
++        if self.past_depth_limit() && callee_body.basic_blocks.len() > 1 {
++            return Err("Not inlining multi-block body as we're past a depth limit");
++        }
++        if !self.in_loop.get(callsite.block).copied().unwrap_or(false) {
++            return Err("call site is outside a loop");
++        }
++        if self.current_blocks > self.max_blocks {
++            return Err("caller growth budget exhausted");
++        }
++
++        let caller_attrs = tcx.codegen_fn_attrs(self.caller_def_id());
++        if callee_attrs.instruction_set != caller_attrs.instruction_set
++            && callee_body
++                .basic_blocks
++                .iter()
++                .any(|bb| matches!(bb.terminator().kind, TerminatorKind::InlineAsm { .. }))
++        {
++            return Err("cannot move inline-asm across instruction sets");
++        }
++
++        let mut checker =
++            CostChecker::new(tcx, self.typing_env(), Some(callsite.callee), callee_body);
++        checker.add_function_level_costs();
++        checker.visit_body(callee_body);
++        let cost = checker.cost();
++        let threshold = self.threshold();
++        if cost <= threshold {
++            debug!("inlining {:?} [cost={cost} <= threshold={threshold}]", callsite.callee);
++            Ok(())
++        } else {
++            Err("cost above the wasm inliner threshold")
++        }
++    }
++
++    fn on_inline_success(
++        &mut self,
++        callsite: &CallSite<'tcx>,
++        caller_body: &mut Body<'tcx>,
++        new_blocks: Range<BasicBlock>,
++    ) {
++        self.changed = true;
++        self.current_blocks = caller_body.basic_blocks.len();
++
++        let new_calls_count = new_blocks
++            .clone()
++            .filter(|&bb| is_call_like(caller_body.basic_blocks[bb].terminator()))
++            .count();
++        if new_calls_count > 1 {
++            self.top_down_counter += 1;
++        }
++
++        self.history.push(callsite.callee.def_id());
++
++        // The inlined blocks are inside the loop the call site was in.
++        let in_loop = self.in_loop[callsite.block];
++        self.in_loop.resize(caller_body.basic_blocks.len(), false);
++        for bb in new_blocks.clone() {
++            self.in_loop[bb] = in_loop;
++        }
++
++        process_blocks(self, caller_body, new_blocks);
++        self.history.pop();
++    }
++
++    fn on_inline_failure(&self, callsite: &CallSite<'tcx>, reason: &'static str) {
++        debug!("not inlining {:?} [{reason}]", callsite.callee);
++    }
++}
+diff --git a/compiler/rustc_mir_transform/src/lib.rs b/compiler/rustc_mir_transform/src/lib.rs
+index 2ad5db5..fd0965a 100644
+--- a/compiler/rustc_mir_transform/src/lib.rs
++++ b/compiler/rustc_mir_transform/src/lib.rs
+@@ -157,6 +157,7 @@ declare_passes! {
+     // Made public so that `mir_drops_elaborated_and_const_checked` can be overridden
+     // by custom rustc drivers, running all the steps by themselves. See #114628.
+     pub mod inline : Inline, ForceInline;
++    mod inline_wasm : InlineWasm;
+     mod impossible_clauses : ImpossibleClauses;
+     mod instsimplify : InstSimplify { BeforeInline, AfterSimplifyCfg };
+     mod jump_threading : JumpThreading;
+@@ -719,6 +720,7 @@ pub(crate) fn run_optimization_passes<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'
+             &inline::ForceInline,
+             // Perform inlining, which may add a lot of code.
+             &inline::Inline,
++            &inline_wasm::InlineWasm,
+             // Inlining may have introduced a lot of redundant code and a large move pattern.
+             // Now, we need to shrink the generated MIR.
+             // Code from other crates may have storage markers, so this needs to happen after
+diff --git a/compiler/rustc_session/src/options.rs b/compiler/rustc_session/src/options.rs
+index 6e00be0..71536b8 100644
+--- a/compiler/rustc_session/src/options.rs
++++ b/compiler/rustc_session/src/options.rs
+@@ -2688,6 +2688,10 @@ options! {
+          details about types, etc. (boolean for all passes, 'nll' to enable in NLL MIR only, default: 'nll')"),
+     mir_hoist_loop_field_reads: bool = (false, parse_bool, [TRACKED],
+         "hoist loop-invariant field reads out of loops; CogWasm step 5b experiment (default: no)"),
++    mir_inline_wasm: bool = (false, parse_bool, [TRACKED],
++        "inline loop-contained calls that the normal MIR inliner declined; CogWasm step 5b experiment (default: no)"),
++    mir_inline_wasm_threshold: Option<usize> = (None, parse_opt_number, [TRACKED],
++        "cost threshold for the CogWasm loop inliner (default: 400)"),
+     mir_move_elimination: bool = (false, parse_bool, [TRACKED],
+         "enable the experimental MIR move elimination pass (default: no)"),
+     mir_opt_bisect_limit: Option<usize> = (None, parse_opt_number, [TRACKED],

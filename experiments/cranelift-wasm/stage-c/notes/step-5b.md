@@ -1,8 +1,10 @@
 # Goal 1 step 5b: a MIR optimiser
 
 Status: **in progress**. The first SROA increment is landed and measured on the
-suite; the cost-model inliner is not started. The pass is opt-in and no speed
-claim is made for the product default.
+suite. A loop-aware cost-model inliner is landed behind its own flag and
+measured on the full suite through a rebuilt `rustc.wasm`; the difftest and
+the two micro-program regressions are still to come. Both passes are opt-in and
+no speed claim is made for the product default.
 
 > The pass code, patch header and this note are LLM-generated under the Rust
 > project's personal-use exemption. This is a local CogWasm experiment, not an
@@ -178,6 +180,113 @@ an experiment cannot pollute the chart. Because the compiler inputs do not
 change, a dispatch after the normal run can reuse the cached compiler outputs
 and skip the ~26-minute build.
 
+## Second increment: a loop-aware cost-model inliner
+
+`stage-c/patches/rust/0006-wasm-cost-model-inliner.patch` adds `InlineWasm`, a
+MIR pass after the normal inliner, opt-in through `-Zmir-inline-wasm` and
+`-Zmir-inline-wasm-threshold` (default 400). It reuses rustc's inlining
+machinery and changes only the decision.
+
+### What the baseline does
+
+MIR inlining already runs in the compiles the suite measures: passing
+`-Zinline-mir=yes` on top of the default pipeline produced **byte-identical
+modules** for `strings`, `collections`, `expr`, `json` and `scene`. The
+remaining calls are the ones the size-based cost model declines, and its
+default thresholds are what keeps them out of line:
+
+| `strings::body` final MIR | lines | blocks |
+| --- | ---: | ---: |
+| default thresholds | 1,676 | 161 |
+| `-Zinline-mir-threshold=100` | 1,676 | 161 |
+| `-Zinline-mir-threshold=200` | 3,171 | 323 |
+| `-Zinline-mir-threshold=400` | 6,614 | 583 |
+| `InlineWasm` (this patch) | 5,072 | 409 |
+
+Threshold 100, the setting the step-3 experiment used, is exactly the default
+for these calls, which is why that run measured nothing on `strings`.
+
+### What a global threshold buys, locally
+
+A quick A/B with the existing `rustc.wasm` and only the threshold flags, on a
+/tmp mirror of the checkout and toolchain (5 programs, 3 runs x 4 seeds):
+
+| program | default | threshold 400 | change | ours/LLVM-O2 |
+| --- | ---: | ---: | ---: | ---: |
+| `strings` | 1.462 ms | 0.863 ms | **-41.0%** | 8.75x -> 5.14x |
+| `collections` | 0.0690 ms | 0.0595 ms | -13.7% | 5.73x -> 4.04x |
+| `expr` | 0.0401 ms | 0.0373 ms | -7.0% | within noise |
+| `json` | 0.0269 ms | 0.0249 ms | -7.4% | within noise |
+| `scene` | 0.0083 ms | 0.0078 ms | -6.0% | within noise |
+
+`strings` is the robust result (sample ranges 0.84-1.02 ms against
+1.39-1.55 ms); the smaller programs are inside run-to-run noise. Warm compile
+costs +2% to +10%, incremental compile is unchanged, and every output stayed
+identical. This is the ceiling a cost-model inliner is aiming at, not the
+patch's own result.
+
+### What the patch does
+
+- Calls in a cyclic block of the caller's CFG get the 300 threshold; calls
+  outside loops stay with rustc's inliner, so cold code does not pay.
+- Bodies without a back edge are skipped before the inliner runs, which keeps
+  the pass off the many loop-free functions in a crate.
+- The recursion limit is raised from five to twenty levels because the
+  iterator chain is nested; the growth budget, not the depth limit, bounds
+  the body, and inlining stops at four times the caller's original block
+  count.
+- Loop membership comes from the dominator back edges; blocks created by an
+  inline inherit the call site's flag, so the chain keeps inlining inside the
+  loop.
+
+Native MIR validation (stage-1 compiler, `--emit=obj`, wasm32 target):
+`strings::body` 1,676 -> 5,072 lines over 409 blocks, `json` 1,183 -> 3,312,
+`scene` 1,608 -> 4,723, and `expr` and `collections` unchanged at `body`. The
+loop chain is inlined and the cold setup is not.
+
+### What the pass measures
+
+`rustc.wasm` was rebuilt with the patch and the full suite was measured with
+the pass off and on, same compiler, 21 programs, 3 runs x 4 seeds. The
+flag-off modules are byte-identical to the unpatched compiler and every
+program returned identical results.
+
+| program | off | on | change | ours/LLVM-O2 |
+| --- | ---: | ---: | ---: | ---: |
+| `strings` | 1.422 ms | 0.804 ms | **-43.5%** | 8.40x -> 4.62x |
+| `sort` | 3.530 ms | 3.297 ms | -6.6% | 3.55x -> 3.34x |
+| `scene` | 0.0089 ms | 0.0084 ms | -5.4% | 1.86x -> 1.62x |
+| `collections` | 0.0694 ms | 0.0659 ms | -5.1% | 5.74x -> 4.69x |
+| `json` | 0.0266 ms | 0.0254 ms | -4.4% | 3.38x -> 3.06x |
+| `nbody` | 72.31 ms | 71.86 ms | -0.6% | 5.06x -> 4.99x |
+| `smoke` | 0.0074 ms | 0.0079 ms | +6.7% | 2.38x -> 2.70x |
+| `hostcall_f` | 0.527 ms | 0.562 ms | +6.6% | 0.99x -> 1.09x |
+| `generated_stress` | 0.0619 ms | 0.0780 ms | +26.1% | 0.99x -> 1.20x |
+| `int_loops` | 0.0033 ms | 0.0047 ms | +43.7% | 0.88x -> 1.30x |
+
+Execution geomean **-2.3%** and warm compile **+3.3%** over all 21 programs;
+module size grows 0.1% to 5.9%. `strings` is the robust win (0.78-0.96 ms
+against 1.38-1.66 ms). The two regressions are the open problem: `int_loops`
+and `generated_stress` are micro-programs whose sample ranges overlap, but
+the median shift repeats across runs, so they need the deterministic
+instruction counts before this pass can carry any speed claim.
+
+Two knobs were tuned before this measurement. With the normal inliner's
+five-level recursion limit the pass only reached 3,499 MIR lines of
+`strings::body` and `strings` improved -16.9%; raising the limit to 20, with
+the 300 threshold, reached 5,072 lines and the -43.5% above. A 400 threshold with no early exit
+for loop-free bodies cost `libm_driver` +65% warm compile for no execution
+gain; at 300 with the early exit that is +2.2%. The four-times growth budget
+did not bind on any suite program.
+
+### What is not done
+
+The difftest has not been run with this pass, the `int_loops` and
+`generated_stress` regressions are unexplained, the threshold and growth
+constants are first estimates, and the pass still has to be measured on a
+machine other than this one. Every program except `strings` moves within
+run-to-run noise, so the suite geomean is not yet a speed claim.
+
 ## What remains for step 5b
 
 1. A sound escape/alias analysis for raw pointers, including pointers returned
@@ -186,9 +295,10 @@ and skip the ~26-minute build.
 2. Run the opt-in experiment (the `mir_hoist` dispatch) and record per-program
    and suite instruction counts, runner time and compile fuel against the
    default baseline.
-3. The cost-model inliner, which is the other half of 5a's winner and what
-   removes the calls keeping `Vec`'s address escaping. Inlining before this
-   pass should widen what the SROA half can see.
+3. The cost-model inliner is started: `InlineWasm` (patch 0006) inlines
+   loop-contained calls that rustc's cost model declines. It still needs the
+   `rustc.wasm` rebuild, the suite measurement, the difftest run, and a tuned
+   threshold and growth budget before it can be more than an experiment.
 4. A real mem2reg/SSA promotion at CFG joins (the hoist only handles
    loop-invariant reads, not arbitrary non-escaping locals).
 5. Repeat inlining and promotion in a loop.
