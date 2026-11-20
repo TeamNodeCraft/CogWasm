@@ -16,6 +16,14 @@
 #
 # Logs are teed by the workflow through ci/build-with-diagnostics.sh; the
 # individual build scripts also keep their own logs under stage-c/results/.
+#
+#   --reuse-compiler   skip steps 1, 2 and 4 and use the compiler that is
+#                      already under toolchain/. CI sets this only when its
+#                      cache key - the patch series plus the scripts that pin
+#                      the rust commit, the nightly and wasi-sdk - proves the
+#                      restored compiler was built from the current inputs.
+#                      Steps 3 and 5-9 still run, so a reuse run tests the
+#                      restored compiler exactly like a freshly built one.
 set -euo pipefail
 CI_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT=$(cd "$CI_DIR/.." && pwd)          # experiments/cranelift-wasm
@@ -23,8 +31,26 @@ TOOL="$ROOT/toolchain"
 RUSTC_WASM="$TOOL/stage-c/artifacts/rustc.wasm"
 SYSROOT="$TOOL/stage-c/sysroot-pure"
 HOST_BIN="$TOOL/target/stage-c-host/release/stage-c-host"
+STAGE1="$TOOL/stage-b/rust/build/host/stage1/bin/rustc"
+WILD="$TOOL/target/wild/release/wild"
 START=$(date +%s)
 CURRENT_STEP=setup
+
+REUSE_COMPILER=${CI_REUSE_COMPILER:-false}
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --reuse-compiler) REUSE_COMPILER=true ;;
+        -h|--help)
+            printf 'usage: %s [--reuse-compiler]\n' "$(basename "$0")" >&2
+            exit 0
+            ;;
+        *)
+            echo "unknown argument: $1 (try --help)" >&2
+            exit 2
+            ;;
+    esac
+    shift
+done
 
 step() {
     CURRENT_STEP=$1
@@ -61,17 +87,41 @@ if [ "$(free_gb "$ROOT")" -lt 15 ]; then
 fi
 echo "budget: $(free_gb "$ROOT") GiB free, $JOBS build jobs, $(uname -s) $(uname -m)"
 
-step "setup pinned toolchain and sources"
-"$CI_DIR/setup-toolchain.sh"
+if [ "$REUSE_COMPILER" = true ]; then
+    step "reuse the cached compiler build"
+    # Fail loudly instead of rebuilding: a partial restore means the cache key
+    # and the checkout disagree, which is a bug worth seeing, not papering over
+    # with a 30-minute rebuild that hides it.
+    for cached in "$RUSTC_WASM" "$SYSROOT" "$STAGE1"; do
+        [ -e "$cached" ] || {
+            echo "::error title=compiler cache incomplete::asked to reuse the compiler build but $cached is missing" >&2
+            exit 1
+        }
+    done
+    # The Wild binary is cached with the compiler because setup-toolchain.sh
+    # builds it from the same pinned sources. If only it is missing, the cheap
+    # fix is a setup run rather than failing a run that can still be correct.
+    if [ ! -x "$WILD" ]; then
+        step "Wild linker missing from the cache; fetching pinned sources"
+        "$CI_DIR/setup-toolchain.sh"
+    fi
+    mkdir -p "$TOOL/stage-c/cache"
+    echo "::notice title=cranelift-wasm build reused::rustc.wasm, pure sysroot, stage1 and Wild restored from a cache keyed on the patch series; steps 3 and 5-9 still run" >&2
+else
+    step "setup pinned toolchain and sources"
+    "$CI_DIR/setup-toolchain.sh"
 
-step "build stage-C rustc.wasm (wasm32-wasip1, cranelift-only)"
-"$ROOT/stage-c/scripts/build-rustc-wasm.sh"
+    step "build stage-C rustc.wasm (wasm32-wasip1, cranelift-only)"
+    "$ROOT/stage-c/scripts/build-rustc-wasm.sh"
+fi
 
 step "build Wasmtime 50.0.2 host"
 "$ROOT/stage-c/scripts/build-host.sh"
 
-step "build pure sysroot with rustc.wasm (strict)"
-"$ROOT/stage-c/scripts/build-pure-sysroot.sh"
+if [ "$REUSE_COMPILER" != true ]; then
+    step "build pure sysroot with rustc.wasm (strict)"
+    "$ROOT/stage-c/scripts/build-pure-sysroot.sh"
+fi
 
 step "plugin (c): compile, link, eval"
 "$ROOT/stage-c/run.sh" check

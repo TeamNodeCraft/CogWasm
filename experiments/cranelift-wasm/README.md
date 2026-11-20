@@ -99,8 +99,22 @@ experiments/cranelift-wasm/ci/build-and-test.sh
 The scripts pick wasi-sdk and rustup by OS/arch, derive the stage1 host triple
 instead of assuming `aarch64-apple-darwin`, and use `nproc` when available (CI)
 or `sysctl` (macOS). GitHub caches the rustup toolchain, Cargo registry/git and
-the pinned checkouts, keyed on the pins; the multi-GB rustc build tree is not
-cached. The full log is published to the
+the pinned checkouts, keyed on the pins. It also caches the compiler outputs -
+stage1, `rustc.wasm`, the pure sysroot and the Wild binary, about 800 MB -
+keyed on the patch series, the scripts that pin the rust commit, the nightly and
+wasi-sdk, and the manifest the sysroot is built with, so a run whose inputs did
+not change skips setup and the 26-minute `rustc.wasm` build. The 12 GB rustc
+build tree is still never cached; the host is rebuilt every run, and every
+correctness step and benchmark program is recompiled from source against the
+cached compiler. No compiled benchmark modules are cached, so a reused compiler
+cannot make a benchmark look unchanged. To exercise that path locally, pass
+`--reuse-compiler`:
+
+```sh
+experiments/cranelift-wasm/ci/build-and-test.sh --reuse-compiler
+```
+
+The full log is published to the
 [`ci-logs` release](https://github.com/TeamNodeCraft/CogWasm/releases/tag/ci-logs),
 and `rustc.wasm` plus `sysroot-pure` are workflow artifacts kept for 7 days.
 

@@ -17,6 +17,12 @@ permissions:
   packages: write
   contents: write
 
+env:
+  # One source of truth for the rustc source tag. The checkout ref, the patch
+  # directory name and the dist cache key all read it, so bumping the tag
+  # cannot leave a cached dist behind under the old source's key.
+  RUST_REF: '1.99.1'
+
 jobs:
   # ============================================================
   # install-abort: Build the default (panic=abort) rustc_minimal.wasm
@@ -32,7 +38,7 @@ jobs:
           # Built from the upstream tag; the CogWasm patch series is applied
           # in the next step, before submodules are initialized.
           repository: 'rust-lang/rust'
-          ref: '1.99.1'
+          ref: ${{ env.RUST_REF }}
           fetch-depth: 1
           submodules: false
           path: 'rust'
@@ -48,9 +54,25 @@ jobs:
         run: |
           bash "${GITHUB_WORKSPACE}/rust_wasm/ci/apply-rust-patches.sh" \
             "${GITHUB_WORKSPACE}/rust" \
-            "${GITHUB_WORKSPACE}/rust_wasm/patches/rust-1.99.1"
+            "${GITHUB_WORKSPACE}/rust_wasm/patches/rust-${{ env.RUST_REF }}"
+
+      # The ~3.5 hour x.py install is what this workflow exists to avoid
+      # repeating. Cache its dist/ output keyed on the patch series (and the
+      # script that applies it), so a re-run with unchanged inputs - a retry,
+      # or a fix in merge-bins - skips straight to the artifacts. The patch
+      # step above still runs and fails first if a patch no longer applies, so
+      # a restored dist cannot hide a broken patch series.
+      # github.job separates the panic=abort and panic=unwind dists; bump the
+      # -v1 suffix when changing the rust ref or the build recipe.
+      - name: restore rustc-for-wasm dist
+        id: cache-dist
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/rust/dist
+          key: rustc-wasm-dist-${{ runner.os }}-${{ github.job }}-${{ env.RUST_REF }}-${{ hashFiles('rust_wasm/patches/**', 'rust_wasm/ci/apply-rust-patches.sh') }}-v1
 
       - name: install-wasi-sdk
+        if: steps.cache-dist.outputs.cache-hit != 'true'
         working-directory: '${{ github.workspace }}/rust'
         shell: bash
         run: |
@@ -78,12 +100,14 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
 
       - name: update
+        if: steps.cache-dist.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
           sudo apt upgrade -y
           sudo apt install -y build-essential cmake pkg-config libclang-dev
 
       - name: install toolchain-for-building-rustc
+        if: steps.cache-dist.outputs.cache-hit != 'true'
         working-directory: '${{ github.workspace }}/rust'
         shell: bash
         env:
@@ -120,6 +144,7 @@ jobs:
       #     echo "rewrite done"
 
       - name: build install
+        if: steps.cache-dist.outputs.cache-hit != 'true'
         working-directory: '${{ github.workspace }}/rust'
         env:
           RUST_CONFIGURE_ARGS: "-W warnings"
@@ -127,11 +152,18 @@ jobs:
         run: |
           ./x.py install --config config.llvm.toml
 
-      - name: cache build directory
+      - name: save rustc-for-wasm dist
+        if: steps.cache-dist.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: ${{ github.workspace }}/rust/build
-          key: build-dir-${{ runner.os }}-compile_rustc_for_wasm-1.99.1
+          path: ${{ github.workspace }}/rust/dist
+          key: rustc-wasm-dist-${{ runner.os }}-${{ github.job }}-${{ env.RUST_REF }}-${{ hashFiles('rust_wasm/patches/**', 'rust_wasm/ci/apply-rust-patches.sh') }}-v1
+
+      - name: verify dist
+        working-directory: '${{ github.workspace }}/rust'
+        run: |
+          ls -lh dist/bin/rustc.wasm
+          test -f dist/bin/rustc.wasm
 
       - name: prepare abort artifacts
         working-directory: '${{ github.workspace }}/rust'
@@ -162,7 +194,7 @@ jobs:
           # Built from the upstream tag; the CogWasm patch series is applied
           # in the next step, before submodules are initialized.
           repository: 'rust-lang/rust'
-          ref: '1.99.1'
+          ref: ${{ env.RUST_REF }}
           fetch-depth: 1
           submodules: false
           path: 'rust'
@@ -178,9 +210,25 @@ jobs:
         run: |
           bash "${GITHUB_WORKSPACE}/rust_wasm/ci/apply-rust-patches.sh" \
             "${GITHUB_WORKSPACE}/rust" \
-            "${GITHUB_WORKSPACE}/rust_wasm/patches/rust-1.99.1"
+            "${GITHUB_WORKSPACE}/rust_wasm/patches/rust-${{ env.RUST_REF }}"
+
+      # The ~3.5 hour x.py install is what this workflow exists to avoid
+      # repeating. Cache its dist/ output keyed on the patch series (and the
+      # script that applies it), so a re-run with unchanged inputs - a retry,
+      # or a fix in merge-bins - skips straight to the artifacts. The patch
+      # step above still runs and fails first if a patch no longer applies, so
+      # a restored dist cannot hide a broken patch series.
+      # github.job separates the panic=abort and panic=unwind dists; bump the
+      # -v1 suffix when changing the rust ref or the build recipe.
+      - name: restore rustc-for-wasm dist
+        id: cache-dist
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/rust/dist
+          key: rustc-wasm-dist-${{ runner.os }}-${{ github.job }}-${{ env.RUST_REF }}-${{ hashFiles('rust_wasm/patches/**', 'rust_wasm/ci/apply-rust-patches.sh') }}-v1
 
       - name: install-wasi-sdk
+        if: steps.cache-dist.outputs.cache-hit != 'true'
         working-directory: '${{ github.workspace }}/rust'
         shell: bash
         run: |
@@ -208,12 +256,14 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
 
       - name: update
+        if: steps.cache-dist.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
           sudo apt upgrade -y
           sudo apt install -y build-essential cmake pkg-config libclang-dev
 
       - name: install toolchain-for-building-rustc
+        if: steps.cache-dist.outputs.cache-hit != 'true'
         working-directory: '${{ github.workspace }}/rust'
         shell: bash
         env:
@@ -243,12 +293,26 @@ jobs:
           grep wasi config.llvm.toml || true
 
       - name: build install unwind
+        if: steps.cache-dist.outputs.cache-hit != 'true'
         working-directory: '${{ github.workspace }}/rust'
         env:
           RUST_CONFIGURE_ARGS: "-W warnings"
           RUSTFLAGS: "-Cpanic=unwind -W warnings"
         run: |
           ./x.py install --config config.llvm.toml
+
+      - name: save rustc-for-wasm dist
+        if: steps.cache-dist.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/rust/dist
+          key: rustc-wasm-dist-${{ runner.os }}-${{ github.job }}-${{ env.RUST_REF }}-${{ hashFiles('rust_wasm/patches/**', 'rust_wasm/ci/apply-rust-patches.sh') }}-v1
+
+      - name: verify dist
+        working-directory: '${{ github.workspace }}/rust'
+        run: |
+          ls -lh dist/bin/rustc.wasm
+          test -f dist/bin/rustc.wasm
 
       - name: prepare unwind artifacts
         working-directory: '${{ github.workspace }}/rust'

@@ -70,8 +70,9 @@ jobs:
           sudo apt-get install -y \
             build-essential cmake pkg-config libclang-dev curl xz-utils zstd
 
-      # Cache only what is slow to download and cheap to restore. The multi-GB
-      # rustc build tree is deliberately not cached.
+      # Cache what is slow to download and cheap to restore (rustup, Cargo
+      # registry, the pinned checkouts, wasi-sdk), plus the compiler outputs
+      # below. The 12 GB rustc build tree itself is never cached.
       - name: restore rustup toolchains
         id: cache-rustup
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -111,17 +112,58 @@ jobs:
             experiments/cranelift-wasm/toolchain/stage-b/wasi-sdk
           key: cranelift-wasm-wasi-sdk-${{ runner.os }}-${{ runner.arch }}-34.0-v1
 
+      # The ~26 minute rustc.wasm build (plus the stage1 compiler it needs at
+      # run time, the pure sysroot and the Wild linker) is what this workflow
+      # spends most of its time on. Cache the outputs, not the 12 GB build tree:
+      # about 800 MB, or ~250 MB compressed.
+      #
+      # The key is the rule: it lists every input that can change the cached
+      # bytes - the patch series, every script that builds them, the pins for
+      # the rust commit/nightly/wasi-sdk, and c_plugin's manifest because
+      # -Zbuild-std takes the sysroot's profile from it. Add an input to the
+      # build and it must be added here. Nothing is restored on a near miss (no
+      # restore-keys), and a hit still rebuilds the host, recompiles every
+      # plugin program and runs every correctness step, so a stale compiler
+      # cannot turn a broken patch green.
+      - name: restore compiler outputs
+        id: cache-compiler
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            experiments/cranelift-wasm/toolchain/stage-c/artifacts
+            experiments/cranelift-wasm/toolchain/stage-c/sysroot-pure
+            experiments/cranelift-wasm/toolchain/stage-b/rust/build/host/stage1
+            experiments/cranelift-wasm/toolchain/target/wild/release/wild
+          key: cranelift-wasm-compiler-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('experiments/cranelift-wasm/stage-c/patches/**', 'experiments/cranelift-wasm/stage-c/scripts/build-rustc-wasm.sh', 'experiments/cranelift-wasm/stage-c/scripts/build-pure-sysroot.sh', 'experiments/cranelift-wasm/stage-c/scripts/rustc-wasm-wrapper.sh', 'experiments/cranelift-wasm/stage-c/programs/c_plugin/Cargo.*', 'experiments/cranelift-wasm/stage-b/scripts/**', 'experiments/cranelift-wasm/ci/setup-toolchain.sh') }}-v1
+
       - name: build and test
+        env:
+          # Only the exact-input cache hit is allowed to skip the build; the id
+          # is unset on a miss, and build-and-test.sh then builds from source.
+          CI_REUSE_COMPILER: ${{ steps.cache-compiler.outputs.cache-hit }}
         run: |
           bash ci/build-with-diagnostics.sh \
             "${RUNNER_TEMP}/cranelift-wasm.log" \
             bash experiments/cranelift-wasm/ci/build-and-test.sh
 
+      - name: save compiler outputs
+        if: success() && steps.cache-compiler.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            experiments/cranelift-wasm/toolchain/stage-c/artifacts
+            experiments/cranelift-wasm/toolchain/stage-c/sysroot-pure
+            experiments/cranelift-wasm/toolchain/stage-b/rust/build/host/stage1
+            experiments/cranelift-wasm/toolchain/target/wild/release/wild
+          key: cranelift-wasm-compiler-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('experiments/cranelift-wasm/stage-c/patches/**', 'experiments/cranelift-wasm/stage-c/scripts/build-rustc-wasm.sh', 'experiments/cranelift-wasm/stage-c/scripts/build-pure-sysroot.sh', 'experiments/cranelift-wasm/stage-c/scripts/rustc-wasm-wrapper.sh', 'experiments/cranelift-wasm/stage-c/programs/c_plugin/Cargo.*', 'experiments/cranelift-wasm/stage-b/scripts/**', 'experiments/cranelift-wasm/ci/setup-toolchain.sh') }}-v1
+
       # A CI-sized subset of the product benchmark suite. It reuses the
       # rustc.wasm, sysroot, Wild and Cargo target directory this job just
       # built, so it adds about two minutes rather than a second full build.
-      # --fuel adds one fuel-enabled rustc.wasm compile per program (the first
-      # load pays the module compile, later programs hit the Wasmtime cache).
+      # On a compiler-cache hit it is what runs: a benchmark-only change no
+      # longer pays for the compiler. --fuel adds one fuel-enabled rustc.wasm
+      # compile per program (the first load pays the module compile, later
+      # programs hit the Wasmtime cache).
       - name: quick performance suite
         if: success()
         run: |
