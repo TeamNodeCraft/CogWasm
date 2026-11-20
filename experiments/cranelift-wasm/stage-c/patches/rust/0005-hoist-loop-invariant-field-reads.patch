@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Stage C <stage-c@example.invalid>
-Date: Thu, 20 Nov 2026 13:30:00 +1030
+Date: Thu, 20 Nov 2026 16:10:00 +1030
 Subject: [PATCH] hoist loop-invariant aggregate field reads
 
 sroa promotes a local only when its address is never taken, so a `Vec`
@@ -18,7 +18,15 @@ pointer from a reference, or an integer-to-pointer cast skips the
 function. That is not yet enough for unsafe code: a call can still hand
 back a raw pointer into the base.
 
-The pass is therefore opt-in through the unstable flag
+The preheader read is paid once per loop entry, so the pass only
+optimizes loops that are part of a nest (nested in another loop, or
+containing one). A single-level loop over a runtime-length collection
+can execute too few times to pay for it: the first suite run regressed
+`expr` by 0.01% entirely because of `expr::Env::set`'s short lookup
+loop. With the nest gate, a local A/B gives `expr` 0.000%, `nbody`
+-10.551% and `b_alloc` -1.731%.
+
+The pass is opt-in through the unstable flag
 `-Zmir-hoist-loop-field-reads`, off by default. It must not run in the
 compiler, sysroot or default benchmark builds: at level 2 the stage-1
 compiler runs it over rustc's own crates while building rustc.wasm, and
@@ -71,7 +79,7 @@ diff --git a/compiler/rustc_mir_transform/src/loop_field_hoist.rs b/compiler/rus
 new file mode 100644
 --- /dev/null
 +++ b/compiler/rustc_mir_transform/src/loop_field_hoist.rs
-@@ -0,0 +1,382 @@
+@@ -0,0 +1,413 @@
 +//! Hoist loop-invariant field reads out of loops.
 +//!
 +//! `sroa` only promotes a local whose address is never taken, so a `Vec` local
@@ -99,6 +107,12 @@ new file mode 100644
 +//! - Any borrow of `base` created inside the loop, any move out of it, and any
 +//!   direct, discriminant or storage write rejects the base, because those
 +//!   change the value between iterations without a borrow conflict.
++//!
++//! Only loops that are part of a nest (nested in another loop, or containing
++//! one) are optimized. The preheader read is paid once per loop entry, so a
++//! single-level loop over a runtime-length collection can run too few times to
++//! pay for it; `expr::Env::set` regressed by 0.01% that way while the nested
++//! kernels (`nbody`, `b_alloc`) pay it back many times over.
 +//!
 +//! This is deliberately conservative: the calls that keep `Vec`'s address
 +//! escaping limit what it can see until the cost-model inliner from Goal 1
@@ -142,10 +156,38 @@ new file mode 100644
 +        }
 +        let typing_env = ty::TypingEnv::post_analysis(tcx, body.source.def_id());
 +        let dominators = body.basic_blocks.dominators().clone();
++        let mut loops = Vec::new();
 +        for header in loop_headers(body, &dominators, &reachable) {
-+            hoist_loop(tcx, body, typing_env, &dominators, &reachable, header);
++            let blocks = loop_blocks(body, &dominators, &reachable, header);
++            if blocks.len() < 2 {
++                continue;
++            }
++            let mut members = DenseBitSet::new_empty(body.basic_blocks.len());
++            for bb in &blocks {
++                members.insert(*bb);
++            }
++            loops.push(Loop { header, blocks, members });
++        }
++        for (index, loop_) in loops.iter().enumerate() {
++            // Pay the preheader read only where the loop is part of a nest.
++            let nested = loops.iter().enumerate().any(|(other_index, other)| {
++                other_index != index && other.members.contains(loop_.header)
++            });
++            let contains_nested = loops.iter().enumerate().any(|(other_index, other)| {
++                other_index != index && loop_.members.contains(other.header)
++            });
++            if !nested && !contains_nested {
++                continue;
++            }
++            hoist_loop(tcx, body, typing_env, &dominators, &reachable, loop_);
 +        }
 +    }
++}
++
++struct Loop {
++    header: BasicBlock,
++    blocks: Vec<BasicBlock>,
++    members: DenseBitSet<BasicBlock>,
 +}
 +
 +fn reachable_blocks(body: &Body<'_>) -> DenseBitSet<BasicBlock> {
@@ -262,16 +304,12 @@ new file mode 100644
 +    typing_env: ty::TypingEnv<'tcx>,
 +    dominators: &Dominators<BasicBlock>,
 +    reachable: &DenseBitSet<BasicBlock>,
-+    header: BasicBlock,
++    loop_: &Loop,
 +) {
-+    let blocks = loop_blocks(body, dominators, reachable, header);
-+    if blocks.len() < 2 {
-+        return;
-+    }
-+    let Some(preheader) = unique_preheader(body, &blocks, header) else {
++    let Some(preheader) = unique_preheader(body, &loop_.blocks, loop_.header) else {
 +        return;
 +    };
-+    let (written, escaped, has_inline_asm) = loop_effects(body, &blocks);
++    let (written, escaped, has_inline_asm) = loop_effects(body, &loop_.blocks);
 +    if has_inline_asm {
 +        return;
 +    }
@@ -283,7 +321,8 @@ new file mode 100644
 +
 +    let mut patch = MirPatch::new(body);
 +    let mut moved = 0;
-+    for bb in blocks {
++    for bb in &loop_.blocks {
++        let bb = *bb;
 +        if body[bb].is_cleanup {
 +            continue;
 +        }

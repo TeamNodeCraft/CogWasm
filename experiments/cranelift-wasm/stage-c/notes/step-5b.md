@@ -1,7 +1,8 @@
 # Goal 1 step 5b: a MIR optimiser
 
-Status: **in progress**. The first increment is landed; the cost-model inliner
-and the benchmark measurement are not. No performance claim is made yet.
+Status: **in progress**. The first SROA increment is landed and measured on the
+suite; the cost-model inliner is not started. The pass is opt-in and no speed
+claim is made for the product default.
 
 > The pass code, patch header and this note are LLM-generated under the Rust
 > project's personal-use exemption. This is a local CogWasm experiment, not an
@@ -133,6 +134,16 @@ is the only regression, 188 instructions (+0.01%), from a hoist whose in-loop
 copy costs more than the load it removes. The compiler-work metric is absent
 because the fuel determinism guard flakes on `sha256` with the pass.
 
+Profiling the `expr` regression attributed all 188 instructions to
+`expr::Env::set`, whose `while i < self.vars.len()` lookup loop is single-level
+and runs a handful of times: the preheader read is paid per loop entry, and the
+in-loop copy does not pay it back. The pass now only optimizes loops that are
+part of a nest (nested in another loop, or containing a nested loop). With that
+gate, a local A/B on the same compiler (only the flag differing) gives `expr`
+**0.000%**, `nbody` **-10.551%** and `b_alloc` **-1.731%**, so the win is kept
+and the regression is gone. The suite table above is from the pre-gate run; the
+gated dispatch will confirm the final suite numbers.
+
 The suite numbers above are still **not measured**. `rustc.wasm` cannot be run
 in this environment (only paths outside the checkout work inside its WASI
 sandbox), so the benchmark run must happen on a normal machine or in CI. Until
@@ -189,7 +200,6 @@ and skip the ~26-minute build.
    on `sha256` (1 in 3 local runs) before considering a default-on pass; it
    may be a nondeterministic hash-order path in rustc that the changed MIR
    reaches.
-8. Add a profitability cost to the hoist. `expr` regressed by 0.01% because the
-   in-loop copy can cost more than the load it removes; the win is only worth
-   it when the read is hot enough (nested loops, or a loop body large enough
-   that the load is the cheaper part).
+8. The loop-nest profitability gate is in and removes the `expr` regression.
+   A finer trip-count/loop-cost model could recover single-level hot loops, and
+   the gated suite numbers still need the confirming dispatch.
