@@ -90,8 +90,26 @@ pointer into the base. The pass is therefore behind an explicit unstable flag,
 which the compiler, sysroot and default benchmark builds do not pass. A real
 escape/alias analysis is the way back to a default-on pass.
 
-The level-3 version has **not** been measured on the suite. `rustc.wasm` cannot
-be run in this environment (only paths outside the checkout work inside its WASI
+### First experiment run
+
+The first `mir_hoist` dispatch (run 44670568809, commit `9f33698`) hit the
+compiler cache (build and test 10 minutes instead of 46) and **passed difftest
+with the pass enabled**. The quick suite then failed, but not on a miscompile:
+with the pass, `sha256`'s compiler fuel differed by 5 units between the two
+`--fuel` samples. That is intermittent; it reproduced in 1 of 3 local runs and
+the samples agree without the pass. The runtime instruction counts do not
+depend on fuel, so the experiment quick suite now runs without `--fuel`; the
+compiler-work metric is unavailable for experiment runs until the
+nondeterminism is understood.
+
+A local reconstruction with a rebuilt rustc.wasm compiled all twelve quick
+programs with the flag. `nbody`'s results matched the same compiler without the
+flag for all four quick seeds, and its module was 413 bytes smaller (41,707 to
+41,294 in that reconstruction). The runtime instruction deltas are pending the
+next dispatch.
+
+The suite numbers above are still **not measured**. `rustc.wasm` cannot be run
+in this environment (only paths outside the checkout work inside its WASI
 sandbox), so the benchmark run must happen on a normal machine or in CI. Until
 then this is an implementation increment, not a speed result.
 
@@ -142,3 +160,7 @@ and skip the ~26-minute build.
    time cost, before claiming any of it. The 5a notes say the +5% warm compile
    belongs in the tier-2 build; a default-on pass would pay that in the fast
    tier, so it stays opt-in until tier 2 exists.
+7. Understand the intermittent 5-unit compiler-fuel difference the pass causes
+   on `sha256` (1 in 3 local runs) before considering a default-on pass; it
+   may be a nondeterministic hash-order path in rustc that the changed MIR
+   reaches.
