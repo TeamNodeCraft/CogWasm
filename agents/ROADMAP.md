@@ -103,7 +103,7 @@ next starts.
 
 Step 1 is done: [bench/gap/REPORT.md](../bench/gap/REPORT.md) attributes every program over 0.1 ms, with dynamic counts, hot-function WAT and the size breakdown. Batch 1 (19 Nov 2026) then did the fix it ranked first: small/constant `memcpy`/`memmove` lowering, constant aggregates addressed in place, zero-data omission in Wild and safe address folding. The suite geomean went from **3.53× to 2.49×** of LLVM `-O2`; `sha256` 12.33× → 1.50×, `sort` 12.22× → 3.51×, total size median 63.7 KB → 46.5 KB, and the compile-time median stayed flat (104.9 → 102.0 ms). The next step is SROA/mem2reg plus a cost-model inliner (step 5); the MIR-optimisation experiment (step 3) measured no execution win.
 
-Step 5b has started: patch `0005-hoist-loop-invariant-field-reads.patch` adds the conservative loop-invariant field-read hoist (the SROA half of 5a, with the destination and raw-pointer/`Freeze` fixes). The cost-model inliner and the suite measurement are next; see [step-5b.md](../experiments/cranelift-wasm/stage-c/notes/step-5b.md).
+Step 5b has started: patch `0005-hoist-loop-invariant-field-reads.patch` adds the conservative loop-invariant field-read hoist (the SROA half of 5a, with the destination and raw-pointer/`Freeze` fixes). It is opt-in behind `-Zmir-hoist-loop-field-reads` because it is not yet sound enough for a default-on pass. An opt-in local A/B reproduces 5a on `nbody` (6.20G → 5.55G executed instructions, −10.55%, at −1.0% module size); the cost-model inliner and the suite-wide measurement are next; see [step-5b.md](../experiments/cranelift-wasm/stage-c/notes/step-5b.md).
 
 ## Goal 2 — Near-instant compiler start
 

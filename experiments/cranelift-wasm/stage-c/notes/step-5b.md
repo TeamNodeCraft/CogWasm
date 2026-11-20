@@ -105,8 +105,11 @@ nondeterminism is understood.
 A local reconstruction with a rebuilt rustc.wasm compiled all twelve quick
 programs with the flag. `nbody`'s results matched the same compiler without the
 flag for all four quick seeds, and its module was 413 bytes smaller (41,707 to
-41,294 in that reconstruction). The runtime instruction deltas are pending the
-next dispatch.
+41,294). Instrumenting both modules and counting executed wasm instructions
+reproduces the step-5a result exactly: **6,204,745,840 -> 5,550,101,348**
+(-10.55%, the same total the 5a prototype reported). The no-flag count matches
+the CI pre-pass baseline exactly, so the local compiler is representative. The
+suite-wide deltas are pending the next dispatch.
 
 The suite numbers above are still **not measured**. `rustc.wasm` cannot be run
 in this environment (only paths outside the checkout work inside its WASI
