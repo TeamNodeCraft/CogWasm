@@ -264,12 +264,24 @@ program returned identical results.
 | `generated_stress` | 0.0619 ms | 0.0780 ms | +26.1% | 0.99x -> 1.20x |
 | `int_loops` | 0.0033 ms | 0.0047 ms | +43.7% | 0.88x -> 1.30x |
 
-Execution geomean **-2.3%** and warm compile **+3.3%** over all 21 programs;
-module size grows 0.1% to 5.9%. `strings` is the robust win (0.78-0.96 ms
-against 1.38-1.66 ms). The two regressions are the open problem: `int_loops`
-and `generated_stress` are micro-programs whose sample ranges overlap, but
-the median shift repeats across runs, so they need the deterministic
-instruction counts before this pass can carry any speed claim.
+Execution geomean **-2.3%** and warm compile **+3.3%** over all 21 programs.
+The module size median grows 1.4%: three programs shrink, two are unchanged
+and sixteen grow, the largest being `float_sum` +13.1% and `mandelbrot`
++11.8%. `strings` is the robust win (0.78-0.96 ms against 1.38-1.66 ms).
+
+The two apparent regressions were re-checked with the deterministic counters
+and a 7-run A/B:
+
+- `generated_stress`: instructions 671,468 -> 666,288 (-0.8%); the 7-run
+  medians are 0.0652 -> 0.0668 ms (+2.5%), or 1.07x -> 1.05x of LLVM `-O2`.
+  The +26.1% in the first table was run noise.
+- `int_loops`: instructions 213,915 -> 198,719 (-7.1%) and direct calls
+  396 -> 4, yet the 7-run medians are 0.0025 -> 0.0034 ms (+38.7%), or
+  1.11x -> 1.20x of LLVM `-O2`. This is not extra work: the pass inlines
+  `emit_bytes` and `copy_from_slice_impl` into `emit_u64`, and the loop does
+  fewer instructions but runs slower. The run is 2-3 microseconds and the
+  shift repeats, so it looks like a code-layout effect on a micro-benchmark.
+  It is the open issue for this pass.
 
 Two knobs were tuned before this measurement. With the normal inliner's
 five-level recursion limit the pass only reached 3,499 MIR lines of
@@ -281,11 +293,11 @@ did not bind on any suite program.
 
 ### What is not done
 
-The difftest has not been run with this pass, the `int_loops` and
-`generated_stress` regressions are unexplained, the threshold and growth
-constants are first estimates, and the pass still has to be measured on a
-machine other than this one. Every program except `strings` moves within
-run-to-run noise, so the suite geomean is not yet a speed claim.
+The difftest has not been run with this pass, the `int_loops` layout
+regression is unexplained, the threshold and growth constants are first
+estimates, and the pass still has to be measured on a machine other than this
+one. Every program except `strings` moves within run-to-run noise, so the
+suite geomean is not yet a speed claim.
 
 ## What remains for step 5b
 
