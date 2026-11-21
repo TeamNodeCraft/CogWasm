@@ -161,20 +161,26 @@ grep -q 'pub enum WasmIntrinsic' "$CLIF/src/wasm_intrinsic.rs" || {
     echo "clif-to-wasm WasmIntrinsic missing from $CLIF/src/wasm_intrinsic.rs" >&2; exit 1; }
 # The in-tree cg_clif must consume the patched clif-to-wasm, not crates.io.
 # Fail loudly if the pinned Cargo.toml line changes: a silent no-op would use
-# the crates.io release without the memory.grow patch.
-python3 - "$CG/Cargo.toml" <<'PY'
-import sys
-p = sys.argv[1]
+# the crates.io release without the memory.grow patch. The path is computed
+# from the real locations (it used to be a hard-coded ../../../../ that broke
+# when the toolchain layout changed), and an existing path from an earlier
+# layout is rewritten too.
+python3 - "$CG/Cargo.toml" "$CLIF" <<'PY'
+import os, re, sys
+p, clif = sys.argv[1], sys.argv[2]
+rel = os.path.relpath(clif, os.path.dirname(p))
 s = open(p).read()
-old = 'clif-to-wasm = { version = "0.3.0", features = ["module"] }'
-new = 'clif-to-wasm = { path = "../../../../clif-to-wasm", features = ["module"] }'
-if new in s:
-    pass
-elif old in s:
-    s = s.replace(old, new)
-    open(p, 'w').write(s)
-else:
+pattern = re.compile(
+    r'^clif-to-wasm = \{ (?:version = "0\.3\.0"|path = "[^"]*"), features = \["module"\] \}$',
+    re.M)
+new = f'clif-to-wasm = {{ path = "{rel}", features = ["module"] }}'
+s2, n = pattern.subn(new, s)
+if n != 1:
     sys.exit(f"unexpected clif-to-wasm dependency in {p}; cannot point it at the patched checkout")
+if s2 != s:
+    open(p, 'w').write(s2)
+if not os.path.isfile(os.path.join(os.path.dirname(p), rel, "Cargo.toml")):
+    sys.exit(f"clif-to-wasm path {rel} does not resolve from {os.path.dirname(p)}")
 PY
 
 sed "s|@WASI_SDK@|$WASI_SDK|g" "$REPO/compiler/bootstrap.toml" > "$SRC/bootstrap.toml"
