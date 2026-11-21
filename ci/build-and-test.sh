@@ -112,8 +112,12 @@ if [ "$REUSE_COMPILER" = true ]; then
     # The Wild binary is cached with the compiler because setup-toolchain.sh
     # builds it from the same pinned sources. If only it is missing, the cheap
     # fix is a setup run rather than failing a run that can still be correct.
-    if [ ! -x "$WILD" ]; then
-        step "Wild linker missing from the cache; fetching pinned sources"
+    # The isolated rustup/cargo are cached separately and saved only when a run
+    # succeeds, so a compiler cache hit can come with no toolchain (the compiler
+    # cache is saved right after the build; a later step can still fail). Later
+    # steps call $TOOL/cargo/bin/cargo directly, so set up in that case too.
+    if [ ! -x "$WILD" ] || [ ! -x "$TOOL/cargo/bin/cargo" ]; then
+        step "Wild or the isolated toolchain missing from the caches; running setup"
         "$CI_DIR/setup-toolchain.sh"
     fi
     mkdir -p "$TOOL/cache"
