@@ -345,3 +345,24 @@ Run in order after each phase (and all of them before the final merge of P4/P5):
   binary name (the supervisor and `bench/host` reference it by name).
 - **`bench/gap/` split.** The crate moves to `crates/gap-tool/`; confirm the
   analysis scripts, `REPORT.md` and (gitignored) `results/` stay under `bench/gap/`.
+
+## Status (2026-11-21)
+
+Done on branch `layout-migration`, each phase verified locally with
+`ci/build-and-test.sh --reuse-compiler` and `bench/run.sh --quick` against a
+baseline (clif and LLVM `-O2` modules identical; only timings differ).
+
+| Phase | Commit | Deviation from the plan |
+| --- | --- | --- |
+| P0 | `42c74c1` | Only `tree.txt` removed. Stage A went with P2 (stage B still built from it). Generated evidence (`bench/gap/results`, `docs/results/*.log`) is still tracked: moving it to a release asset publishes it, so it waits for an owner decision. |
+| P1 | `5311ad0` | As planned. `serde_json` 1.0.154 → 1.0.149 and `smallvec` 1.16.6 → 1.16.5 from unifying the lockfiles. |
+| P2 | `ee9f8be` | Stage A removed here. Source setup became `setup-sources.sh`. |
+| P3 | `bc9c86a` | Only `Wt` and `SpawnSummary` were identical; the other shared helper names behave differently in each host and stay duplicated until their behaviour is decided. |
+| P7 | `d4ec653` | Done before P4. |
+| P4 | `571a5e1`, `3e1d0a3` | Split into the move (4a) and the renames (4b). `bench/host` and `bench/gap` stay in `bench/`. Fixed `setup-sources.sh` failing to rewrite `bootstrap.toml` after the toolchain moved. |
+| P5 | `f8e37c5` | Upstream PR bundles are checked, not generated (they carry hand-written PR text). All four currently differ from the live patches. |
+| P6 | — | Not started: feature work, separate from the restructure. |
+
+Not verified locally: a cold build (setup-toolchain.sh, rustc.wasm from
+source), the release workflow and the legacy LLVM workflows. CI caches start
+cold on the first run of this branch.
