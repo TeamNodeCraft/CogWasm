@@ -1,6 +1,6 @@
 //! Shared host-side runtime helpers for the `CogWasm` Wasmtime hosts.
 //!
-//! The stage-C product host and the benchmark host deliberately keep separate
+//! The CogWasm product host and the benchmark host deliberately keep separate
 //! engine setup, WASI store construction, spawn recording and startup
 //! reporting: those have drifted in ways that are observable (stderr capture,
 //! deterministic randomness, resource limits, log prefixes and error text).

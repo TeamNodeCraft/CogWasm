@@ -7,7 +7,7 @@
 #
 # It also applies the prior-art rust patch series (through
 # compiler/scripts/setup-sources.sh) and downloads wasi-sdk, but does NOT build
-# rustc.wasm: stage C builds wasm32-wasip1 directly from this tree.
+# rustc.wasm: the CogWasm compiler builds wasm32-wasip1 directly from this tree.
 set -euo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 TOOL="$REPO/toolchain"
@@ -129,7 +129,7 @@ if [ "$wild_patch_applied" = true ] || [ ! -x "$TOOL/target/wild/release/wild" ]
 fi
 "$TOOL/target/wild/release/wild" --version >/dev/null
 
-# Reuse the stage-C source setup (rust checkout + 23-patch series + wasi-sdk +
+# Reuse the compiler source setup (rust checkout + 23-patch series + wasi-sdk +
 # bootstrap.toml rewrite); it does not build rustc.wasm.
 log "preparing rust source, prior-art patches and wasi-sdk"
 "$REPO/compiler/scripts/setup-sources.sh"

@@ -4,7 +4,7 @@
 #
 #   1. fetch the pinned toolchain inputs (rustup, rust + prior-art patches,
 #      clif-to-wasm, Wild, wasi-sdk)
-#   2. build stage-C rustc.wasm (wasm32-wasip1, cg_clif only, single-threaded)
+#   2. build the CogWasm rustc.wasm (wasm32-wasip1, cg_clif only, single-threaded)
 #   3. build the Wasmtime 50.0.2 host (the sysroot builder executes rustc.wasm)
 #   4. build core/alloc/compiler_builtins with rustc.wasm itself (strict)
 #   5. run plugin (c) end to end and assert eval(1,2,3,4) == 2.25
@@ -28,10 +28,10 @@ set -euo pipefail
 CI_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(cd "$CI_DIR/.." && pwd)
 TOOL="$REPO/toolchain"
-RUSTC_WASM="$TOOL/stage-c/artifacts/rustc.wasm"
-SYSROOT="$TOOL/stage-c/sysroot-pure"
-HOST_BIN="$TOOL/target/stage-c-host/release/stage-c-host"
-STAGE1="$TOOL/stage-b/rust/build/host/stage1/bin/rustc"
+RUSTC_WASM="$TOOL/artifacts/rustc.wasm"
+SYSROOT="$TOOL/sysroot"
+HOST_BIN="$TOOL/target/cogwasm-host/release/cogwasm-host"
+STAGE1="$TOOL/rust/build/host/stage1/bin/rustc"
 WILD="$TOOL/target/wild/release/wild"
 START=$(date +%s)
 CURRENT_STEP=setup
@@ -105,13 +105,13 @@ if [ "$REUSE_COMPILER" = true ]; then
         step "Wild linker missing from the cache; fetching pinned sources"
         "$CI_DIR/setup-toolchain.sh"
     fi
-    mkdir -p "$TOOL/stage-c/cache"
+    mkdir -p "$TOOL/cache"
     echo "::notice title=cranelift-wasm build reused::rustc.wasm, pure sysroot, stage1 and Wild restored from a cache keyed on the patch series; steps 3 and 5-9 still run" >&2
 else
     step "setup pinned toolchain and sources"
     "$CI_DIR/setup-toolchain.sh"
 
-    step "build stage-C rustc.wasm (wasm32-wasip1, cranelift-only)"
+    step "build the CogWasm rustc.wasm (wasm32-wasip1, cranelift-only)"
     "$REPO/compiler/scripts/build-rustc-wasm.sh"
 fi
 
@@ -152,15 +152,15 @@ step "differential test: LLVM rustc vs Cranelift->wasm"
 "$REPO/difftest/run.sh" --seeds 24
 
 step "no-LLVM audit"
-mkdir -p "$TOOL/stage-c/work"
-"$HOST_BIN" inspect --wasm "$RUSTC_WASM" > "$TOOL/stage-c/work/rustc-inspect.json"
-python3 "$CI_DIR/audit-llvm.py" "$TOOL/stage-c/work/rustc-inspect.json" "$RUSTC_WASM"
+mkdir -p "$TOOL/work/compiler"
+"$HOST_BIN" inspect --wasm "$RUSTC_WASM" > "$TOOL/work/compiler/rustc-inspect.json"
+python3 "$CI_DIR/audit-llvm.py" "$TOOL/work/compiler/rustc-inspect.json" "$RUSTC_WASM"
 
 step "sizes and checksums"
 RUSTC_BYTES=$(wc -c < "$RUSTC_WASM" | tr -d ' ')
 RUSTC_SHA=$(sha256_file "$RUSTC_WASM")
 SYS_BYTES=$(du -sk "$SYSROOT" | cut -f1)
-PLUGIN_BYTES=$(wc -c < "$TOOL/stage-c/work/c_plugin.wasm" | tr -d ' ')
+PLUGIN_BYTES=$(wc -c < "$TOOL/work/compiler/c_plugin.wasm" | tr -d ' ')
 echo "rustc.wasm: ${RUSTC_BYTES} bytes, sha256 ${RUSTC_SHA}"
 echo "sysroot-pure: ${SYS_BYTES} KiB"
 echo "plugin (c): ${PLUGIN_BYTES} bytes"

@@ -71,7 +71,7 @@ def main() -> int:
     if not llvm_candidates:
         raise RuntimeError(f"no {nightly} rustc")
     llvm_rustc = llvm_candidates[0]
-    host = toolchain / "target" / "stage-c-host" / "release" / "bench-host"
+    host = toolchain / "target" / "cogwasm-host" / "release" / "bench-host"
     manifest = json.loads((BENCH / "programs.json").read_text(encoding="utf-8"))
     wanted = set(args.programs)
     selected = [
@@ -142,9 +142,9 @@ def main() -> int:
                 str(host),
                 "compile",
                 "--rustc",
-                str(toolchain / "stage-c" / "artifacts" / "rustc.wasm"),
+                str(toolchain / "artifacts" / "rustc.wasm"),
                 "--sysroot",
-                str(toolchain / "stage-c" / "sysroot-pure"),
+                str(toolchain / "sysroot"),
                 "--linker",
                 str(toolchain / "target" / "wild" / "release" / "wild"),
                 "--src",
@@ -164,7 +164,7 @@ def main() -> int:
                 "--load",
                 "cached",
                 "--cache-dir",
-                str(toolchain / "stage-c" / "cache"),
+                str(toolchain / "cache"),
                 "--json",
                 str(gap_work / variant / f"{name}-compile.json"),
             ]

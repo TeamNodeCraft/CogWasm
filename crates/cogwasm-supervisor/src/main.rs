@@ -1,7 +1,7 @@
 //! CLI for the reference supervisor.
 //!
 //! `build` uses the deterministic fake compiler (M1). `matrix` drives the real
-//! pipeline through `stage-c-host raw` and prints compile time, artifact size
+//! pipeline through `cogwasm-host raw` and prints compile time, artifact size
 //! and cache state per tier (M2).
 
 use std::fs::File;

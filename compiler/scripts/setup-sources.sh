@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
-# Set up the stage-C rustc source tree: fetch/verify the pinned rust-lang/rust
+# Set up the CogWasm rustc source tree: fetch/verify the pinned rust-lang/rust
 # checkout, apply the prior-art rust-to-wasm patch series once, fetch/select
 # wasi-sdk, point bootstrap.toml at it, and stop.
 #
-# This is the source setup stage C needs. It is idempotent and never builds
+# This is the source setup the CogWasm compiler needs. It is idempotent and never builds
 # rustc.wasm; compiler/scripts/build-rustc-wasm.sh does that afterwards. The
 # native stage1 compiler is still built with LLVM (stage0's LLVM backend, plus
 # a CI LLVM download for the native compiler). That is the one build-time LLVM
 # use; rustc.wasm itself contains only cg_clif. See docs/compiler.md.
 #
-# Everything downloaded/built lives under toolchain/ (gitignored). The ignored
-# toolchain directory names still say stage-b; renaming that layout is a
-# separate migration phase.
+# Everything downloaded/built lives under toolchain/ (gitignored).
+# The layout is role-based: rust source at toolchain/rust, wasi-sdk at
+# toolchain/wasi-sdk.
 set -euo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 TOOL="$REPO/toolchain"
-WORK="$TOOL/stage-b"
+WORK="$TOOL"
 SRC="$WORK/rust"
 PLAYGROUND="$TOOL/playground"
 export RUSTUP_HOME="${RUSTUP_HOME:-$TOOL/rustup}"

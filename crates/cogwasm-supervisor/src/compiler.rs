@@ -1,7 +1,7 @@
 //! The compiler seam.
 //!
 //! The supervisor does not know how a build happens. [`Compiler`] is the seam
-//! the real backend (M2, the stage-C host driving `rustc.wasm` and Wild) plugs
+//! the real backend (M2, the CogWasm host driving `rustc.wasm` and Wild) plugs
 //! into; [`FakeCompiler`] is the deterministic implementation the M1 tests use.
 
 use std::fmt;

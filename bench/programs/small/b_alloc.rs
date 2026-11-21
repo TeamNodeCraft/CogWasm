@@ -40,7 +40,7 @@ fn bench(n: u32) -> f64 {
         for op in &ops {
             y = op.apply(y);
         }
-        // Same shape as the stage-C program without the libm dependency; the
+        // Same shape as the original plugin program without the libm dependency; the
         // A.2 maths program covers libm calls.
         acc += (y.abs() * 0.5 + y) * 0.999;
         i = i.wrapping_add(1);

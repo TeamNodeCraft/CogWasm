@@ -28,21 +28,21 @@ applies all rust patches, so a fresh tree gets 0002 automatically:
 
 ```sh
 # From the repository root.
-git -C toolchain/stage-b/rust apply --check \
+git -C toolchain/rust apply --check \
     "$PWD/compiler/patches/rust/0002-generate-copyright-path-deps.patch"
 compiler/scripts/build-rustc-wasm.sh
 echo "exit: $?"                  # must be 0
 grep -c 'x.py install failed' docs/results/build-rustc-wasm.log || true
 ```
 
-A successful run ends with `rustc.wasm -> .../toolchain/stage-c/artifacts/rustc.wasm`;
+A successful run ends with `rustc.wasm -> .../toolchain/artifacts/rustc.wasm`;
 the script copies the artifact only after `x.py install` exits 0. There is no
 message matching anywhere in the script.
 
 Focused crate test (only in a build window; it compiles askama):
 
 ```sh
-cd toolchain/stage-b/rust
+cd toolchain/rust
 RUSTC_BOOTSTRAP=1 cargo test \
     --manifest-path src/tools/generate-copyright/Cargo.toml \
     --offline
@@ -93,17 +93,17 @@ Jobs:
    `compiler/scripts/build-rustc-wasm.sh`, `build-host.sh` and
    `build-pure-sysroot.sh` (strict), writes `release-metadata.json`
    (rustc.wasm size/SHA-256, sysroot size, rustc version, pins), generates
-   `THIRD_PARTY_NOTICES`, and uploads `rustc.wasm`, `sysroot-pure`,
+   `THIRD_PARTY_NOTICES`, and uploads `rustc.wasm`, `sysroot`,
    `release-metadata.json` and the notices.
 2. **host** matrix:
    - `aarch64-apple-darwin` on `macos-14`;
    - `x86_64-unknown-linux-gnu` on `ubuntu-latest`.
    Each downloads the one `rustc.wasm`, runs `setup-toolchain.sh`, then
    `release/package.sh`: builds the host and Wild with stable
-   1.99.1, runs `stage-c-precompile precompile` with the shared engine config,
+   1.99.1, runs `cogwasm-precompile precompile` with the shared engine config,
    and packages `rustc-<tag>.wasm`, `rustc-<tag>-<host>.cwasm` (+ `.json`),
-   `sysroot-pure-<tag>.tar.gz`, `wild-<tag>-<host>`,
-   `stage-c-host-<tag>-<host>`, `README-<tag>.md`, `THIRD_PARTY_NOTICES` and
+   `sysroot-<tag>.tar.gz`, `wild-<tag>-<host>`,
+   `cogwasm-host-<tag>-<host>`, `README-<tag>.md`, `THIRD_PARTY_NOTICES` and
    `SHA256SUMS`. Uploaded as `bundle-<host>`.
 3. **release** (`ubuntu-latest`, `contents: write`): downloads all host
    bundles, writes `SHA256SUMS-<tag>` over the merged files, adds
@@ -174,11 +174,11 @@ release/package.sh \
 ```
 
 `--skip-build` reuses the host/precompile binaries built with
-`CARGO_TARGET_DIR=toolchain/target/stage-c-host` and the Wild binary.
+`CARGO_TARGET_DIR=toolchain/target/cogwasm-host` and the Wild binary.
 `--reuse-precompiled` reuses the artifact just measured instead of
 precompiling the same bytes again; it must have been built from the same
 `rustc.wasm` (the metadata SHA-256 is what the host checks). Without the flag
-the script runs `stage-c-precompile precompile` itself. The script creates
+the script runs `cogwasm-precompile precompile` itself. The script creates
 `release/out/` (gitignored, including `*.cwasm.json`), copies `rustc.wasm` as
 `rustc-<tag>.wasm`, tars the sysroot, copies Wild and the host, writes
 `README-<tag>.md`, generates/copies `THIRD_PARTY_NOTICES` and writes
@@ -198,13 +198,13 @@ THIRD_PARTY_NOTICES
 rustc-v9.9.9-smoke2-aarch64-apple-darwin.cwasm
 rustc-v9.9.9-smoke2-aarch64-apple-darwin.cwasm.json
 rustc-v9.9.9-smoke2.wasm
-stage-c-host-v9.9.9-smoke2-aarch64-apple-darwin
-sysroot-pure-v9.9.9-smoke2.tar.gz
+cogwasm-host-v9.9.9-smoke2-aarch64-apple-darwin
+sysroot-v9.9.9-smoke2.tar.gz
 wild-v9.9.9-smoke2-aarch64-apple-darwin
 ```
 
 A second run with a different tag removed every stale `rustc-*`, `sysroot-*`,
-`wild-*`, `stage-c-host-*`, `README-*` and `SHA256SUMS*` file before writing
+`wild-*`, `cogwasm-host-*`, `README-*` and `SHA256SUMS*` file before writing
 the new bundle, and `SHA256SUMS` listed exactly the eight other files.
 
 Dry-run file list and sizes on the final artifact (`d2404a86`, 144,051,631 B;
@@ -215,9 +215,9 @@ Dry-run file list and sizes on the final artifact (`d2404a86`, 144,051,631 B;
 | `rustc-v0.0.0-dryrun.wasm` | 144,051,631 |
 | `rustc-v0.0.0-dryrun-aarch64-apple-darwin.cwasm` | 296,372,016 |
 | `rustc-v0.0.0-dryrun-aarch64-apple-darwin.cwasm.json` | 3,407 |
-| `sysroot-pure-v0.0.0-dryrun.tar.gz` | 17,889,140 |
+| `sysroot-v0.0.0-dryrun.tar.gz` | 17,889,140 |
 | `wild-v0.0.0-dryrun-aarch64-apple-darwin` | 13,473,264 |
-| `stage-c-host-v0.0.0-dryrun-aarch64-apple-darwin` | 18,014,480 |
+| `cogwasm-host-v0.0.0-dryrun-aarch64-apple-darwin` | 18,014,480 |
 | `README-v0.0.0-dryrun.md` | 5,047 |
 | `THIRD_PARTY_NOTICES` | 2,165,967 |
 | `SHA256SUMS` | 818 |
@@ -238,7 +238,7 @@ measured):
 
 ### `results.md` Stage C section: new bullet
 
-> * **Precompiled `.cwasm`**: `stage-c-precompile` produces a per-host
+> * **Precompiled `.cwasm`**: `cogwasm-precompile` produces a per-host
 >   Wasmtime artifact and a sidecar recording the Wasmtime version, the
 >   `Engine::precompile_compatibility_hash()`, the target, the engine
 >   configuration and the SHA-256/size of both files. The host checks the

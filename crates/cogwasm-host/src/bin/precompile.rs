@@ -2,8 +2,8 @@
 //! long the `.wasm` and `.cwasm` take to load.
 //!
 //! ```text
-//! stage-c-precompile precompile --wasm rustc.wasm --out rustc.cwasm --metadata rustc.cwasm.json
-//! stage-c-precompile bench      --wasm rustc.wasm --cwasm rustc.cwasm --runs 5
+//! cogwasm-precompile precompile --wasm rustc.wasm --out rustc.cwasm --metadata rustc.cwasm.json
+//! cogwasm-precompile bench      --wasm rustc.wasm --cwasm rustc.cwasm --runs 5
 //! ```
 //!
 //! The `.cwasm` is native code for this host. It is only valid for the exact
@@ -12,11 +12,11 @@
 //! anything does not match.
 
 use anyhow::{anyhow, bail, Context, Result};
-use serde::Serialize;
-use stage_c_host::config::{engine, engine_config_with, ConfigSummary};
-use stage_c_host::precompiled::{
+use cogwasm_host::config::{engine, engine_config_with, ConfigSummary};
+use cogwasm_host::precompiled::{
     load_rustc_module, metadata_sidecar, ArtifactMetadata, ModuleSource,
 };
+use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -24,7 +24,7 @@ use std::time::Instant;
 use wasmtime::{Engine, Module};
 
 const USAGE: &str = "\
-usage: stage-c-precompile <precompile|bench> [options]
+usage: cogwasm-precompile <precompile|bench> [options]
 
 precompile options:
   --wasm PATH        rustc.wasm to precompile
@@ -177,7 +177,7 @@ fn precompile(args: &Args) -> Result<()> {
     let expected_metadata = metadata_sidecar(out_path);
     if metadata_path != expected_metadata {
         eprintln!(
-            "[stage-c-precompile] warning: --metadata is {}, but the host reads sidecar \
+            "[cogwasm-precompile] warning: --metadata is {}, but the host reads sidecar \
              metadata from {}; copy or write it there before shipping",
             metadata_path.display(),
             expected_metadata.display()
@@ -429,7 +429,7 @@ fn run_child(
     quiet: bool,
     cache_dir: Option<&Path>,
 ) -> Result<ChildResult> {
-    let exe = std::env::current_exe().context("locating the stage-c-precompile binary")?;
+    let exe = std::env::current_exe().context("locating the cogwasm-precompile binary")?;
     let wasm = args.require_wasm()?;
     let mut command = Command::new(exe);
     command

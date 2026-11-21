@@ -1,6 +1,6 @@
-//! Shared library for the stage-C tools.
+//! Shared library for the CogWasm host tools.
 //!
-//! The `stage-c-host` binary and the `stage-c-precompile` binary both use
+//! The `cogwasm-host` binary and the `cogwasm-precompile` binary both use
 //! [`config`] for the Wasmtime engine and [`precompiled`] for loading and
 //! validating a precompiled `rustc.wasm`.
 

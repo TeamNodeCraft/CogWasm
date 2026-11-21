@@ -91,9 +91,9 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            toolchain/stage-b/wasi-sdk-34.0-x86_64-linux
-            toolchain/stage-b/wasi-sdk
-          key: cranelift-wasm-wasi-sdk-${{ runner.os }}-${{ runner.arch }}-34.0-v1
+            toolchain/wasi-sdk-34.0-x86_64-linux
+            toolchain/wasi-sdk
+          key: cranelift-wasm-wasi-sdk-${{ runner.os }}-${{ runner.arch }}-34.0-v2
 
       - name: build rustc.wasm, host and pure sysroot
         run: |

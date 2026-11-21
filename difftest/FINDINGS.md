@@ -1,7 +1,7 @@
 # Findings
 
-Last updated: 2026-11-19, local macOS arm64 (Apple silicon), stage-C artifacts
-as shipped in `toolchain/stage-c/` (rustc.wasm 143,849,756 B, sysroot-pure built
+Last updated: 2026-11-19, local macOS arm64 (Apple silicon), compiler artifacts
+as shipped in `toolchain/artifacts/` (rustc.wasm 143,849,756 B, sysroot-pure built
 by rustc.wasm, Wild 0.11.0, Wasmtime 50.0.2).
 
 ## Current status: no mismatches

@@ -38,7 +38,7 @@ The tests run on the host (the module is compiled under
 * dropping the lock releases the path.
 
 **Limitation, on purpose:** a WASI p1 process cannot coordinate locks with
-another process. The stage-C host runs one `rustc.wasm` instance at a time and
+another process. The cogwasm-host runs one `rustc.wasm` instance at a time and
 does not share an incremental directory with another running compiler
 process. Running two hosts against one incremental directory would make the
 garbage collector's "is this session still in use" decision unsafe; that is a

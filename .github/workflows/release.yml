@@ -102,14 +102,14 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            toolchain/stage-b/wasi-sdk-34.0-x86_64-linux
-            toolchain/stage-b/wasi-sdk
-          key: cranelift-wasm-wasi-sdk-${{ runner.os }}-${{ runner.arch }}-34.0-v1
+            toolchain/wasi-sdk-34.0-x86_64-linux
+            toolchain/wasi-sdk
+          key: cranelift-wasm-wasi-sdk-${{ runner.os }}-${{ runner.arch }}-34.0-v2
 
       - name: setup pinned toolchain and sources
         run: bash ci/setup-toolchain.sh
 
-      - name: build stage-C rustc.wasm
+      - name: build CogWasm rustc.wasm
         run: bash compiler/scripts/build-rustc-wasm.sh
 
       - name: build reference host
@@ -125,13 +125,13 @@ jobs:
           TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          RUSTC="toolchain/stage-c/artifacts/rustc.wasm"
-          STAGE1="toolchain/stage-b/rust/build/host/stage1/bin/rustc"
+          RUSTC="toolchain/artifacts/rustc.wasm"
+          STAGE1="toolchain/rust/build/host/stage1/bin/rustc"
           export RUSTUP_HOME="$PWD/toolchain/rustup"
           export CARGO_HOME="$PWD/toolchain/cargo"
           RUSTC_BYTES=$(wc -c < "$RUSTC" | tr -d ' ')
           RUSTC_SHA=$(sha256sum "$RUSTC" | cut -d' ' -f1)
-          SYS_BYTES=$(du -sb "toolchain/stage-c/sysroot-pure" | cut -f1)
+          SYS_BYTES=$(du -sb "toolchain/sysroot" | cut -f1)
           RUSTC_VERSION=$("$STAGE1" -vV | head -1)
           python3 - "$TAG" "$RUSTC_BYTES" "$RUSTC_SHA" "$SYS_BYTES" "$RUSTC_VERSION" <<'PY'
           import json, os, subprocess, sys
@@ -155,7 +155,7 @@ jobs:
               "sysroot_pure_bytes": int(sys_bytes),
               "rustc_version": rustc_version,
               "nightly": "nightly-2026-10-19",
-              "rustc_source": rev("toolchain/stage-b/rust"),
+              "rustc_source": rev("toolchain/rust"),
               "clif_to_wasm": rev("toolchain/clif-to-wasm"),
               "wild": rev("toolchain/wild"),
               # `root` is the repository root; the workspace lock is there too.
@@ -179,8 +179,8 @@ jobs:
         with:
           name: compiler-bundle
           path: |
-            toolchain/stage-c/artifacts/rustc.wasm
-            toolchain/stage-c/sysroot-pure
+            toolchain/artifacts/rustc.wasm
+            toolchain/sysroot
             release-metadata.json
             THIRD_PARTY_NOTICES
           if-no-files-found: error
@@ -290,9 +290,9 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            toolchain/stage-b/wasi-sdk-34.0-x86_64-linux
-            toolchain/stage-b/wasi-sdk
-          key: cranelift-wasm-wasi-sdk-${{ runner.os }}-${{ runner.arch }}-34.0-v1
+            toolchain/wasi-sdk-34.0-x86_64-linux
+            toolchain/wasi-sdk
+          key: cranelift-wasm-wasi-sdk-${{ runner.os }}-${{ runner.arch }}-34.0-v2
 
       - name: download rustc.wasm and sysroot
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
@@ -311,8 +311,8 @@ jobs:
           bash release/package.sh \
             --tag "$TAG" \
             --host-triple "$HOST_TRIPLE" \
-            --rustc-wasm bundle/compiler/toolchain/stage-c/artifacts/rustc.wasm \
-            --sysroot bundle/compiler/toolchain/stage-c/sysroot-pure \
+            --rustc-wasm bundle/compiler/toolchain/artifacts/rustc.wasm \
+            --sysroot bundle/compiler/toolchain/sysroot \
             --notices bundle/compiler/THIRD_PARTY_NOTICES \
             --out bundle/host
 

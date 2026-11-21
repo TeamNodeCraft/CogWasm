@@ -1,13 +1,13 @@
 # Precompiled `rustc.wasm` (`.cwasm`)
 
-Stage C can ship a Wasmtime-precompiled `rustc.wasm` so a host does not pay
+The CogWasm compiler can ship a Wasmtime-precompiled `rustc.wasm` so a host does not pay
 the ~40 s cold compile of the 137 MiB module. This note covers the new library
 split, the exact `main.rs` integration, and how the artifact is verified and
 packaged. The lead integrated this snippet into `main.rs` after Track B; this file
 remains the reference for the option semantics. One difference from the
 snippet below: the integrated `self_args` passes `--precompiled` through to
-`cold-once`/`cached-once`, so `stage-c-host bench --precompiled X` reports the
-precompiled path in its cold/cached fields. `stage-c-precompile bench` is the
+`cold-once`/`cached-once`, so `cogwasm-host bench --precompiled X` reports the
+precompiled path in its cold/cached fields. `cogwasm-precompile bench` is the
 tool that reports the `.wasm` cold/cached and `.cwasm` deserialize numbers
 separately.
 
@@ -18,23 +18,23 @@ separately.
 | `crates/cogwasm-host/src/config.rs` | The single Wasmtime engine configuration (moved from `main.rs`, behaviour unchanged) plus a `ConfigSummary` that is recorded in metadata. |
 | `crates/cogwasm-host/src/precompiled.rs` | `load_rustc_module`, sidecar metadata, SHA-256 helpers, compatibility hash, fallback. |
 | `crates/cogwasm-host/src/lib.rs` | Library target shared by the host and precompile binaries. |
-| `crates/cogwasm-host/src/bin/precompile.rs` | `stage-c-precompile precompile` and `stage-c-precompile bench`. |
+| `crates/cogwasm-host/src/bin/precompile.rs` | `cogwasm-precompile precompile` and `cogwasm-precompile bench`. |
 | `release/package.sh` | Build host + Wild, precompile, assemble one host's release bundle. |
 
-`stage-c-host` itself is unchanged in this track; the snippet below is what
+`cogwasm-host` itself is unchanged in this track; the snippet below is what
 the lead applies.
 
 ## CLI
 
 ```sh
 # One-time precompile for this host. Writes rustc.cwasm and rustc.cwasm.json.
-stage-c-precompile precompile \
+cogwasm-precompile precompile \
     --wasm rustc.wasm --out rustc-aarch64-apple-darwin.cwasm \
     --metadata rustc-aarch64-apple-darwin.cwasm.json
 
 # Hot-path vs opt-in verified load, medians of 5. --skip-cold reuses the
 # existing cold baseline instead of recompiling rustc.wasm five times.
-stage-c-precompile bench \
+cogwasm-precompile bench \
     --wasm rustc.wasm --cwasm rustc-aarch64-apple-darwin.cwasm \
     --runs 5 --skip-cold --verify \
     --json bench.json
@@ -49,12 +49,22 @@ relaxed SIMD because Wasmtime rejects SIMD off with relaxed SIMD on.
 `rustc-<host>.cwasm.json` records:
 
 - `format_version` (currently 1);
+- `generator`: the binary and version that wrote the file
+  (`cogwasm-precompile <version>`), for diagnosis only;
 - the Wasmtime version (`50.0.2`);
 - `compatibility_hash`: `Engine::precompile_compatibility_hash()` as lowercase
   hex (long: it is the exact hash byte stream);
 - `target`: arch/os/family/env/vendor and a derived Rust triple;
 - `config`: the `ConfigSummary` fields;
 - `wasm` and `cwasm`: SHA-256 and byte size.
+
+The compatibility hash is Wasmtime's hash of the engine configuration,
+Wasmtime version and target; it does **not** include the host crate name, the
+precompile binary name or any `stage-c` string. Renaming the package or the
+binary therefore does not change the hash. The `generator` string does change,
+but verification never compares it, so existing `.cwasm` files still load.
+A `.cwasm` is invalidated only by a Wasmtime version/configuration/target
+change, and then the host falls back to compiling the `.wasm`.
 
 On every load the host checks the format version, Wasmtime version,
 compatibility hash, target and both file sizes, then
@@ -81,8 +91,8 @@ behaviour when `--precompiled` is absent.
 
 ```diff
 -use wasmtime::{Cache, CacheConfig, Caller, Config, Engine, Extern, Linker, Memory, Module, Store};
-+use stage_c_host::config::engine;
-+use stage_c_host::precompiled::load_rustc_module;
++use cogwasm_host::config::engine;
++use cogwasm_host::precompiled::load_rustc_module;
 +use wasmtime::{Caller, Engine, Extern, Linker, Memory, Module, Store};
 ```
 
@@ -124,7 +134,7 @@ behaviour when `--precompiled` is absent.
 Delete the whole `fn engine_config(cache_dir: Option<&Path>) -> Result<Config>`
 and `fn engine(cache_dir: Option<&Path>) -> Result<Engine>` definitions (the
 `Engine / store` section around them). `engine` now comes from
-`stage_c_host::config`; its behaviour is identical (threads off, bulk memory,
+`cogwasm_host::config`; its behaviour is identical (threads off, bulk memory,
 multi-memory, SIMD, 8 MiB wasm stack, 16 MiB async stack, same cache settings).
 
 ### 4. `run_rustc`
@@ -294,7 +304,7 @@ Commands (run on macOS arm64 with the regenerated artifact):
 # path relies on Wasmtime's own file validation.
 cp rustc.cwasm bad.cwasm && cp rustc.cwasm.json bad.cwasm.json
 printf '\x00' | dd of=bad.cwasm bs=1 seek=4096 conv=notrunc
-stage-c-host check --precompiled bad.cwasm --verify-precompiled ...   # warning + fallback
+cogwasm-host check --precompiled bad.cwasm --verify-precompiled ...   # warning + fallback
 # (b) compile with --wasm-simd false: compatibility hash differs; falls back.
 # (c) both still compile and evaluate plugin (c): eval(1,2,3,4) == 2.25.
 ```

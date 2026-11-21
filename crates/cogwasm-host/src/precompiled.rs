@@ -180,7 +180,7 @@ impl ArtifactMetadata {
     ) -> Result<Self> {
         Ok(Self {
             format_version: METADATA_FORMAT_VERSION,
-            generator: format!("stage-c-precompile {}", env!("CARGO_PKG_VERSION")),
+            generator: format!("cogwasm-precompile {}", env!("CARGO_PKG_VERSION")),
             wasmtime_version: wasmtime_version(),
             compatibility_hash: compatibility_hash_hex(engine),
             target: TargetInfo::current(),
@@ -373,7 +373,7 @@ pub fn load_rustc_module(
             Err(error) => {
                 let reason = format!("{error:#}");
                 eprintln!(
-                    "[stage-c host] warning: precompiled {} not usable: {reason}; \
+                    "[cogwasm-host] warning: precompiled {} not usable: {reason}; \
                      falling back to compiling {}",
                     cwasm_path.display(),
                     wasm_path.display()
@@ -475,7 +475,7 @@ mod tests {
                 .map_or(0, |duration| duration.as_nanos());
             let unique = COUNTER.fetch_add(1, Ordering::Relaxed);
             let path = std::env::temp_dir().join(format!(
-                "stage-c-precompiled-{name}-{}-{nanos}-{unique}",
+                "cogwasm-precompiled-{name}-{}-{nanos}-{unique}",
                 std::process::id()
             ));
             std::fs::create_dir_all(&path).expect("creating the test temp dir");

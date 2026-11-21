@@ -72,8 +72,8 @@ if [ ! -d "$TOOLCHAIN" ]; then
     exit 1
 fi
 
-RUSTC_WASM="$TOOLCHAIN/stage-c/artifacts/rustc.wasm"
-SYSROOT="$TOOLCHAIN/stage-c/sysroot-pure"
+RUSTC_WASM="$TOOLCHAIN/artifacts/rustc.wasm"
+SYSROOT="$TOOLCHAIN/sysroot"
 WILD="$TOOLCHAIN/target/wild/release/wild"
 export RUSTUP_HOME=${RUSTUP_HOME:-$TOOLCHAIN/rustup}
 export CARGO_HOME=${CARGO_HOME:-$TOOLCHAIN/cargo}
@@ -103,7 +103,7 @@ need "${LLVM_RUSTC:?no $NIGHTLY rustc found; set BENCH_LLVM_RUSTC}"
 
 HOST_TRIPLE=${BENCH_HOST_TRIPLE:-}
 if [ -z "$HOST_TRIPLE" ]; then
-    STAGE1="$TOOLCHAIN/stage-b/rust/build/host/stage1/bin/rustc"
+    STAGE1="$TOOLCHAIN/rust/build/host/stage1/bin/rustc"
     if [ -x "$STAGE1" ]; then
         HOST_TRIPLE=$("$STAGE1" -vV | sed -n 's/^host: //p')
     else
@@ -127,10 +127,10 @@ else
 fi
 export PATH
 
-# Build the benchmark host into the same target directory as the stage-C host
+# Build the benchmark host into the same target directory as the cogwasm-host
 # so CI reuses the compiled Wasmtime units instead of building them again.
 unset RUSTC
-HOST_TARGET="$TOOLCHAIN/target/stage-c-host"
+HOST_TARGET="$TOOLCHAIN/target/cogwasm-host"
 HOST_BIN="$HOST_TARGET/release/bench-host"
 BUILD_TOOLCHAIN=$HOST_TOOLCHAIN
 # `[ -d "$path"-* ]` tests a literal glob, not the matches, so the fallback was
@@ -152,7 +152,7 @@ mkdir -p "$WORK"
 PRECOMPILED=
 STARTUP_PRECOMPILED=
 if [ "$PREPARE_PRECOMPILED" = 1 ]; then
-    PRECOMPILE="$HOST_TARGET/release/stage-c-precompile"
+    PRECOMPILE="$HOST_TARGET/release/cogwasm-precompile"
     if [ -x "$PRECOMPILE" ]; then
         if [ ! -f "$WORK/rustc.cwasm" ] || [ "$RUSTC_WASM" -nt "$WORK/rustc.cwasm" ]; then
             printf 'precompiling rustc.wasm for the precompiled-load metric\n' >&2
@@ -168,7 +168,7 @@ if [ "$PREPARE_PRECOMPILED" = 1 ]; then
             STARTUP_PRECOMPILED="$WORK/rustc.cwasm"
         fi
     else
-        printf 'note: stage-c-precompile is not built; measuring cached loads only\n' >&2
+        printf 'note: cogwasm-precompile is not built; measuring cached loads only\n' >&2
     fi
 fi
 

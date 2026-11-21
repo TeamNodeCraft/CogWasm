@@ -9,7 +9,7 @@ GAP=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 BENCH=$(cd "$GAP/.." && pwd)
 ROOT=$(cd "$BENCH/.." && pwd)
 TOOLCHAIN=${BENCH_TOOLCHAIN:-$ROOT/toolchain}
-HOST=$TOOLCHAIN/target/stage-c-host/release/bench-host
+HOST=$TOOLCHAIN/target/cogwasm-host/release/bench-host
 OUT=$GAP/results/gc.json
 mkdir -p "$GAP/work/gc" "$GAP/results"
 printf '{"programs": {' > "$OUT"
@@ -26,14 +26,14 @@ for name in a_add sha256; do
             no-gc) args+=(--rustc-arg=-Clink-arg=--no-gc-sections) ;;
         esac
         out=$GAP/work/gc/$name-$variant.wasm
-        "$HOST" compile --rustc "$TOOLCHAIN/stage-c/artifacts/rustc.wasm" \
-            --sysroot "$TOOLCHAIN/stage-c/sysroot-pure" \
+        "$HOST" compile --rustc "$TOOLCHAIN/artifacts/rustc.wasm" \
+            --sysroot "$TOOLCHAIN/sysroot" \
             --linker "$TOOLCHAIN/target/wild/release/wild" \
             --src "$BENCH/work/sources/$name.rs" \
             --prelude "$BENCH/programs/prelude.rs" \
             --out "$out" --work "$GAP/work/gc/$name-$variant" \
             --crate-name "$name" --runs 1 --phase-runs 0 --load cached \
-            --cache-dir "$TOOLCHAIN/stage-c/cache" ${args[@]+"${args[@]}"} \
+            --cache-dir "$TOOLCHAIN/cache" ${args[@]+"${args[@]}"} \
             --json "$GAP/work/gc/$name-$variant.json" >/dev/null
         [ "$inner" = 1 ] || printf ',' >> "$OUT"
         inner=0

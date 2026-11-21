@@ -1,6 +1,6 @@
 //! Benchmark host for the `CogWasm` performance suite.
 //!
-//! The host measures the product, not an experiment: it loads the stage-C
+//! The host measures the product, not an experiment: it loads the CogWasm
 //! `rustc.wasm` through the same Wasmtime engine configuration and precompiled
 //! artifact loader as the shipped host, compiles benchmark programs with the
 //! compiler inside the module, and runs the linked modules with the difftest
@@ -17,10 +17,10 @@
 
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Parser, Subcommand};
+use cogwasm_host::precompiled::load_rustc_module;
 use cogwasm_runtime::{SpawnSummary, Wt};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use stage_c_host::precompiled::load_rustc_module;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -489,15 +489,15 @@ fn startup_once(args: &StartupOnceArgs) -> Result<()> {
     let precompiled = args.precompiled.as_deref().map(absolute_arg).transpose()?;
     let cache_dir = args.cache_dir.as_deref().map(absolute_arg).transpose()?;
     let engine = match args.mode.as_str() {
-        "cold" => stage_c_host::engine(None)?,
+        "cold" => cogwasm_host::engine(None)?,
         "cached" => {
             let directory = cache_dir
                 .as_deref()
                 .ok_or_else(|| anyhow!("--mode cached needs --cache-dir"))?;
             std::fs::create_dir_all(directory)?;
-            stage_c_host::engine(Some(directory))?
+            cogwasm_host::engine(Some(directory))?
         }
-        "precompiled" => stage_c_host::engine(cache_dir.as_deref())?,
+        "precompiled" => cogwasm_host::engine(cache_dir.as_deref())?,
         other => bail!("unknown startup mode {other}; use cold, cached or precompiled"),
     };
     let precompiled_arg = match args.mode.as_str() {
@@ -636,7 +636,7 @@ fn startup(args: &StartupArgs) -> Result<()> {
         rustc: rustc.display().to_string(),
         rustc_bytes: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
         rustc_sha256: hex(&Sha256::digest(&bytes)),
-        wasmtime_version: stage_c_host::wasmtime_version(),
+        wasmtime_version: cogwasm_host::wasmtime_version(),
         modes: results,
     };
     let text = serde_json::to_string_pretty(&result)?;
@@ -1028,7 +1028,7 @@ fn measure_compiler_fuel(
     out: &Path,
     cache_dir: Option<&Path>,
 ) -> Result<(Vec<FuelRun>, u64)> {
-    let mut config = stage_c_host::engine_config(cache_dir)?;
+    let mut config = cogwasm_host::engine_config(cache_dir)?;
     config.consume_fuel(true);
     let engine = Engine::new(&config).wt("creating the fuel engine")?;
     let loaded = load_rustc_module(&engine, rustc, None, false)
@@ -1091,17 +1091,17 @@ fn load_compiler(
     mode: &str,
 ) -> Result<(Engine, String, Option<String>, Module, f64)> {
     let engine = match mode {
-        "cold" => stage_c_host::engine(None)?,
+        "cold" => cogwasm_host::engine(None)?,
         "cached" => {
             let directory = cache_dir.ok_or_else(|| anyhow!("--load cached needs --cache-dir"))?;
             std::fs::create_dir_all(directory)?;
-            stage_c_host::engine(Some(directory))?
+            cogwasm_host::engine(Some(directory))?
         }
         "precompiled" => {
             if precompiled.is_none() {
                 bail!("--load precompiled needs --precompiled");
             }
-            stage_c_host::engine(cache_dir)?
+            cogwasm_host::engine(cache_dir)?
         }
         other => bail!("unknown --load {other}; use cold, cached or precompiled"),
     };
@@ -1517,7 +1517,7 @@ fn run_command(args: &RunArgs) -> Result<()> {
     }
     let wasm = absolute_arg(&args.wasm)?;
     let seeds = parse_seeds(&args.seeds)?;
-    let engine = stage_c_host::engine(None)?;
+    let engine = cogwasm_host::engine(None)?;
     let started = Instant::now();
     let module = Module::from_file(&engine, &wasm).wt("compiling the benchmark module")?;
     let module_compile_ms = elapsed_ms(started);

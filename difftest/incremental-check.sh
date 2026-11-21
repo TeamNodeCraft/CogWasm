@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Incremental-compilation regression check for the stage-C pipeline.
+# Incremental-compilation regression check for the CogWasm compiler.
 #
 # Compile one corpus program with rustc.wasm three ways:
 #   1. cold, no -C incremental
@@ -32,19 +32,19 @@ SRC="$DIFFTEST/corpus/smoke.rs"
 WORK=${DIFFTEST_WORK:-$TOOL/difftest-work}/incremental-check
 INC="$WORK/inc"
 
-RUSTC_WASM=${DIFFTEST_RUSTC_WASM:-$TOOL/stage-c/artifacts/rustc.wasm}
-SYSROOT=${DIFFTEST_SYSROOT:-$TOOL/stage-c/sysroot-pure}
-STAGE_C_HOST=${DIFFTEST_STAGE_C_HOST:-$TOOL/target/stage-c-host/release/stage-c-host}
+RUSTC_WASM=${DIFFTEST_RUSTC_WASM:-$TOOL/artifacts/rustc.wasm}
+SYSROOT=${DIFFTEST_SYSROOT:-$TOOL/sysroot}
+COMPILER_HOST=${DIFFTEST_COMPILER_HOST:-${DIFFTEST_STAGE_C_HOST:-$TOOL/target/cogwasm-host/release/cogwasm-host}}
 WILD=${DIFFTEST_WILD:-$TOOL/target/wild/release/wild}
-CACHE_DIR=${DIFFTEST_CACHE_DIR:-$TOOL/stage-c/cache}
-TARGET_DIR=${DIFFTEST_TARGET_DIR:-$TOOL/target/stage-c-host}
+CACHE_DIR=${DIFFTEST_CACHE_DIR:-$TOOL/cache}
+TARGET_DIR=${DIFFTEST_TARGET_DIR:-$TOOL/target/cogwasm-host}
 RUNNER=${DIFFTEST_HOST_RUNNER:-$TARGET_DIR/release/difftest-host}
 
 need() { [ -e "$1" ] || { printf 'error: missing %s (set the matching DIFFTEST_* override, or build it first)\n' "$1" >&2; exit 1; }; }
 need "$SRC"
 need "$RUSTC_WASM"
 need "$SYSROOT"
-need "$STAGE_C_HOST"
+need "$COMPILER_HOST"
 need "$WILD"
 
 # Refuse obvious unsafe roots before removing the per-run work directory.
@@ -69,7 +69,7 @@ need "$RUNNER"
 compile() {
     local out=$1
     shift
-    "$STAGE_C_HOST" raw \
+    "$COMPILER_HOST" raw \
         --rustc "$RUSTC_WASM" --sysroot "$SYSROOT" --linker "$WILD" \
         --cache-dir "$CACHE_DIR" "$@" -- \
         --target wasm32-unknown-unknown --sysroot "$SYSROOT" \
@@ -99,7 +99,7 @@ done
 # Output-size report. `inspect` parses the wasm sections; use it for the code
 # size and function count as well as the total file size.
 inspect() {
-    "$STAGE_C_HOST" inspect --wasm "$1" | python3 -c '
+    "$COMPILER_HOST" inspect --wasm "$1" | python3 -c '
 import json, sys
 d = json.load(sys.stdin)
 print("{} bytes ({} code, {} functions)".format(d["bytes"], d["code_bytes"], d["functions"]))
@@ -107,8 +107,8 @@ print("{} bytes ({} code, {} functions)".format(d["bytes"], d["code_bytes"], d["
 }
 cold_desc=$(inspect "$WORK/cold/smoke.wasm")
 inc_desc=$(inspect "$WORK/incremental-1/smoke.wasm")
-cold_bytes=$("$STAGE_C_HOST" inspect --wasm "$WORK/cold/smoke.wasm" | python3 -c 'import json,sys; print(json.load(sys.stdin)["bytes"])')
-inc_bytes=$("$STAGE_C_HOST" inspect --wasm "$WORK/incremental-1/smoke.wasm" | python3 -c 'import json,sys; print(json.load(sys.stdin)["bytes"])')
+cold_bytes=$("$COMPILER_HOST" inspect --wasm "$WORK/cold/smoke.wasm" | python3 -c 'import json,sys; print(json.load(sys.stdin)["bytes"])')
+inc_bytes=$("$COMPILER_HOST" inspect --wasm "$WORK/incremental-1/smoke.wasm" | python3 -c 'import json,sys; print(json.load(sys.stdin)["bytes"])')
 delta_pct=$(awk -v a="$cold_bytes" -v b="$inc_bytes" 'BEGIN { printf "%.1f", (b-a)*100/a }')
 printf 'cold:                %s\n' "$cold_desc"
 printf 'incremental (first): %s\n' "$inc_desc"

@@ -1,6 +1,6 @@
 # The compiler build: no LLVM in the plugin path, no wasi-threads, growable heap
 
-Stage C closes the remaining non-Rust pieces of the stage-A/B plugin pipeline:
+The CogWasm compiler closes the remaining non-Rust pieces of the stage-A/B plugin pipeline:
 
 1. **rustc.wasm runs on the latest stable Wasmtime with plain WASI p1.** It is
    now built for `wasm32-wasip1` (non-threads): rustc's compiler thread and
@@ -42,7 +42,7 @@ reused. New or changed pins:
 | rustc source | https://github.com/rust-lang/rust | `b6eeb93c992027a03e1fd120b6652546396b142c` (`nightly-2026-10-19`) |
 | prior-art rust series | https://github.com/ryancbuckley/rust-playground-inbrowser | `f5298630dda0f2dc2b44f6ae1b54add7a77d8316`, 23 patches |
 | cg_clif | in-tree, from that series | upstream `4f78fd3e…` |
-| clif-to-wasm | https://github.com/ryancbuckley/clif-to-wasm (`toolchain/clif-to-wasm`) | `0e4e0458f5a190a7fcdbb2298d9ad780678c44bc` (0.3.0) + stage-C patch |
+| clif-to-wasm | https://github.com/ryancbuckley/clif-to-wasm (`toolchain/clif-to-wasm`) | `0e4e0458f5a190a7fcdbb2298d9ad780678c44bc` (0.3.0) + compiler patch |
 | wild | https://github.com/wild-linker/wild | `fd79578abb…`, 0.11.0 |
 | host | crates.io | **wasmtime / wasmtime-wasi 50.0.2**, `p1` feature only |
 | wasmparser | crates.io | 0.263 |
@@ -92,10 +92,10 @@ docs/
 # 0. Fetch the pinned rust source, prior-art patches and wasi-sdk (idempotent).
 compiler/scripts/setup-sources.sh
 
-# 1. Apply the stage-C patches and build rustc.wasm (~3.5 min incremental).
+# 1. Apply the compiler patches and build rustc.wasm (~3.5 min incremental).
 compiler/scripts/build-rustc-wasm.sh
 
-# 2. Build the stage-C Wasmtime 50.0.2 host. The sysroot builder needs it,
+# 2. Build the CogWasm Wasmtime 50.0.2 host. The sysroot builder needs it,
 #    because rustc.wasm is executed through this host while Cargo compiles
 #    core/alloc/compiler_builtins.
 compiler/scripts/build-host.sh
@@ -119,13 +119,37 @@ compiler/scripts/run-item3.sh all
 ```
 
 `build-rustc-wasm.sh` reuses the pinned source/build tree under
-`toolchain/stage-b` and applies every patch under `compiler/patches/rust/`,
+`toolchain/rust` and applies every patch under `compiler/patches/rust/`,
 `compiler/patches/cg_clif/` and `compiler/patches/clif-to-wasm/` in sorted order, idempotently.
 `x.py install` must succeed: the former
 `generate-copyright` failure for the out-of-tree clif-to-wasm path dependency
 is fixed by `compiler/patches/rust/0002-generate-copyright-path-deps.patch`. On any
 non-zero exit the script prints the tail of the log and stops; it only copies
 `build/wasm32-wasip1/stage2/bin/rustc.wasm` after a successful install.
+
+## Environment variables
+
+The scripts and the Rust host read the `COGWASM_*` names below. For one
+release, every read site also accepts the old `STAGE_C_*` spelling as a
+fallback, so an existing shell or CI environment keeps working; exports and
+sets always use the new name. The fallback is removed in the next release.
+
+| New name | Old fallback | Meaning |
+|---|---|---|
+| `COGWASM_STAGE1` | `STAGE_C_STAGE1` | native stage1 `rustc` (default: `toolchain/rust/build/host/stage1/bin/rustc`) |
+| `COGWASM_SYSROOT` | `STAGE_C_SYSROOT` | plugin sysroot added to target-crate compiles |
+| `COGWASM_STD_SRC` | `STAGE_C_STD_SRC` | stage1 `rust-src` checkout |
+| `COGWASM_REAL_SRC` | `STAGE_C_REAL_SRC` | real rust checkout the `rust-src` symlink points at |
+| `COGWASM_RUSTC_WASM` | `STAGE_C_RUSTC_WASM` | `rustc.wasm` to run |
+| `COGWASM_WILD` | `STAGE_C_WILD` | Wild linker binary |
+| `COGWASM_HOST` | `STAGE_C_HOST` | `cogwasm-host` binary |
+| `COGWASM_CACHE` | `STAGE_C_CACHE` | Wasmtime compiled-module cache |
+| `COGWASM_HOST_TRIPLE` | `STAGE_C_HOST_TRIPLE` | host triple for the stage1 `rust-src` path |
+| `COGWASM_HOST_TOOLCHAIN` | `STAGE_C_HOST_TOOLCHAIN` | stable toolchain that builds the host (default `1.99.1`) |
+| `COGWASM_TIME` | `STAGE_C_TIME` | print `TIMING` lines from the host |
+| `COGWASM_SPAWN_DEBUG` | `STAGE_C_SPAWN_DEBUG` | print the linker spawn argv |
+
+`CG_CLIF_WASM_STRICT` is cg_clif's own variable and is unchanged.
 
 ## Item 1: run on the calling thread, latest Wasmtime
 
@@ -164,7 +188,7 @@ differ between the two hosts in observable ways.
 `guests/c_plugin` is built with `-Zbuild-std=core,alloc,compiler_builtins`
 under `RUSTC=compiler/scripts/rustc-wasm-wrapper.sh`; `core`, `alloc` and
 `compiler_builtins` are produced by **rustc.wasm** and copied to
-`toolchain/stage-c/sysroot-pure`. The metadata version matches rustc.wasm
+`toolchain/sysroot`. The metadata version matches rustc.wasm
 (`rustc 1.101.0-dev`), so rustc.wasm accepts the rlibs.
 
 The one source fix needed was the **f128 ABI**. cg_clif's generated f128
@@ -235,7 +259,7 @@ applies to plain upstream). clif-to-wasm applies to `0e4e0458…`.
   rustc.wasm with cg_clif (no LLVM-built rlibs on the plugin path).
 * Linker: Wild (pure Rust) for the plugin; rust-lld is the LLVM-toolchain
   reference and produces an almost identical file.
-* Host: the stage-C Wasmtime host is Rust; Wasmtime itself contains C for
+* Host: the CogWasm Wasmtime host is Rust; Wasmtime itself contains C for
   signals/unwinding, but no plugin codegen depends on it.
 
 ## What is still not Rust

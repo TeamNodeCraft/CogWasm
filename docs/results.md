@@ -69,7 +69,7 @@ Raw: [`results/stage-c.json`](results/stage-c.json),
 
 (e) 100k f64 points: `sin`, `cos`, `sqrt`, reduce. (f) 40k iterations × 5
 imported host calls = 200,000 calls. Stage-C "warm" is the compile+link time
-reported inside rustc.wasm (`STAGE_C_TIME=1`); the whole Cargo process wall
+reported inside rustc.wasm (`COGWASM_TIME=1`; the old `STAGE_C_TIME=1` still works); the whole Cargo process wall
 with a warm Wasmtime cache is 0.675 s (e) / 0.609 s (f), dominated by the
 ~0.44 s rustc.wasm module load.
 

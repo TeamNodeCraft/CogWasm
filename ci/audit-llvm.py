@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Audit rustc.wasm for LLVM symbols/imports.
 
-`stage-c-host inspect` emits the wasm imports, exports and function names from
+`cogwasm-host inspect` emits the wasm imports, exports and function names from
 the name section. This script fails the CI job on the things the pure-Rust path
 promises not to have:
 

@@ -8,7 +8,7 @@ relocatable wasm objects. Objects are linked with either
 [Wild](https://github.com/wild-linker/wild) or `rust-lld`, validated with
 `wasmparser`, and run in Wasmtime.
 
-The live pipeline is **stage C**, built by [`compiler/`](../compiler/) and run
+The live pipeline is the CogWasm compiler, built by [`compiler/`](../compiler/) and run
 by [`crates/cogwasm-host/`](../crates/cogwasm-host/). The stage-A and stage-B
 trees have been retired; their notes and raw results are kept under
 [`docs/notes/history/`](notes/history/), and the combined measurement history is
@@ -17,7 +17,7 @@ trees have been retired; their notes and raw results are kept under
 **Verdict: (a), (b) and (c) build, link, validate and run.** Program (c) is a
 NodeCraft-style `no_std` + `alloc` plugin with a custom `wasm_import_module`,
 an f64 parameter list, allocation, and a result returned through linear memory.
-(d) was the `std`/wasip1 comparison built by LLVM. Stage C now builds the plugin
+(d) was the `std`/wasip1 comparison built by LLVM. The compiler now builds the plugin
 sysroot with rustc.wasm itself and runs the compiler on plain WASI p1; details
 are in [`docs/compiler.md`](compiler.md) and
 [`docs/results.md`](results.md).
@@ -59,7 +59,7 @@ compiler/                      # build rustc.wasm + the pure sysroot
 └── upstream/                  # upstream PR drafts
 crates/                        # host workspace
 ├── cogwasm-runtime/
-├── cogwasm-host/              # the Wasmtime host (today's stage-c-host)
+├── cogwasm-host/              # the cogwasm-host binary
 ├── cogwasm-supervisor/
 └── difftest-host/
 guests/                        # wasm32-unknown-unknown programs + harnesses
@@ -70,9 +70,9 @@ docs/                          # compiler/pipeline/results docs + notes/history
 toolchain/                     # downloads/build outputs (gitignored)
 ```
 
-The ignored `toolchain/` directory still uses the old `stage-b/` and `stage-c/`
-names for its contents; renaming that layout is a separate migration step. The
-tracked code does not depend on those path names beyond the toolchain lookups.
+The ignored `toolchain/` directory is role-based (`rust/`, `wasi-sdk/`,
+`artifacts/`, `sysroot/`, `cache/`, `work/`, `target/`); the tracked code
+only depends on those path names through the toolchain lookups in the scripts.
 
 ## Reproduce
 
@@ -106,7 +106,7 @@ runs [`ci/build-and-test.sh`](../ci/build-and-test.sh), which
 
 1. installs the pinned isolated rustup (`nightly-2026-10-19` plus `1.99.1` for
    Wild) and fetches the pinned rust/clif-to-wasm/Wild/wasi-sdk inputs;
-2. builds stage-C `rustc.wasm` (`wasm32-wasip1`, cg_clif only);
+2. builds the CogWasm `rustc.wasm` (`wasm32-wasip1`, cg_clif only);
 3. builds the Wasmtime 50.0.2 host and the pure `core`/`alloc`/
    `compiler_builtins` sysroot with `rustc.wasm` itself (`CG_CLIF_WASM_STRICT=1`);
 4. runs plugin (c) end to end and asserts `eval(1,2,3,4) == 2.25`;
@@ -226,7 +226,7 @@ as a comparison and is not the plugin target.
 ## Stage B and C
 
 Stage B proved that rustc.wasm is feasible with the playground's patch series;
-stage C is the kept pipeline. See the history at the end of
-[`stage-a-results.md`](notes/history/stage-a-results.md), the stage-C
+the CogWasm compiler is the kept pipeline. See the history at the end of
+[`stage-a-results.md`](notes/history/stage-a-results.md), the compiler
 notes in [`docs/results.md`](results.md), and
 [`docs/compiler.md`](compiler.md).

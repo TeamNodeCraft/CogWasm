@@ -198,17 +198,17 @@ def clif_env(toolchain: Path) -> dict:
     env = os.environ.copy()
     env["RUSTUP_HOME"] = str(toolchain / "rustup")
     env["CARGO_HOME"] = str(toolchain / "cargo")
-    env["STAGE_C_HOST_TRIPLE"] = os.environ.get(
+    env["COGWASM_HOST_TRIPLE"] = os.environ.get(
         "BENCH_HOST_TRIPLE", detect_host_triple(toolchain)
     )
-    env["STAGE_C_SYSROOT"] = str(toolchain / "stage-c" / "sysroot-pure")
-    env["STAGE_C_RUSTC_WASM"] = str(toolchain / "stage-c" / "artifacts" / "rustc.wasm")
-    env["STAGE_C_HOST"] = str(toolchain / "target" / "stage-c-host" / "release" / "stage-c-host")
-    env["STAGE_C_WILD"] = str(toolchain / "target" / "wild" / "release" / "wild")
-    env["STAGE_C_STAGE1"] = str(
-        toolchain / "stage-b" / "rust" / "build" / "host" / "stage1" / "bin" / "rustc"
+    env["COGWASM_SYSROOT"] = str(toolchain / "sysroot")
+    env["COGWASM_RUSTC_WASM"] = str(toolchain / "artifacts" / "rustc.wasm")
+    env["COGWASM_HOST"] = str(toolchain / "target" / "cogwasm-host" / "release" / "cogwasm-host")
+    env["COGWASM_WILD"] = str(toolchain / "target" / "wild" / "release" / "wild")
+    env["COGWASM_STAGE1"] = str(
+        toolchain / "rust" / "build" / "host" / "stage1" / "bin" / "rustc"
     )
-    env["STAGE_C_CACHE"] = str(toolchain / "stage-c" / "cache")
+    env["COGWASM_CACHE"] = str(toolchain / "cache")
     env["RUSTC"] = str(
         ROOT / "compiler" / "scripts" / "rustc-wasm-wrapper.sh"
     )
@@ -227,7 +227,7 @@ def llvm_env() -> dict:
 
 
 def detect_host_triple(toolchain: Path) -> str:
-    stage1 = toolchain / "stage-b" / "rust" / "build" / "host" / "stage1" / "bin" / "rustc"
+    stage1 = toolchain / "rust" / "build" / "host" / "stage1" / "bin" / "rustc"
     if stage1.exists():
         output = run([str(stage1), "-vV"], quiet=True)
         for line in output.splitlines():
@@ -356,9 +356,9 @@ def compile_clif(
         str(host),
         "compile",
         "--rustc",
-        str(toolchain / "stage-c" / "artifacts" / "rustc.wasm"),
+        str(toolchain / "artifacts" / "rustc.wasm"),
         "--sysroot",
-        str(toolchain / "stage-c" / "sysroot-pure"),
+        str(toolchain / "sysroot"),
         "--linker",
         str(toolchain / "target" / "wild" / "release" / "wild"),
         "--src",
@@ -378,7 +378,7 @@ def compile_clif(
         "--load",
         load,
         "--cache-dir",
-        str(toolchain / "stage-c" / "cache"),
+        str(toolchain / "cache"),
         "--json",
         str(work / "json" / f"{program['name']}-compile.json"),
     ]
@@ -835,9 +835,9 @@ def main(argv: list[str]) -> int:
         str(host),
         "startup",
         "--rustc",
-        str(toolchain / "stage-c" / "artifacts" / "rustc.wasm"),
+        str(toolchain / "artifacts" / "rustc.wasm"),
         "--cache-dir",
-        str(toolchain / "stage-c" / "cache"),
+        str(toolchain / "cache"),
         "--runs",
         str(args.cold_runs if args.mode == "full" else min(args.cold_runs, 1)),
         "--mode",

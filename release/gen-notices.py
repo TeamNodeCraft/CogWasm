@@ -38,7 +38,7 @@ MANIFESTS = [
 # Includes the standalone A.2 harness at guests/a2_harness.
 PROGRAM_GLOB = "guests/*/Cargo.toml"
 
-SPDX_TEXT_DIRS = ["toolchain/stage-b/rust/LICENSES", "toolchain/playground/licenses/spdx"]
+SPDX_TEXT_DIRS = ["toolchain/rust/LICENSES", "toolchain/playground/licenses/spdx"]
 
 # The explicit components. `files` are relative to the repository root.
 NAMED_COMPONENTS = [
@@ -47,9 +47,9 @@ NAMED_COMPONENTS = [
         "licence": "MIT OR Apache-2.0",
         "source": "https://github.com/rust-lang/rust",
         "files": [
-            "toolchain/stage-b/rust/LICENSE-MIT",
-            "toolchain/stage-b/rust/LICENSE-APACHE",
-            "toolchain/stage-b/rust/COPYRIGHT",
+            "toolchain/rust/LICENSE-MIT",
+            "toolchain/rust/LICENSE-APACHE",
+            "toolchain/rust/COPYRIGHT",
         ],
         "note": (
             "rustc.wasm is a modified build of rustc: it uses the "
@@ -403,8 +403,8 @@ def main() -> None:
             "Provenance",
             "----------",
             (
-                f"rustc source: {git_revision(root / 'toolchain/stage-b/rust')} "
-                "(nightly-2026-10-19 plus stage-c patches)"
+                f"rustc source: {git_revision(root / 'toolchain/rust')} "
+                "(nightly-2026-10-19 plus compiler patches)"
             ),
             f"clif-to-wasm: {git_revision(root / 'toolchain/clif-to-wasm')}",
             f"Wild: {git_revision(root / 'toolchain/wild')}",
@@ -413,11 +413,11 @@ def main() -> None:
             "wasi-sdk: "
             + (
                 " ".join(
-                    (root / "toolchain/stage-b/wasi-sdk/VERSION")
+                    (root / "toolchain/wasi-sdk/VERSION")
                     .read_text(encoding="utf-8")
                     .splitlines()
                 )
-                if (root / "toolchain/stage-b/wasi-sdk/VERSION").is_file()
+                if (root / "toolchain/wasi-sdk/VERSION").is_file()
                 else "unknown"
             ),
             "",

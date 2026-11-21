@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Differential test: compile every corpus program with LLVM rustc and with the
-# stage-C Cranelift->wasm pipeline, then run both modules in Wasmtime and
+# CogWasm Cranelift->wasm pipeline, then run both modules in Wasmtime and
 # compare run(seed) and the output buffer bit-for-bit.
 #
 # One entry point for local use and CI:
@@ -11,7 +11,7 @@
 #
 # Tool paths can be overridden with environment variables:
 #   DIFFTEST_LLVM_RUSTC, DIFFTEST_RUSTC_WASM, DIFFTEST_SYSROOT,
-#   DIFFTEST_STAGE_C_HOST, DIFFTEST_WILD, DIFFTEST_CACHE_DIR,
+#   DIFFTEST_COMPILER_HOST, DIFFTEST_WILD, DIFFTEST_CACHE_DIR,
 #   DIFFTEST_TARGET_DIR, DIFFTEST_WORK, DIFFTEST_RESULTS,
 #   DIFFTEST_CARGO, DIFFTEST_HOST_TOOLCHAIN, DIFFTEST_GEN_START
 #
@@ -30,7 +30,7 @@ TOOL="$REPO/toolchain"
 CORPUS="$DIFFTEST/corpus"
 RESULTS=${DIFFTEST_RESULTS:-$DIFFTEST/results}
 WORK=${DIFFTEST_WORK:-$TOOL/difftest-work}
-TARGET_DIR=${DIFFTEST_TARGET_DIR:-$TOOL/target/stage-c-host}
+TARGET_DIR=${DIFFTEST_TARGET_DIR:-$TOOL/target/cogwasm-host}
 
 mkdir -p "$RESULTS"
 LOG="$RESULTS/run.log"
@@ -72,14 +72,14 @@ say "difftest: $(uname -s) $(uname -m), $(free_gb "$REPO") GiB free, seeds=$SEED
 # ---------------------------------------------------------------------------
 # Tool discovery / overrides
 # ---------------------------------------------------------------------------
-RUSTC_WASM=${DIFFTEST_RUSTC_WASM:-$TOOL/stage-c/artifacts/rustc.wasm}
-SYSROOT=${DIFFTEST_SYSROOT:-$TOOL/stage-c/sysroot-pure}
-STAGE_C_HOST=${DIFFTEST_STAGE_C_HOST:-$TOOL/target/stage-c-host/release/stage-c-host}
+RUSTC_WASM=${DIFFTEST_RUSTC_WASM:-$TOOL/artifacts/rustc.wasm}
+SYSROOT=${DIFFTEST_SYSROOT:-$TOOL/sysroot}
+COMPILER_HOST=${DIFFTEST_COMPILER_HOST:-${DIFFTEST_STAGE_C_HOST:-$TOOL/target/cogwasm-host/release/cogwasm-host}}
 WILD=${DIFFTEST_WILD:-$TOOL/target/wild/release/wild}
-CACHE_DIR=${DIFFTEST_CACHE_DIR:-$TOOL/stage-c/cache}
+CACHE_DIR=${DIFFTEST_CACHE_DIR:-$TOOL/cache}
 GEN_START=${DIFFTEST_GEN_START:-1}
 
-# Isolated rustup/cargo for the LLVM side. The stage-C scripts use the same
+# Isolated rustup/cargo for the LLVM side. The compiler scripts use the same
 # environment; keep it overridable for a caller that already exported it.
 export RUSTUP_HOME=${RUSTUP_HOME:-$TOOL/rustup}
 export CARGO_HOME=${CARGO_HOME:-$TOOL/cargo}
@@ -118,7 +118,7 @@ need() { [ -e "$1" ] || { printf 'error: missing %s (set the matching DIFFTEST_*
 need "$LLVM_RUSTC"
 need "$RUSTC_WASM"
 need "$SYSROOT"
-need "$STAGE_C_HOST"
+need "$COMPILER_HOST"
 need "$WILD"
 
 # Absolute paths: rustc.wasm runs under WASI with `/` preopened, so relative
@@ -138,11 +138,11 @@ MANIFEST="$WORK/manifest.tsv"
 : > "$MANIFEST"
 
 # ---------------------------------------------------------------------------
-# Build the runner + generator. Reusing the stage-c-host target directory means
+# Build the runner + generator. Reusing the cogwasm-host target directory means
 # the Wasmtime dependency is already compiled in CI.
 # ---------------------------------------------------------------------------
 step "build difftest runner and generator"
-# The stage-C host is built with stable 1.99.1; use the same toolchain so the
+# The CogWasm host is built with stable 1.99.1; use the same toolchain so the
 # release Wasmtime dependency units in the shared target dir are reused in CI.
 HOST_TOOLCHAIN=${DIFFTEST_HOST_TOOLCHAIN:-1.99.1}
 shopt -s nullglob
@@ -187,7 +187,7 @@ compile_clif() {
     if [ "${DIFFTEST_INLINE_WASM:-0}" = "1" ]; then
         extra+=(-Zmir-inline-wasm)
     fi
-    if ! "$STAGE_C_HOST" raw \
+    if ! "$COMPILER_HOST" raw \
         --rustc "$RUSTC_WASM" --sysroot "$SYSROOT" --linker "$WILD" \
         --cache-dir "$CACHE_DIR" -- \
         --target wasm32-unknown-unknown --sysroot "$SYSROOT" \

@@ -1,7 +1,7 @@
 # Differential testing: LLVM rustc vs the Cranelift → wasm pipeline
 
 `difftest/` compiles the same Rust source twice — once with rustup's prebuilt
-LLVM rustc for `wasm32-unknown-unknown`, once with the stage-C `rustc.wasm`
+LLVM rustc for `wasm32-unknown-unknown`, once with the CogWasm `rustc.wasm`
 (cg_clif + clif-to-wasm + Wild) — loads both wasm modules in Wasmtime 50.0.2,
 and compares everything observable through the corpus ABI: the `u64` return
 value and the bytes in an exported output buffer. It runs in CI on every push
@@ -177,11 +177,11 @@ difftest/run.sh --seeds 24
 ```
 
 The script builds the runner/generator itself (reusing
-`toolchain/target/stage-c-host`, where Wasmtime is already compiled), then
-compiles both backends for every program. It needs the stage-C artifacts:
-`toolchain/stage-c/artifacts/rustc.wasm`,
-`toolchain/stage-c/sysroot-pure`,
-`toolchain/target/stage-c-host/release/stage-c-host`,
+`toolchain/target/cogwasm-host`, where Wasmtime is already compiled), then
+compiles both backends for every program. It needs the compiler artifacts:
+`toolchain/artifacts/rustc.wasm`,
+`toolchain/sysroot`,
+`toolchain/target/cogwasm-host/release/cogwasm-host`,
 `toolchain/target/wild/release/wild`, and the isolated nightly rustup. Missing
 artifacts produce a clear error; run `compiler/scripts/setup-sources.sh` and
 `compiler/scripts/build-*.sh` first.
@@ -192,7 +192,7 @@ artifacts produce a clear error; run `compiler/scripts/setup-sources.sh` and
 persistent `-C incremental` directory, and requires all three linked modules to
 be byte-identical. It is the regression check for the wasm file-lock fallback
 and the host's `--incremental` path; `compiler/run.sh incremental` checks the
-real programs. It needs the same stage-C artifacts as `run.sh`:
+real programs. It needs the same compiler artifacts as `run.sh`:
 
 ```sh
 difftest/incremental-check.sh
@@ -203,16 +203,16 @@ difftest/incremental-check.sh
 | Variable | Default |
 |---|---|
 | `DIFFTEST_LLVM_RUSTC` | first `toolchain/rustup/toolchains/nightly-*-*/bin/rustc` |
-| `DIFFTEST_RUSTC_WASM` | `toolchain/stage-c/artifacts/rustc.wasm` |
-| `DIFFTEST_SYSROOT` | `toolchain/stage-c/sysroot-pure` |
-| `DIFFTEST_STAGE_C_HOST` | `toolchain/target/stage-c-host/release/stage-c-host` |
+| `DIFFTEST_RUSTC_WASM` | `toolchain/artifacts/rustc.wasm` |
+| `DIFFTEST_SYSROOT` | `toolchain/sysroot` |
+| `DIFFTEST_COMPILER_HOST` (old `DIFFTEST_STAGE_C_HOST` still works) | `toolchain/target/cogwasm-host/release/cogwasm-host` |
 | `DIFFTEST_WILD` | `toolchain/target/wild/release/wild` |
-| `DIFFTEST_CACHE_DIR` | `toolchain/stage-c/cache` |
-| `DIFFTEST_TARGET_DIR` | `toolchain/target/stage-c-host` |
+| `DIFFTEST_CACHE_DIR` | `toolchain/cache` |
+| `DIFFTEST_TARGET_DIR` | `toolchain/target/cogwasm-host` |
 | `DIFFTEST_WORK` | `toolchain/difftest-work` |
 | `DIFFTEST_RESULTS` | `difftest/results` |
 | `DIFFTEST_CARGO` | isolated `toolchain/cargo/bin/cargo`, else `cargo` |
-| `DIFFTEST_HOST_TOOLCHAIN` | `1.99.1` (same as the stage-C host build; falls back to the LLVM nightly) |
+| `DIFFTEST_HOST_TOOLCHAIN` | `1.99.1` (same as the CogWasm host build; falls back to the LLVM nightly) |
 | `DIFFTEST_GEN_START` | `1` |
 
 Host discovery is derived from the isolated rustup toolchain directory names, so
@@ -230,7 +230,7 @@ Local macOS arm64 (Apple silicon, 14 CPUs), 2026-11-19, existing artifacts:
 
 Breakdown for the default run: 49 handwritten programs compiled in 36–38 s,
 24 generated in 18 s, the Wasmtime comparison itself ~1 s; the rest is the
-tiny runner build (Wasmtime was already compiled for the stage-C host).
+tiny runner build (Wasmtime was already compiled for the CogWasm host).
 All runs above were green: `value_matches` + `trap_matches` = `calls`,
 `mismatches=0`.
 

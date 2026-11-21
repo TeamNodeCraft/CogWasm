@@ -18,7 +18,7 @@ runs `./y.sh test`, whose `config.txt` selects suites such as:
   `graviola`, `portable-simd`, stdarch) built and tested.
 
 The actual rustc tests live in the pinned rust checkout
-(`toolchain/stage-b/rust/tests/`), mostly `tests/ui/**` with `//@ run-pass` /
+(`toolchain/rust/tests/`), mostly `tests/ui/**` with `//@ run-pass` /
 `//@ check-pass` directives, plus `tests/codegen*`, `tests/assembly*`, etc.
 `y.sh` drives a `compiletest`/custom harness and expects **native executables**
 with stdout/stderr comparisons, panic messages and unwinding. None of that maps
@@ -34,7 +34,7 @@ compile-only differential over the first 40 UI test files containing
 for each file:
   LLVM:  rustc --edition=2021 --target wasm32-unknown-unknown --crate-type lib \
                  -C panic=abort -C opt-level=2 file.rs
-  ours:  stage-c-host raw ... -Zcodegen-backend=cranelift ... file.rs
+  ours:  cogwasm-host raw ... -Zcodegen-backend=cranelift ... file.rs
 ```
 
 Results:
@@ -67,7 +67,7 @@ test sources where the sysroot is sufficient.
 1. **A `wasm32-wasip1` `std` built by cg_clif.** Today `sysroot-pure` has only
    `core`/`alloc`/`compiler_builtins`; the only `std` available for
    `wasm32-wasip1` in `toolchain/` was built by LLVM for the native stage1
-   (`toolchain/stage-b/rust/build/host/stage1/lib/rustlib/wasm32-wasip1/lib`).
+   (`toolchain/rust/build/host/stage1/lib/rustlib/wasm32-wasip1/lib`).
    Mixing that with `rustc.wasm` is an ABI/metadata experiment, and most tests
    expect the exact same compiler build. Building `std` with cg_clif would hit
    the usual wasm blockers: libc/wasi-libc C code is LLVM-built (or must be
@@ -78,7 +78,7 @@ test sources where the sysroot is sufficient.
 3. **A WASI runner with expectations.** Our difftest runner calls exports and
    compares values. The suite compares stdout/stderr and exit status; running it
    needs `wasmtime run` (or a WASI p1 host) with preopened dirs, env, and
-   normalised panic output. `stage-c-host` is a rustc driver, not a general
+   normalised panic output. `cogwasm-host` is a rustc driver, not a general
    WASI CLI.
 4. **Filtering.** Exclude tests using `std::thread`, `catch_unwind`,
    backtraces, `/proc`, network, subprocesses, `#[ignore]` platform quirks,

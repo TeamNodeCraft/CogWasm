@@ -124,9 +124,9 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            toolchain/stage-b/wasi-sdk-34.0-x86_64-linux
-            toolchain/stage-b/wasi-sdk
-          key: cranelift-wasm-wasi-sdk-${{ runner.os }}-${{ runner.arch }}-34.0-v1
+            toolchain/wasi-sdk-34.0-x86_64-linux
+            toolchain/wasi-sdk
+          key: cranelift-wasm-wasi-sdk-${{ runner.os }}-${{ runner.arch }}-34.0-v2
 
       # The ~26 minute rustc.wasm build (plus the stage1 compiler it needs at
       # run time, the pure sysroot and the Wild linker) is what this workflow
@@ -146,11 +146,11 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            toolchain/stage-c/artifacts
-            toolchain/stage-c/sysroot-pure
-            toolchain/stage-b/rust/build/host/stage1
+            toolchain/artifacts
+            toolchain/sysroot
+            toolchain/rust/build/host/stage1
             toolchain/target/wild/release/wild
-          key: cranelift-wasm-compiler-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('compiler/patches/**', 'compiler/scripts/build-rustc-wasm.sh', 'compiler/scripts/build-pure-sysroot.sh', 'compiler/scripts/rustc-wasm-wrapper.sh', 'guests/c_plugin/Cargo.*', 'compiler/scripts/setup-sources.sh', 'ci/setup-toolchain.sh') }}-v1
+          key: cranelift-wasm-compiler-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('compiler/patches/**', 'compiler/scripts/build-rustc-wasm.sh', 'compiler/scripts/build-pure-sysroot.sh', 'compiler/scripts/rustc-wasm-wrapper.sh', 'guests/c_plugin/Cargo.*', 'compiler/scripts/setup-sources.sh', 'ci/setup-toolchain.sh') }}-v2
 
       - name: build and test
         env:
@@ -171,11 +171,11 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            toolchain/stage-c/artifacts
-            toolchain/stage-c/sysroot-pure
-            toolchain/stage-b/rust/build/host/stage1
+            toolchain/artifacts
+            toolchain/sysroot
+            toolchain/rust/build/host/stage1
             toolchain/target/wild/release/wild
-          key: cranelift-wasm-compiler-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('compiler/patches/**', 'compiler/scripts/build-rustc-wasm.sh', 'compiler/scripts/build-pure-sysroot.sh', 'compiler/scripts/rustc-wasm-wrapper.sh', 'guests/c_plugin/Cargo.*', 'compiler/scripts/setup-sources.sh', 'ci/setup-toolchain.sh') }}-v1
+          key: cranelift-wasm-compiler-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('compiler/patches/**', 'compiler/scripts/build-rustc-wasm.sh', 'compiler/scripts/build-pure-sysroot.sh', 'compiler/scripts/rustc-wasm-wrapper.sh', 'guests/c_plugin/Cargo.*', 'compiler/scripts/setup-sources.sh', 'ci/setup-toolchain.sh') }}-v2
 
       # A CI-sized subset of the product benchmark suite. It reuses the
       # rustc.wasm, sysroot, Wild and Cargo target directory this job just
@@ -316,9 +316,9 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            toolchain/stage-b/wasi-sdk-34.0-x86_64-linux
-            toolchain/stage-b/wasi-sdk
-          key: cranelift-wasm-wasi-sdk-${{ runner.os }}-${{ runner.arch }}-34.0-v1
+            toolchain/wasi-sdk-34.0-x86_64-linux
+            toolchain/wasi-sdk
+          key: cranelift-wasm-wasi-sdk-${{ runner.os }}-${{ runner.arch }}-34.0-v2
 
       - name: upload rustc.wasm and pure sysroot
         if: always()
@@ -326,8 +326,8 @@ jobs:
         with:
           name: cranelift-wasm-rustc-wasm-${{ github.run_id }}
           path: |
-            toolchain/stage-c/artifacts/rustc.wasm
-            toolchain/stage-c/sysroot-pure
+            toolchain/artifacts/rustc.wasm
+            toolchain/sysroot
           if-no-files-found: warn
           retention-days: 7
           compression-level: 6

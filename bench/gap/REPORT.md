@@ -694,7 +694,7 @@ Outputs: `bench/gap/results/analysis.json` (all counts, per-function and
 per-category), `results/counts/` (per-seed block counts, git-ignored),
 `results/hot/` (top-three WAT and diffs), `results/analysis.json` sizes and
 `results/MIR.md`. `bench/gap/run.sh` refuses to start under 15 GB free and
-uses the same stage-C artifacts as `bench/run.sh`.
+uses the same compiler artifacts as `bench/run.sh`.
 
 ## Appendix A: all-program attribution
 

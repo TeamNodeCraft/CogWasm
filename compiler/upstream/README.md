@@ -1,6 +1,6 @@
 # Upstream submission staging (drafts only)
 
-Four existing stage-C patches, refreshed against the upstream default branches
+Four existing compiler patches, refreshed against the upstream default branches
 and prepared for review. Nothing here has been pushed, opened as a PR/issue, or
 committed to the tracked repository. All work is in scratch clones under
 `toolchain/upstream/` (gitignored).
@@ -45,9 +45,9 @@ No upstream equivalent was found for any of the four. None were dropped.
 | cg_clif memory intrinsics | current `src/intrinsics/llvm.rs`; `git log -S'llvm.wasm.memory'`; GitHub issue/PR search | No match. Plain upstream also has no wasm backend or `clif-to-wasm` dependency. |
 | clif-to-wasm memory | current `src/lower.rs`; `git log --all -S'MemoryGrow'` / `-S'memory_grow'`; GitHub issue/PR search | No match. |
 
-## Re-pointing against the pinned stage-C tree
+## Re-pointing against the pinned compiler tree
 
-Without modifying `toolchain/stage-b/rust`, `toolchain/cg_clif`, or
+Without modifying `toolchain/rust`, `toolchain/cg_clif`, or
 `toolchain/clif-to-wasm`, each refreshed patch was checked against a clean
 `git archive` snapshot of the pinned base:
 

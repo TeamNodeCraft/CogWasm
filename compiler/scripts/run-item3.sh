@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stage C, item 3: wasm memory.grow / memory.size support.
+# CogWasm compiler, item 3: wasm memory.grow / memory.size support.
 #
 #   ./run-item3.sh build     rebuild the native cg_clif dylib with the item-3 patch
 #   ./run-item3.sh test      run clif-to-wasm's tests (including tests/memory.rs)
@@ -25,11 +25,11 @@ export PATH="$CARGO_HOME/bin:$PATH"
 DYLIB="$TOOL/target/cg_clif/release/librustc_codegen_cranelift.dylib"
 WILD="$TOOL/target/wild/release/wild"
 HOST="$TOOL/target/host/release/host"
-HARNESS="$TOOL/target/stage-c-harness/release"
+HARNESS="$TOOL/target/harness/release"
 RUST_LLD="$TOOL/rustup/toolchains/$NIGHTLY-aarch64-apple-darwin/lib/rustlib/aarch64-apple-darwin/bin/rust-lld"
 
-lld_target="$TOOL/target/stage-c"
-wild_target="$TOOL/target/stage-c-wild"
+lld_target="$TOOL/target/lld-plugins"
+wild_target="$TOOL/target/wild-plugins"
 
 log() { printf '\n== %s\n' "$*" >&2; }
 
@@ -50,7 +50,7 @@ build_harnesses() {
     for prog in mem_grow_harness c_plugin_harness; do
         log "harness $prog"
         ( cd "$REPO/guests/$prog" && RUSTUP_TOOLCHAIN="$HOST_TOOLCHAIN" \
-            CARGO_TARGET_DIR="$TOOL/target/stage-c-harness" cargo build --release )
+            CARGO_TARGET_DIR="$TOOL/target/harness" cargo build --release )
     done
 }
 

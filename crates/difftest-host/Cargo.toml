@@ -14,7 +14,7 @@ path = "src/bin/generate.rs"
 
 [dependencies]
 anyhow = "1"
-# Same pin as the stage-C host (from the root workspace). Features match
+# Same pin as the cogwasm-host (from the root workspace). Features match
 # crates/cogwasm-host/Cargo.toml so the release build can reuse
-# toolchain/target/stage-c-host's compiled dependencies.
+# toolchain/target/cogwasm-host's compiled dependencies.
 wasmtime = { workspace = true, features = ["cranelift", "runtime", "std", "cache", "anyhow", "threads"] }

@@ -8,5 +8,5 @@ publish = false
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 # Only `wasmtime::Result` is used here; the engine configuration and the
-# precompiled loader stay in `stage-c-host`.
+# precompiled loader stay in `cogwasm-host`.
 wasmtime = { workspace = true, features = ["std"] }

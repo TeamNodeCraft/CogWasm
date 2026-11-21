@@ -59,7 +59,7 @@ def main() -> int:
             return 1
         llvm_rustc = candidates[0]
     llvm_rustc = llvm_rustc.resolve()
-    host = toolchain / "target" / "stage-c-host" / "release" / "bench-host"
+    host = toolchain / "target" / "cogwasm-host" / "release" / "bench-host"
     if not host.exists():
         print(f"missing {host}; run bench/run.sh once", file=sys.stderr)
         return 1

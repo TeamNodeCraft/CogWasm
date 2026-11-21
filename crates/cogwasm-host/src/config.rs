@@ -1,6 +1,6 @@
-//! One Wasmtime [`Engine`] configuration for every stage-C tool.
+//! One Wasmtime [`Engine`] configuration for every CogWasm host tool.
 //!
-//! The host binary and the `stage-c-precompile` binary must agree exactly:
+//! The host binary and the `cogwasm-precompile` binary must agree exactly:
 //! a `.cwasm` may only be deserialized by an engine whose configuration is
 //! compatible with the one that produced it. Keeping the configuration in one
 //! place is what makes that true.
@@ -13,10 +13,10 @@ use wasmtime::{Cache, CacheConfig, Config, Engine};
 /// Guest stack limit for the rustc.wasm module.
 pub const MAX_WASM_STACK: usize = 8 << 20;
 /// Host async stack size (unused by the synchronous p1 host, kept identical to
-/// the stage-C baseline configuration).
+/// the historical baseline configuration).
 pub const ASYNC_STACK_SIZE: usize = 16 << 20;
 
-/// The stage-C engine configuration, before an optional module cache.
+/// The CogWasm engine configuration, before an optional module cache.
 ///
 /// This is recorded in `.cwasm` metadata so a mismatch can be reported with a
 /// readable reason instead of only an opaque compatibility hash.
@@ -43,7 +43,7 @@ pub struct ConfigSummary {
 }
 
 impl ConfigSummary {
-    /// The configuration shipped by the stage-C host.
+    /// The configuration shipped by the cogwasm-host.
     pub const fn shipped() -> Self {
         Self {
             wasm_threads: false,
@@ -94,7 +94,7 @@ pub fn engine_config(cache_dir: Option<&Path>) -> Result<Config> {
     engine_config_with(&ConfigSummary::shipped(), cache_dir)
 }
 
-/// Create the stage-C engine.
+/// Create the CogWasm engine.
 pub fn engine(cache_dir: Option<&Path>) -> Result<Engine> {
     let config = engine_config(cache_dir)?;
     Engine::new(&config).map_err(|error| anyhow!("creating Wasmtime engine: {error}"))

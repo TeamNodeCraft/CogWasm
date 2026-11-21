@@ -16,15 +16,15 @@ export CARGO_HOME="${CARGO_HOME:-$TOOL/cargo}"
 export PATH="$CARGO_HOME/bin:$PATH"
 # Keep the host binaries in the same target directory build-host.sh uses, even
 # when the caller overrides it.
-export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$TOOL/target/stage-c-host}"
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$TOOL/target/cogwasm-host}"
 
 TAG=
 HOST_TRIPLE=
-RUSTC_WASM="$TOOL/stage-c/artifacts/rustc.wasm"
-SYSROOT="$TOOL/stage-c/sysroot-pure"
+RUSTC_WASM="$TOOL/artifacts/rustc.wasm"
+SYSROOT="$TOOL/sysroot"
 WILD="$TOOL/target/wild/release/wild"
-HOST_BIN="$CARGO_TARGET_DIR/release/stage-c-host"
-PRECOMPILE="$CARGO_TARGET_DIR/release/stage-c-precompile"
+HOST_BIN="$CARGO_TARGET_DIR/release/cogwasm-host"
+PRECOMPILE="$CARGO_TARGET_DIR/release/cogwasm-precompile"
 REUSE_PRECOMPILED=
 NOTICES=
 OUT="$REPO/release/out"
@@ -36,8 +36,8 @@ usage: release/package.sh --tag TAG [options]
 
   --tag TAG            release tag used in file names (required)
   --host-triple TRIPLE Rust host triple (default: rustc -vV host)
-  --rustc-wasm PATH    rustc.wasm (default: toolchain/stage-c/artifacts/rustc.wasm)
-  --sysroot DIR        pure sysroot (default: toolchain/stage-c/sysroot-pure)
+  --rustc-wasm PATH    rustc.wasm (default: toolchain/artifacts/rustc.wasm)
+  --sysroot DIR        pure sysroot (default: toolchain/sysroot)
   --wild PATH          Wild binary (default: toolchain/target/wild/release/wild)
   --reuse-precompiled PATH  copy this .cwasm (and PATH.json) instead of
                        running precompile; it must have been built from --rustc-wasm
@@ -95,9 +95,9 @@ shopt -s nullglob
 rm -f "$OUT"/rustc-*.wasm \
       "$OUT"/rustc-*.cwasm \
       "$OUT"/rustc-*.cwasm.json \
-      "$OUT"/sysroot-pure-*.tar.gz \
+      "$OUT"/sysroot-*.tar.gz \
       "$OUT"/wild-* \
-      "$OUT"/stage-c-host-* \
+      "$OUT"/cogwasm-host-* \
       "$OUT"/README-*.md \
       "$OUT"/THIRD_PARTY_NOTICES \
       "$OUT"/SHA256SUMS \
@@ -120,9 +120,9 @@ else
 fi
 
 echo "== packaging sysroot, linker, host, README and notices"
-tar -czf "$OUT/sysroot-pure-$TAG.tar.gz" -C "$(dirname "$SYSROOT")" "$(basename "$SYSROOT")"
+tar -czf "$OUT/sysroot-$TAG.tar.gz" -C "$(dirname "$SYSROOT")" "$(basename "$SYSROOT")"
 cp "$WILD" "$OUT/wild-$TAG-$HOST_TRIPLE"
-cp "$HOST_BIN" "$OUT/stage-c-host-$TAG-$HOST_TRIPLE"
+cp "$HOST_BIN" "$OUT/cogwasm-host-$TAG-$HOST_TRIPLE"
 cp "$REPO/release/README.md" "$OUT/README-$TAG.md"
 if [ -n "$NOTICES" ]; then
     need "$NOTICES"

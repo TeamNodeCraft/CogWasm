@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Build stage-c rustc.wasm: wasm32-wasip1 (non-threads), cg_clif only, with
+# Build the CogWasm rustc.wasm: wasm32-wasip1 (non-threads), cg_clif only, with
 # every patch under compiler/patches/{rust,cg_clif,clif-to-wasm}/ applied.
 #
-# Reuses the pinned source tree under toolchain/stage-b (incremental when the
+# Reuses the pinned source tree under toolchain/rust (incremental when the
 # tree was already built). Run compiler/scripts/setup-sources.sh first if it is
 # missing. Every patch under compiler/patches/{rust,cg_clif,clif-to-wasm}/ is
 # applied idempotently before the build, in sorted order.
@@ -15,7 +15,7 @@
 set -euo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 TOOL="$REPO/toolchain"
-WORK="$TOOL/stage-b"
+WORK="$TOOL"
 SRC="$WORK/rust"
 CG="$SRC/compiler/rustc_codegen_cranelift"
 CLIF="$TOOL/clif-to-wasm"
@@ -24,7 +24,7 @@ export CARGO_HOME="${CARGO_HOME:-$TOOL/cargo}"
 export PATH="$CARGO_HOME/bin:$PATH"
 export RUSTUP_TOOLCHAIN=nightly-2026-10-19
 WASI_SDK="$WORK/wasi-sdk"
-OUT="$TOOL/stage-c/artifacts/rustc.wasm"
+OUT="$TOOL/artifacts/rustc.wasm"
 LOG="$REPO/docs/results/build-rustc-wasm.log"
 # Patch files are applied in order, and a later patch can change the context
 # of an earlier one. Once a patch has been applied successfully, record its
@@ -33,10 +33,10 @@ LOG="$REPO/docs/results/build-rustc-wasm.log"
 # checkout has no state file and applies the whole series.
 #
 # The state must live with the checkout it describes: CI caches the patched
-# clif-to-wasm checkout but not the rust work tree, so keeping its hashes in
-# $WORK made a restored checkout look unpatched, and re-applying 0001 failed
+# clif-to-wasm checkout but not the rust work tree, so keeping its hashes outside
+# the checkout made a restored checkout look unpatched, and re-applying 0001 failed
 # on context that 0002-0004 had already moved.
-PATCH_STATE="$WORK/.stage-c-applied-patches"
+PATCH_STATE="$SRC/.cogwasm-applied-patches"
 CLIF_PATCH_STATE="$CLIF/.cogwasm-applied-patches"
 sha256_file() {
     if command -v sha256sum >/dev/null 2>&1; then

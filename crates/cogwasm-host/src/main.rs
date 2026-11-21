@@ -1,4 +1,4 @@
-//! Stage C host: run rustc.wasm (wasm32-wasip1, cg_clif only) under the latest
+//! CogWasm host: run rustc.wasm (wasm32-wasip1, cg_clif only) under the latest
 //! stable Wasmtime with plain WASI preview 1, service its `playground.spawn`
 //! linker import with native Wild, then load and evaluate the linked plugin.
 //!
@@ -14,9 +14,9 @@
 //!   inspect      validate a wasm and scan its name/data sections for LLVM symbols
 
 use anyhow::{anyhow, bail, Context, Result};
+use cogwasm_host::precompiled::load_rustc_module;
 use cogwasm_runtime::{SpawnSummary, Wt};
 use serde::Serialize;
-use stage_c_host::precompiled::load_rustc_module;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -25,6 +25,13 @@ use std::time::Instant;
 use wasmtime::{Caller, Engine, Extern, Linker, Memory, Module, Store};
 use wasmtime_wasi::p1::{self, WasiP1Ctx};
 use wasmtime_wasi::{FsPerms, I32Exit, WasiCtxBuilder};
+
+/// Read a `COGWASM_<name>` environment variable, falling back to the old
+/// `STAGE_C_<name>` spelling for one release.
+fn env_var_compat(name: &str) -> Option<std::ffi::OsString> {
+    std::env::var_os(format!("COGWASM_{name}"))
+        .or_else(|| std::env::var_os(format!("STAGE_C_{name}")))
+}
 
 // ---------------------------------------------------------------------------
 // CLI
@@ -110,7 +117,7 @@ fn infer_kind(src: &Path) -> EvalKind {
 }
 
 fn usage() -> &'static str {
-    "usage: stage-c-host <compile|eval|check|bench|incremental|inspect> [options]\n\
+    "usage: cogwasm-host <compile|eval|check|bench|incremental|inspect> [options]\n\
      \n\
      compile/eval/check/bench/incremental options:\n\
        --rustc PATH       rustc.wasm\n\
@@ -249,10 +256,10 @@ fn clear_incremental_dir(dir: &Path) -> Result<()> {
 // Engine / store
 // ---------------------------------------------------------------------------
 
-/// The one engine configuration shared with `stage-c-precompile`; a `.cwasm`
+/// The one engine configuration shared with `cogwasm-precompile`; a `.cwasm`
 /// is only valid for an engine built from exactly this configuration.
 fn engine(cache_dir: Option<&Path>) -> Result<Engine> {
-    stage_c_host::config::engine(cache_dir)
+    cogwasm_host::config::engine(cache_dir)
 }
 
 /// The pieces needed to build a fresh WASI context for an instance.
@@ -364,7 +371,7 @@ fn add_playground_spawn(linker: &mut Linker<HostState>, o: &Opts) -> Result<()> 
                 match spawn_impl(&mut caller, argv, argc, &linker_path) {
                     Ok(code) => code,
                     Err(e) => {
-                        eprintln!("[stage-c host] spawn failed: {e:#}");
+                        eprintln!("[cogwasm-host] spawn failed: {e:#}");
                         -1
                     }
                 }
@@ -389,8 +396,8 @@ fn spawn_impl(
         let p = u32::from_le_bytes(chunk.try_into().unwrap());
         args.push(read_cstr(caller, &mem, p)?);
     }
-    if std::env::var_os("STAGE_C_SPAWN_DEBUG").is_some() {
-        eprintln!("[stage-c host] spawn argv: {args:?}");
+    if env_var_compat("SPAWN_DEBUG").is_some() {
+        eprintln!("[cogwasm-host] spawn argv: {args:?}");
     }
     // The rustc patch puts the linker program name first. Run native Wild on
     // the remaining arguments, inheriting stdio and the filesystem view.
@@ -406,12 +413,12 @@ fn spawn_impl(
         Ok(s) if s.success() => 0,
         Ok(s) => s.code().unwrap_or(-1),
         Err(e) => {
-            eprintln!("[stage-c host] cannot run {}: {e}", linker.display());
+            eprintln!("[cogwasm-host] cannot run {}: {e}", linker.display());
             -1
         }
     };
     eprintln!(
-        "[stage-c host] spawn: {} ({} args) -> {code} in {ms:.1} ms",
+        "[cogwasm-host] spawn: {} ({} args) -> {code} in {ms:.1} ms",
         args.first().map(String::as_str).unwrap_or("<empty>"),
         args.len().saturating_sub(1)
     );
@@ -573,10 +580,10 @@ fn run_rustc(o: &Opts, expect: f64, measure_plugin: bool) -> Result<(RunResult, 
     )?;
     let module_load_ms = t.elapsed().as_secs_f64() * 1e3;
     if let Some(reason) = &loaded.fallback_reason {
-        eprintln!("[stage-c host] precompiled artifact rejected: {reason}");
+        eprintln!("[cogwasm-host] precompiled artifact rejected: {reason}");
     }
     eprintln!(
-        "[stage-c host] rustc.wasm loaded from {} in {module_load_ms:.1} ms",
+        "[cogwasm-host] rustc.wasm loaded from {} in {module_load_ms:.1} ms",
         loaded.source.as_str()
     );
     let mut r = run_rustc_with(o, &engine, &loaded.module, measure_plugin)?;
@@ -1072,7 +1079,7 @@ fn bench(o: &Opts) -> Result<Bench> {
     let warm_module_load_ms = t.elapsed().as_secs_f64() * 1e3;
     if warm_module_load_ms > 5000.0 {
         eprintln!(
-            "[stage-c host] warning: rustc.wasm module load was {warm_module_load_ms:.0} ms; pass --cache-dir for warm runs"
+            "[cogwasm-host] warning: rustc.wasm module load was {warm_module_load_ms:.0} ms; pass --cache-dir for warm runs"
         );
     }
 
@@ -1503,7 +1510,7 @@ fn main() -> Result<()> {
             println!("{text}");
             if !result.wasm_identical {
                 eprintln!(
-                    "[stage-c host] note: incremental wasm bytes differ from the cold build; \
+                    "[cogwasm-host] note: incremental wasm bytes differ from the cold build; \
                      acceptance is by identical eval results"
                 );
             }
@@ -1546,7 +1553,7 @@ fn main() -> Result<()> {
                 .iter()
                 .map(|s| s.ms)
                 .sum();
-            if std::env::var_os("STAGE_C_TIME").is_some() {
+            if env_var_compat("TIME").is_some() {
                 eprintln!(
                     "TIMING rustc_total_ms={rustc_total_ms:.3} link_ms={link_ms:.3} compile_ms={:.3}",
                     (rustc_total_ms - link_ms).max(0.0)

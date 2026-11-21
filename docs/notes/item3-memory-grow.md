@@ -111,7 +111,7 @@ export RUSTUP_HOME=$PWD/toolchain/rustup
 export CARGO_HOME=$PWD/toolchain/cargo
 export PATH=$CARGO_HOME/bin:$PATH
 export RUSTUP_TOOLCHAIN=nightly-2026-10-19
-export CARGO_TARGET_DIR=$PWD/toolchain/target/stage-c
+export CARGO_TARGET_DIR=$PWD/toolchain/target/lld-plugins
 DYLIB=$PWD/toolchain/target/cg_clif/release/librustc_codegen_cranelift.dylib
 WILD=$PWD/toolchain/target/wild/release/wild
 ```
@@ -140,7 +140,7 @@ The harnesses build with stable `1.99.1` and Wasmtime 50.0.2:
 
 ```sh
 cd guests/mem_grow_harness   # and c_plugin_harness
-RUSTUP_TOOLCHAIN=1.99.1 CARGO_TARGET_DIR=$PWD/toolchain/target/stage-c-harness \
+RUSTUP_TOOLCHAIN=1.99.1 CARGO_TARGET_DIR=$PWD/toolchain/target/harness \
     cargo build --release
 ```
 
@@ -238,7 +238,7 @@ blow-up is gone.
   not user-callable APIs.
 * **The allocator is a bump allocator.** It grows by whole pages and `dealloc`
   is a no-op; each instance leaks until it is dropped. That is sufficient for
-  one `eval` and for the stage-C host. A long-lived instance that allocates
+  one `eval` and for the cogwasm-host. A long-lived instance that allocates
   repeatedly should use dlmalloc-style free lists (the vendored
   `dlmalloc-0.2.14/src/wasm.rs` is the natural reference) or a free-list bump.
   The allocator starts at the current memory end, after static data and the

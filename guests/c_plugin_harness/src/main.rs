@@ -1,4 +1,4 @@
-//! Run a stage-C plugin with the growable allocator and check both the result
+//! Run a CogWasm plugin with the growable allocator and check both the result
 //! and that `memory.grow` was actually used:
 //!
 //!     c_plugin_harness path/to/c_plugin.wasm [1 2 3 4]

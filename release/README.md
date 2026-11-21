@@ -13,9 +13,9 @@ as WebAssembly on Wasmtime. It is not endorsed by the Rust project.
 | `rustc-<tag>.wasm` | The compiler, built for `wasm32-wasip1` with Cranelift only. No LLVM inside. It imports WASI preview 1 and `playground.spawn` (used to run the Wild linker). |
 | `rustc-<tag>-<host>.cwasm` | `rustc.wasm` precompiled by `Engine::precompile_module` for `<host>`. Native code: it only loads on the exact Wasmtime version, engine configuration and target recorded in its sidecar. |
 | `rustc-<tag>-<host>.cwasm.json` | Sidecar metadata: Wasmtime version, precompile compatibility hash (hex), target, configuration summary, and the SHA-256 and size of the `.wasm` and `.cwasm`. |
-| `sysroot-pure-<tag>.tar.gz` | `core`, `alloc` and `compiler_builtins` for `wasm32-unknown-unknown`, built by `rustc.wasm` itself. Matches this compiler's metadata exactly. |
+| `sysroot-<tag>.tar.gz` | `core`, `alloc` and `compiler_builtins` for `wasm32-unknown-unknown`, built by `rustc.wasm` itself. Matches this compiler's metadata exactly. |
 | `wild-<tag>-<host>` | The native Wild linker. The host runs it when `rustc.wasm` calls its `playground.spawn` import. |
-| `stage-c-host-<tag>-<host>` | The reference Wasmtime host: `compile`, `eval`, `check`, `bench` and `inspect`. |
+| `cogwasm-host-<tag>-<host>` | The reference Wasmtime host: `compile`, `eval`, `check`, `bench` and `inspect`. |
 | `THIRD_PARTY_NOTICES` | Licences and notices of every component and Cargo package in the bundle. |
 | `SHA256SUMS` (per-host artifact) / `SHA256SUMS-<tag>` (published release) | SHA-256 of every file above. Verify it before installing. |
 | `README-<tag>.md` | This file. |
@@ -33,9 +33,9 @@ own embedding.
 ```sh
 # Compile and link one crate. `--precompiled` selects the fast path; omit it
 # to compile rustc.wasm from scratch (~40 s cold on an Apple M-series machine).
-./stage-c-host-<tag>-aarch64-apple-darwin compile \
+./cogwasm-host-<tag>-aarch64-apple-darwin compile \
     --rustc rustc-<tag>.wasm \
-    --sysroot sysroot-pure \
+    --sysroot sysroot \
     --linker wild-<tag>-aarch64-apple-darwin \
     --src path/to/plugin/src/lib.rs \
     --work work \
@@ -46,9 +46,9 @@ own embedding.
 `check` uses the NodeCraft example ABI and asserts `eval(1,2,3,4) == 2.25`;
 `compile` does not evaluate anything.
 
-The host expects a `sysroot-pure` directory; extract
-`sysroot-pure-<tag>.tar.gz` first (it contains a `sysroot-pure/` directory).
-`stage-c-host --rustc ... --precompiled ...` checks the sidecar, deserializes
+The host expects a `sysroot` directory; extract
+`sysroot-<tag>.tar.gz` first (it contains a `sysroot/` directory).
+`cogwasm-host --rustc ... --precompiled ...` checks the sidecar, deserializes
 the artifact, and falls back to compiling `rustc.wasm` with a warning if
 anything does not match. `--verify-precompiled` additionally checks the full
 SHA-256 of both files on every load; that is an install-time integrity check,

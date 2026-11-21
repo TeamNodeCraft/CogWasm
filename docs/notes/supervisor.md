@@ -49,7 +49,7 @@ Two consequences for the design:
 ## Architecture
 
 A new crate beside the host: `crates/cogwasm-supervisor/`
-(CLI + library). It drives the existing `stage-c-host` / `bench-host` compile
+(CLI + library). It drives the existing `cogwasm-host` / `bench-host` compile
 and eval paths; it does not reimplement them. (Today that logic lives in
 `host/src/main.rs`; extracting a library API is a later step, only if
 in-process calls become necessary.)
@@ -171,7 +171,7 @@ Rules:
 
 ## M2 matrix
 
-Built with the reference supervisor against the real pipeline (`stage-c-host
+Built with the reference supervisor against the real pipeline (`cogwasm-host
 raw`, precompiled `rustc.wasm`), four programs at three tiers. Times are the
 `compile_ms` recorded by the supervisor (host start, module load from the
 precompiled artifact, compile and link), after a cold run and after a
@@ -236,7 +236,7 @@ then the swap is instantiation only.
 
 The reference runtime caches compiled modules in memory by artifact key, which
 is enough for the demo; a real service wants the cache on disk and keyed by
-the engine's compatibility hash, as `stage-c-precompile` does for `rustc.wasm`.
+the engine's compatibility hash, as `cogwasm-precompile` does for `rustc.wasm`.
 
 M3 uses a cold restart: the new instance re-runs `run(seed)` with the same
 input, which is correct for a plugin whose state is derived from its inputs.

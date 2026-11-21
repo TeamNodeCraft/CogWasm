@@ -1,7 +1,7 @@
 //! NodeCraft-style plugin: host import, f64 parameter list, allocation, result
 //! in linear memory, panic=abort, no_std.
 //!
-//! This stage-C copy replaces the fixed 1 MiB `.bss` heap with a growable bump
+//! This growable-heap copy replaces the fixed 1 MiB `.bss` heap with a growable bump
 //! allocator over `memory.grow`. The heap starts at the current end of linear
 //! memory (after all static data and the linker-provided shadow stack), so
 //! every heap byte comes from pages that `memory.grow` added. `dealloc` is a

@@ -155,7 +155,7 @@ then this is an implementation increment, not a speed result.
 
 ```sh
 # MIR-level check, native compiler (the config targets wasm by default)
-toolchain/stage-b/rust/x build --stage 1 \
+toolchain/rust/x build --stage 1 \
     --host aarch64-apple-darwin --target aarch64-apple-darwin library rustc
 RUSTC_BOOTSTRAP=1 build/host/stage1/bin/rustc --edition 2024 -O \
     -Zmir-hoist-loop-field-reads \

@@ -1,19 +1,19 @@
 [package]
-name = "stage-c-host"
+name = "cogwasm-host"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "stage_c_host"
+name = "cogwasm_host"
 path = "src/lib.rs"
 
 [[bin]]
-name = "stage-c-host"
+name = "cogwasm-host"
 path = "src/main.rs"
 
 # Precompiles rustc.wasm to a Wasmtime `.cwasm` and benchmarks module loading.
 [[bin]]
-name = "stage-c-precompile"
+name = "cogwasm-precompile"
 path = "src/bin/precompile.rs"
 
 [dependencies]
@@ -24,7 +24,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = { workspace = true }
 wasmparser = "0.263"
-# Latest stable Wasmtime as of stage C (51.0.0 is still an RC). rustc.wasm no
+# Latest stable Wasmtime as of the CogWasm compiler (51.0.0 is still an RC). rustc.wasm no
 # longer spawns a compiler thread, so plain WASI p1 is enough: no wasi-threads.
 # The exact version is pinned once in the root workspace.
 wasmtime = { workspace = true, features = ["cranelift", "runtime", "std", "cache", "anyhow", "threads"] }

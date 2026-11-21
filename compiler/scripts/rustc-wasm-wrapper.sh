@@ -1,33 +1,30 @@
 #!/usr/bin/env bash
-# Cargo RUSTC wrapper: compile wasm32-unknown-unknown crates with stage-c
+# Cargo RUSTC wrapper: compile wasm32-unknown-unknown crates with the CogWasm
 # rustc.wasm under Wasmtime, and everything else (build scripts, proc macros)
 # with the native stage1 compiler from the same rustc source.
 #
-# Set STAGE_C_SYSROOT to add a plugin sysroot to target-crate compiles. With
+# Set COGWASM_SYSROOT to add a plugin sysroot to target-crate compiles. With
 # -Zbuild-std, Cargo passes --sysroot itself and no extra sysroot is added.
 set -euo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 TOOL="$REPO/toolchain"
-STAGE1=${STAGE_C_STAGE1:-$TOOL/stage-b/rust/build/host/stage1/bin/rustc}
-HOST_BIN=${STAGE_C_HOST:-$TOOL/target/stage-c-host/release/stage-c-host}
-RUSTC_WASM=${STAGE_C_RUSTC_WASM:-$TOOL/stage-c/artifacts/rustc.wasm}
-WILD=${STAGE_C_WILD:-$TOOL/target/wild/release/wild}
-CACHE=${STAGE_C_CACHE:-$TOOL/stage-c/cache}
-SYSROOT=${STAGE_C_SYSROOT:-}
-REAL_SRC=${STAGE_C_REAL_SRC:-$TOOL/stage-b/rust}
+STAGE1=${COGWASM_STAGE1:-${STAGE_C_STAGE1:-$TOOL/rust/build/host/stage1/bin/rustc}}
+HOST_BIN=${COGWASM_HOST:-${STAGE_C_HOST:-$TOOL/target/cogwasm-host/release/cogwasm-host}}
+RUSTC_WASM=${COGWASM_RUSTC_WASM:-${STAGE_C_RUSTC_WASM:-$TOOL/artifacts/rustc.wasm}}
+WILD=${COGWASM_WILD:-${STAGE_C_WILD:-$TOOL/target/wild/release/wild}}
+CACHE=${COGWASM_CACHE:-${STAGE_C_CACHE:-$TOOL/cache}}
+SYSROOT=${COGWASM_SYSROOT:-${STAGE_C_SYSROOT:-}}
+REAL_SRC=${COGWASM_REAL_SRC:-${STAGE_C_REAL_SRC:-$TOOL/rust}}
 
 # The stage1 sysroot contains rust-src as a symlink under the build host's
 # triple. Do not hardcode aarch64-apple-darwin: CI is x86_64 Linux.
-if [ -n "${STAGE_C_HOST_TRIPLE:-}" ]; then
-    HOST_TRIPLE=$STAGE_C_HOST_TRIPLE
-elif [ -x "$STAGE1" ]; then
+HOST_TRIPLE=${COGWASM_HOST_TRIPLE:-${STAGE_C_HOST_TRIPLE:-}}
+if [ -z "$HOST_TRIPLE" ] && [ -x "$STAGE1" ]; then
     HOST_TRIPLE=$("$STAGE1" -vV | sed -n 's/^host: //p')
-else
-    HOST_TRIPLE=
 fi
-STD_SRC=${STAGE_C_STD_SRC:-}
+STD_SRC=${COGWASM_STD_SRC:-${STAGE_C_STD_SRC:-}}
 if [ -z "$STD_SRC" ] && [ -n "$HOST_TRIPLE" ]; then
-    STD_SRC="$TOOL/stage-b/rust/build/$HOST_TRIPLE/stage1/lib/rustlib/src/rust"
+    STD_SRC="$TOOL/rust/build/$HOST_TRIPLE/stage1/lib/rustlib/src/rust"
 fi
 [ -n "$STD_SRC" ] && [ -e "$STD_SRC" ] || STD_SRC=
 

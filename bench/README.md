@@ -1,6 +1,6 @@
 # Performance suite
 
-`bench/` measures the product, not one experiment: the stage-C host starts
+`bench/` measures the product, not one experiment: the cogwasm-host starts
 `rustc.wasm`, compiles Rust to WebAssembly, links it with Wild, and the linked
 program runs in Wasmtime. Every number is a median of N measured runs (default
 5) after a warm-up, with min and max, and every program's result is checked
@@ -37,7 +37,7 @@ both pipelines, so a result mismatch is a suite failure, never a speed-up.
 
 | Class | Program | Lines | What it exercises |
 | --- | --- | ---: | --- |
-| small | `a_add` | 26 | no_std arithmetic, mirrors stage-C `a_add` |
+| small | `a_add` | 26 | no_std arithmetic, mirrors the original `a_add` |
 | small | `b_alloc` | 63 | `Vec`, `String`, `format!`, closures, trait objects |
 | small | `c_plugin` | 36 | `nodecraft::host_bias`, f64 parameters, growable heap |
 | small | `smoke` | 29 | difftest smoke: sort, Vec, shifts, output buffer |
@@ -85,16 +85,20 @@ measures deterministic compiler work (two fuel runs per program) and is what
 the CI quick job uses. `--programs` accepts a name or `class/name`. Other
 switches: `--runs N`, `--out FILE`, `--no-precompiled`.
 
-Requirements: the stage-C artifacts must already exist under
-`toolchain/` (`rustc.wasm`, `sysroot-pure`, Wild,
+Requirements: the compiler artifacts must already exist under
+`toolchain/` (`artifacts/rustc.wasm`, `sysroot`, Wild,
 the isolated rustup). Build them with
 `ci/build-and-test.sh`. The script builds
-`bench/host` into the same Cargo target directory as the stage-C host, so CI
+`bench/host` into the same Cargo target directory as the cogwasm-host, so CI
 reuses the compiled Wasmtime units. The behaviour-identical helpers it shares
 with the product host (the Wasmtime error adapter and the `playground.spawn`
 summary type) come from [`crates/cogwasm-runtime`](../crates/cogwasm-runtime);
 engine setup, stderr capture, fuel and resource-limit tracking stay in
 `bench/host` because they differ from the product host.
+
+The suite passes the compiler's `COGWASM_*` variables to the wrapper itself;
+the old `STAGE_C_*` spellings still work as a fallback for this release. The
+`BENCH_*` variables above remain the benchmark-specific overrides.
 
 Baseline runs against a different checkout (for example a detached worktree at
 an older commit) use the same suite with overridden paths:

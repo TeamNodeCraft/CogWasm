@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stage C driver: rustc.wasm on wasm32-wasip1 (no wasi-threads), pure
+# CogWasm compiler driver: rustc.wasm on wasm32-wasip1 (no wasi-threads), pure
 # rustc.wasm-built plugin sysroot, growable plugin heap, latest Wasmtime.
 #
 #   ./run.sh build      build the Wasmtime 50 host (crates/cogwasm-host)
@@ -13,14 +13,14 @@
 set -euo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 TOOL="$REPO/toolchain"
-RUSTC_WASM="$TOOL/stage-c/artifacts/rustc.wasm"
-PURE="$TOOL/stage-c/sysroot-pure"
-HOST="$TOOL/target/stage-c-host/release/stage-c-host"
+RUSTC_WASM="$TOOL/artifacts/rustc.wasm"
+PURE="$TOOL/sysroot"
+HOST="$TOOL/target/cogwasm-host/release/cogwasm-host"
 WILD="$TOOL/target/wild/release/wild"
 export RUSTUP_HOME="${RUSTUP_HOME:-$TOOL/rustup}"
 export CARGO_HOME="${CARGO_HOME:-$TOOL/cargo}"
 export RUSTUP_TOOLCHAIN=nightly-2026-10-19
-STAGE1="${STAGE_C_STAGE1:-$TOOL/stage-b/rust/build/host/stage1/bin/rustc}"
+STAGE1="${COGWASM_STAGE1:-${STAGE_C_STAGE1:-$TOOL/rust/build/host/stage1/bin/rustc}}"
 if [ -x "$STAGE1" ]; then
     HOST_TRIPLE=$("$STAGE1" -vV | sed -n 's/^host: //p')
 else
@@ -32,14 +32,14 @@ if [ -n "$HOST_TRIPLE" ]; then
 else
     export PATH="$CARGO_HOME/bin:$PATH"
 fi
-export STAGE_C_HOST_TRIPLE="$HOST_TRIPLE"
+export COGWASM_HOST_TRIPLE="$HOST_TRIPLE"
 export RUSTC="$REPO/compiler/scripts/rustc-wasm-wrapper.sh"
-export STAGE_C_SYSROOT="$PURE"
-export STAGE_C_RUSTC_WASM="$RUSTC_WASM"
-export STAGE_C_HOST="$HOST"
-export STAGE_C_WILD="$WILD"
+export COGWASM_SYSROOT="$PURE"
+export COGWASM_RUSTC_WASM="$RUSTC_WASM"
+export COGWASM_HOST="$HOST"
+export COGWASM_WILD="$WILD"
 export CG_CLIF_WASM_STRICT=1
-export CARGO_TARGET_DIR="$TOOL/target/stage-c-pure-wasm"
+export CARGO_TARGET_DIR="$TOOL/target/pure-wasm"
 
 need() { [ -e "$1" ] || { echo "missing $1" >&2; exit 1; }; }
 
@@ -57,11 +57,11 @@ case "${1:-check}" in
         ;;
     check)
         need "$RUSTC_WASM"; need "$PURE"; need "$HOST"
-        mkdir -p "$TOOL/stage-c/work"
+        mkdir -p "$TOOL/work/compiler"
         "$HOST" check --rustc "$RUSTC_WASM" --sysroot "$PURE" \
             --src "$REPO/guests/c_plugin/src/lib.rs" --linker "$WILD" \
-            --work "$TOOL/stage-c/work" --out "$TOOL/stage-c/work/c_plugin.wasm" \
-            --cache-dir "$TOOL/stage-c/cache"
+            --work "$TOOL/work/compiler" --out "$TOOL/work/compiler/c_plugin.wasm" \
+            --cache-dir "$TOOL/cache"
         ;;
     a2check)
         need "$PURE"
@@ -74,16 +74,16 @@ case "${1:-check}" in
         ;;
     bench)
         need "$RUSTC_WASM"; need "$PURE"; need "$HOST"
-        mkdir -p "$TOOL/stage-c/work-bench" "$REPO/docs/results"
+        mkdir -p "$TOOL/work/bench" "$REPO/docs/results"
         "$HOST" bench --rustc "$RUSTC_WASM" --sysroot "$PURE" \
             --src "$REPO/guests/c_plugin/src/lib.rs" --linker "$WILD" \
-            --work "$TOOL/stage-c/work-bench" --out "$TOOL/stage-c/work-bench/c_plugin.wasm" \
-            --cache-dir "$TOOL/stage-c/cache" --runs 5 \
+            --work "$TOOL/work/bench" --out "$TOOL/work/bench/c_plugin.wasm" \
+            --cache-dir "$TOOL/cache" --runs 5 \
             --json "$REPO/docs/results/stage-c.json"
         ;;
     incremental)
         need "$RUSTC_WASM"; need "$PURE"; need "$HOST"; need "$WILD"
-        mkdir -p "$TOOL/stage-c/work-inc" "$REPO/docs/results"
+        mkdir -p "$TOOL/work/incremental" "$REPO/docs/results"
         # e_math uses the `libm` crate. A direct rustc.wasm invocation (which is
         # what measures one edit in the resident host) needs the rlib that
         # cargo builds, so build the program once through the usual wrapper
@@ -94,8 +94,8 @@ case "${1:-check}" in
         # `--extern libm=...` rlib that cargo selected can be read without
         # guessing between stale build directories.
         touch "$REPO/guests/e_math/src/lib.rs"
-        BUILD_LOG="$TOOL/stage-c/work-inc/e-build.log"
-        mkdir -p "$TOOL/stage-c/work-inc"
+        BUILD_LOG="$TOOL/work/incremental/e-build.log"
+        mkdir -p "$TOOL/work/incremental"
         ( cd "$REPO/guests/e_math" && RUSTFLAGS="-Cpanic=abort" \
             cargo build --release --target wasm32-unknown-unknown -v ) 2>&1 | tee "$BUILD_LOG"
         # Cargo passes both the rlib and its rmeta: the rlib contains the object
@@ -127,10 +127,10 @@ case "${1:-check}" in
             echo "== incremental $spec"
             "$HOST" incremental --rustc "$RUSTC_WASM" --sysroot "$PURE" \
                 --src "$REPO/guests/$spec/src/lib.rs" --linker "$WILD" \
-                --work "$TOOL/stage-c/work-inc/$tag" \
-                --out "$TOOL/stage-c/work-inc/$tag/$spec.wasm" \
-                --cache-dir "$TOOL/stage-c/cache" \
-                --incremental "$TOOL/stage-c/work-inc/$tag/inc" \
+                --work "$TOOL/work/incremental/$tag" \
+                --out "$TOOL/work/incremental/$tag/$spec.wasm" \
+                --cache-dir "$TOOL/cache" \
+                --incremental "$TOOL/work/incremental/$tag/inc" \
                 --fresh-incremental --runs "${INCREMENTAL_RUNS:-5}" "$@" \
                 --json "$REPO/docs/results/incremental-$tag.json"
         }
@@ -143,8 +143,8 @@ case "${1:-check}" in
         # sidecar and a truncated artifact both fall back to the .wasm. This is
         # the regression check for the precompiled path (Track A).
         need "$RUSTC_WASM"; need "$PURE"; need "$HOST"; need "$WILD"
-        PRE="$TOOL/stage-c/work-precompiled"
-        PC="$TOOL/target/stage-c-host/release/stage-c-precompile"
+        PRE="$TOOL/work/precompiled"
+        PC="$TOOL/target/cogwasm-host/release/cogwasm-precompile"
         need "$PC"
         mkdir -p "$PRE"
         "$PC" precompile --wasm "$RUSTC_WASM" \
@@ -152,7 +152,7 @@ case "${1:-check}" in
         common=(--rustc "$RUSTC_WASM" --sysroot "$PURE" \
             --src "$REPO/guests/c_plugin/src/lib.rs" --linker "$WILD" \
             --work "$PRE" --out "$PRE/c_plugin.wasm" \
-            --cache-dir "$TOOL/stage-c/cache")
+            --cache-dir "$TOOL/cache")
         echo "== precompiled .cwasm load"
         "$HOST" check "${common[@]}" --precompiled "$PRE/rustc.cwasm"
         echo "== mismatched sidecar falls back"

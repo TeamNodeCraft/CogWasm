@@ -1,4 +1,4 @@
-//! The real compiler backend (M2): drives the stage-C host's `raw` mode.
+//! The real compiler backend (M2): drives the CogWasm host's `raw` mode.
 //!
 //! The supervisor stays agnostic: it hands the host the toolchain paths and the
 //! rustc arguments for the job's tier, and reads the linked `.wasm` back. The
@@ -15,7 +15,7 @@ use crate::job::JobSpec;
 /// Everything the host needs to run one build.
 #[derive(Debug, Clone)]
 pub struct RealCompilerConfig {
-    /// The `stage-c-host` binary.
+    /// The `cogwasm-host` binary.
     pub host: PathBuf,
     /// The `rustc.wasm` to run.
     pub rustc: PathBuf,
