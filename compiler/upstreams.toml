@@ -1,0 +1,112 @@
+# Machine-readable pins for the CogWasm compiler build.
+#
+# This is the single source of truth for every upstream revision/version the
+# compiler scripts fetch and every patch series they apply. The shell scripts
+# call compiler/scripts/upstream.py instead of hard-coding a rev, a version or
+# a `compiler/patches/<name>/*.patch` glob.
+#
+#   get <upstream> <key>   print one value
+#   patches <upstream>     print the ordered absolute patch paths, one per line
+#   check                  validate the patch lists and the PR bundles
+#
+# `patches` entries are file names relative to compiler/patches/<upstream>/.
+# They are applied in this order, which is lexicographic and therefore the same
+# order the old `*.patch` glob produced. Nothing in this file is fetched by
+# reading it; the scripts still do the checkout/install.
+
+[upstream.rust]
+# rust-lang/rust source tree. setup-sources.sh shallow-fetches this exact
+# commit; build-rustc-wasm.sh then applies the rust patch series below.
+repo = "https://github.com/rust-lang/rust"
+rev = "b6eeb93c992027a03e1fd120b6652546396b142c"
+patches = [
+    "0001-wasm-run-compiler-and-codegen-on-calling-thread.patch",
+    "0002-generate-copyright-path-deps.patch",
+    "0003-wasm-file-locks.patch",
+    "0004-wasm-sync-cached-cgus.patch",
+    "0005-hoist-loop-invariant-field-reads.patch",
+    "0006-wasm-cost-model-inliner.patch",
+]
+
+[upstream.playground]
+# Prior-art rust-playground-inbrowser checkout. setup-sources.sh fetches this
+# rev and applies the checkout's own patches/rust/ series with `git am`. Those
+# 23 patches live in the checkout, not in this repository, so `patches` is
+# empty here; patch_dir and patch_series describe the series that is applied.
+repo = "https://github.com/ryancbuckley/rust-playground-inbrowser"
+rev = "f5298630dda0f2dc2b44f6ae1b54add7a77d8316"
+patch_dir = "patches/rust"
+patch_series = 23
+patches = []
+
+[upstream.cg_clif]
+# rustc_codegen_cranelift is in-tree in the rust checkout
+# (compiler/rustc_codegen_cranelift); it is not checked out separately. `rev` is
+# the upstream base of that in-tree copy (the prior-art series moves it here),
+# and the patches below are applied under the rust checkout's cg_clif
+# directory with `--directory=compiler/rustc_codegen_cranelift`.
+repo = "https://github.com/rust-lang/rustc_codegen_cranelift"
+rev = "4f78fd3e5f2ce8a688865b4a6197e6d33211c09c"
+patches = [
+    "0001-wasm-lower-memory-grow-and-size.patch",
+    "0002-wasm-f128-sret-return.patch",
+    "0003-wasm-inline-small-functions.patch",
+    "0004-wasm-const-aggregate-locals-in-place.patch",
+    "0005-wasm-small-constant-memory-intrinsics.patch",
+]
+
+[upstream.clif-to-wasm]
+# clif-to-wasm checkout at toolchain/clif-to-wasm. ci/setup-toolchain.sh
+# shallow-fetches this rev for the compiler; build-rustc-wasm.sh applies the
+# patches below in that checkout.
+repo = "https://github.com/ryancbuckley/clif-to-wasm"
+rev = "0e4e0458f5a190a7fcdbb2298d9ad780678c44bc"
+patches = [
+    "0001-lower-wasm-memory-grow-and-size.patch",
+    "0002-inline-small-leaf-functions.patch",
+    "0003-lower-wasm-memory-copy-and-fill.patch",
+    "0004-fold-constant-addresses.patch",
+]
+
+[upstream.wild]
+# Wild linker checkout at toolchain/wild. ci/setup-toolchain.sh fetches this
+# rev, applies the patch below, and builds the native Wild binary with the
+# stable toolchain.
+repo = "https://github.com/wild-linker/wild"
+rev = "fd79578abb968275788428a6c639d967d974128f"
+patches = [
+    "0001-wasm-omit-zero-data-segments.patch",
+]
+
+[upstream.wasi-sdk]
+# wasi-sdk release archive. setup-sources.sh picks the host archive named
+# wasi-sdk-<version>-<arch>-<os>.tar.gz and downloads it from <url>/<archive>.
+# The release tag on GitHub is wasi-sdk-34; the archive version is 34.0.
+repo = "https://github.com/WebAssembly/wasi-sdk"
+version = "34.0"
+release = "wasi-sdk-34"
+url = "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-34"
+patches = []
+
+[upstream.rust-nightly]
+# Nightly toolchain installed with rustup. `rustup_dist` is the base URL for
+# the pinned rustup-init binary that setup-toolchain.sh downloads per host.
+repo = "https://static.rust-lang.org"
+version = "nightly-2026-10-19"
+rustup_dist = "https://static.rust-lang.org/rustup/dist"
+patches = []
+
+[upstream.rust-stable]
+# Stable toolchain used to build Wild and the native Wasmtime host.
+repo = "https://static.rust-lang.org"
+version = "1.99.1"
+patches = []
+
+[upstream.wasmtime]
+# Host-side Wasmtime crates. The authoritative pin is the exact version in the
+# root Cargo.toml [workspace.dependencies]; this entry mirrors it so the
+# manifest also records the host engine version. No script fetches Wasmtime
+# from here.
+repo = "https://crates.io/crates/wasmtime"
+version = "50.0.2"
+patches = []

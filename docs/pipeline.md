@@ -25,16 +25,14 @@ are in [`docs/compiler.md`](compiler.md) and
 ## Pins
 
 Everything is checked out under `toolchain/` (gitignored) and built with an
-isolated `RUSTUP_HOME`/`CARGO_HOME` so no other toolchain is touched.
-
-| Component | Repository | Revision | Version / note |
-|---|---|---|---|
-| rustc | static.rust-lang.org | `nightly-2026-10-19` | rustc 1.101.0-nightly (`b6eeb93c9 2026-10-18`) |
-| cg_clif | https://github.com/rust-lang/rustc_codegen_cranelift | `4f78fd3e5f2ce8a688865b4a6197e6d33211c09c` | upstream moved here from `bjorn3/…` |
-| clif-to-wasm | https://github.com/ryancbuckley/clif-to-wasm | `0e4e0458f5a190a7fcdbb2298d9ad780678c44bc` | v0.3.0, built as a path dependency |
-| wild | https://github.com/wild-linker/wild | `fd79578abb968275788428a6c639d967d974128f` | 0.11.0; built with stable 1.99.1 |
-| wasmtime (host) | crates.io | `=50.0.2` | pinned once in the root `Cargo.toml` / `Cargo.lock` |
-| wasmparser (host) | crates.io | `0.263` | validation |
+isolated `RUSTUP_HOME`/`CARGO_HOME` so no other toolchain is touched. The
+authoritative pins are in [`compiler/upstreams.toml`](../compiler/upstreams.toml):
+one `[upstream.<name>]` table per source, with its repository, revision or
+version, and the ordered patch list relative to `compiler/patches/<name>/`.
+[`compiler/scripts/upstream.py`](../compiler/scripts/upstream.py) reads that
+manifest (`get`, `patches`, `check`), and the setup/build scripts call it
+instead of hard-coding a rev or a patch glob. Host dependency versions stay
+pinned in the root `Cargo.toml` (Wasmtime `=50.0.2`, wasmparser `0.263`).
 
 The retained stage-A cg_clif patch is
 [`notes/history/stage-a/0001-cg_clif-wasm-backend.patch`](notes/history/stage-a/0001-cg_clif-wasm-backend.patch);

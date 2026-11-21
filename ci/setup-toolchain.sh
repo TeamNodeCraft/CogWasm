@@ -10,15 +10,19 @@
 # rustc.wasm: the CogWasm compiler builds wasm32-wasip1 directly from this tree.
 set -euo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+UPSTREAM="$REPO/compiler/scripts/upstream.py"
 TOOL="$REPO/toolchain"
 export RUSTUP_HOME="${RUSTUP_HOME:-$TOOL/rustup}"
 export CARGO_HOME="${CARGO_HOME:-$TOOL/cargo}"
 export PATH="$CARGO_HOME/bin:$PATH"
 
-CLIF_REV=0e4e0458f5a190a7fcdbb2298d9ad780678c44bc
-WILD_REV=fd79578abb968275788428a6c639d967d974128f
-NIGHTLY=nightly-2026-10-19
-STABLE=1.99.1
+CLIF_REV=$(python3 "$UPSTREAM" get clif-to-wasm rev)
+CLIF_URL=$(python3 "$UPSTREAM" get clif-to-wasm repo)
+WILD_REV=$(python3 "$UPSTREAM" get wild rev)
+WILD_URL=$(python3 "$UPSTREAM" get wild repo)
+NIGHTLY=$(python3 "$UPSTREAM" get rust-nightly version)
+STABLE=$(python3 "$UPSTREAM" get rust-stable version)
+RUSTUP_DIST=$(python3 "$UPSTREAM" get rust-nightly rustup_dist)
 
 log() { printf '\n== %s\n' "$*" >&2; }
 jobs() {
@@ -54,7 +58,7 @@ log "installing isolated rustup ($RUSTUP_HOST)"
 if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
     if [ ! -x "$TOOL/rustup-init" ]; then
         curl --retry 3 --retry-delay 5 -fL \
-            "https://static.rust-lang.org/rustup/dist/$RUSTUP_HOST/rustup-init" \
+            "$RUSTUP_DIST/$RUSTUP_HOST/rustup-init" \
             -o "$TOOL/rustup-init"
         chmod +x "$TOOL/rustup-init"
     fi
@@ -98,16 +102,18 @@ checkout() {
 }
 
 log "fetching pinned clif-to-wasm and Wild"
-checkout "$TOOL/clif-to-wasm" https://github.com/ryancbuckley/clif-to-wasm "$CLIF_REV"
-checkout "$TOOL/wild" https://github.com/wild-linker/wild "$WILD_REV"
+checkout "$TOOL/clif-to-wasm" "$CLIF_URL" "$CLIF_REV"
+checkout "$TOOL/wild" "$WILD_URL" "$WILD_REV"
 
 # Wild patches. The reverse check makes reruns idempotent whether the patch
 # is applied as a commit or left uncommitted. If a patch is newly applied the
 # cached binary predates it, so rebuild even when the executable exists.
-shopt -s nullglob
-WILD_PATCHES=("$REPO"/compiler/patches/wild/*.patch)
+WILD_PATCHES=()
+while IFS= read -r p; do
+    [ -n "$p" ] && WILD_PATCHES+=("$p")
+done < <(python3 "$UPSTREAM" patches wild)
 [ "${#WILD_PATCHES[@]}" -gt 0 ] || {
-    echo "no Wild patches found under $REPO/compiler/patches/wild" >&2; exit 1; }
+    echo "no Wild patches listed for upstream 'wild' in compiler/upstreams.toml" >&2; exit 1; }
 wild_patch_applied=false
 for p in "${WILD_PATCHES[@]}"; do
     if git -C "$TOOL/wild" apply --reverse --check "$p" 2>/dev/null; then

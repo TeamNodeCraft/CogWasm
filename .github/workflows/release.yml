@@ -95,7 +95,7 @@ jobs:
             toolchain/playground
             toolchain/clif-to-wasm
             toolchain/wild
-          key: cranelift-wasm-src-${{ runner.os }}-${{ hashFiles('compiler/patches/**') }}-f5298630-0e4e0458-fd79578-v1
+          key: cranelift-wasm-src-${{ runner.os }}-${{ hashFiles('compiler/patches/**', 'compiler/upstreams.toml') }}-f5298630-0e4e0458-fd79578-v1
 
       - name: restore wasi-sdk
         id: cache-wasi-sdk
@@ -213,7 +213,7 @@ jobs:
             toolchain/playground
             toolchain/clif-to-wasm
             toolchain/wild
-          key: cranelift-wasm-src-${{ runner.os }}-${{ hashFiles('compiler/patches/**') }}-f5298630-0e4e0458-fd79578-v1
+          key: cranelift-wasm-src-${{ runner.os }}-${{ hashFiles('compiler/patches/**', 'compiler/upstreams.toml') }}-f5298630-0e4e0458-fd79578-v1
 
   # One job per host. Each downloads the one rustc.wasm, builds the host and
   # Wild with the pinned stable 1.99.1, precompiles the .cwasm with the host's
@@ -283,7 +283,7 @@ jobs:
             toolchain/playground
             toolchain/clif-to-wasm
             toolchain/wild
-          key: cranelift-wasm-src-${{ runner.os }}-${{ hashFiles('compiler/patches/**') }}-f5298630-0e4e0458-fd79578-v1
+          key: cranelift-wasm-src-${{ runner.os }}-${{ hashFiles('compiler/patches/**', 'compiler/upstreams.toml') }}-f5298630-0e4e0458-fd79578-v1
 
       - name: restore wasi-sdk
         id: cache-wasi-sdk

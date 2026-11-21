@@ -87,6 +87,13 @@ if [ "$(free_gb "$REPO")" -lt 15 ]; then
 fi
 echo "budget: $(free_gb "$REPO") GiB free, $JOBS build jobs, $(uname -s) $(uname -m)"
 
+# Cheap manifest sanity check before any checkout/build: the patch lists in
+# compiler/upstreams.toml must match compiler/patches/, and the PR bundles are
+# reported if they have drifted (a warning, not a failure). A failure here
+# means the toolchain setup would apply a different series than the manifest.
+step "upstream manifest"
+python3 "$REPO/compiler/scripts/upstream.py" check
+
 if [ "$REUSE_COMPILER" = true ]; then
     step "reuse the cached compiler build"
     # Fail loudly instead of rebuilding: a partial restore means the cache key

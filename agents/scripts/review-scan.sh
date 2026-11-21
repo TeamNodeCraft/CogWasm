@@ -83,6 +83,16 @@ if [[ $changed -eq 1 ]]; then
   fi
 fi
 
+# 0. The machine-readable upstream/patch manifest still matches the tree.
+note "upstream manifest"
+if ! command -v python3 >/dev/null; then
+  blocking "python3 not installed; cannot check compiler/upstreams.toml"
+  failed=1
+elif ! python3 "$root/compiler/scripts/upstream.py" check; then
+  blocking "compiler/upstreams.toml does not match compiler/patches/ (run python3 compiler/scripts/upstream.py check)"
+  failed=1
+fi
+
 # 1. The project rules still match their known examples.
 note "ast-grep rule self-test"
 if command -v ast-grep >/dev/null; then

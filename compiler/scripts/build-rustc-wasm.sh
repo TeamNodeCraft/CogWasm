@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Build the CogWasm rustc.wasm: wasm32-wasip1 (non-threads), cg_clif only, with
-# every patch under compiler/patches/{rust,cg_clif,clif-to-wasm}/ applied.
+# every patch listed for rust, cg_clif and clif-to-wasm in compiler/upstreams.toml
+# applied.
 #
 # Reuses the pinned source tree under toolchain/rust (incremental when the
 # tree was already built). Run compiler/scripts/setup-sources.sh first if it is
-# missing. Every patch under compiler/patches/{rust,cg_clif,clif-to-wasm}/ is
-# applied idempotently before the build, in sorted order.
+# missing. The patch series comes from compiler/upstreams.toml through
+# compiler/scripts/upstream.py, applied idempotently in manifest order.
 #
 # `x.py install` must succeed: the generate-copyright failure caused by the
 # out-of-tree clif-to-wasm path dependency is fixed by
@@ -14,6 +15,7 @@
 # install.
 set -euo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+UPSTREAM="$REPO/compiler/scripts/upstream.py"
 TOOL="$REPO/toolchain"
 WORK="$TOOL"
 SRC="$WORK/rust"
@@ -22,7 +24,8 @@ CLIF="$TOOL/clif-to-wasm"
 export RUSTUP_HOME="${RUSTUP_HOME:-$TOOL/rustup}"
 export CARGO_HOME="${CARGO_HOME:-$TOOL/cargo}"
 export PATH="$CARGO_HOME/bin:$PATH"
-export RUSTUP_TOOLCHAIN=nightly-2026-10-19
+RUSTUP_TOOLCHAIN=$(python3 "$UPSTREAM" get rust-nightly version)
+export RUSTUP_TOOLCHAIN
 WASI_SDK="$WORK/wasi-sdk"
 OUT="$TOOL/artifacts/rustc.wasm"
 LOG="$REPO/docs/results/build-rustc-wasm.log"
@@ -47,6 +50,13 @@ sha256_file() {
 }
 patch_recorded() { [ -f "$1" ] && grep -qx "$2" "$1"; }
 record_patch() { printf '%s\n' "$2" >> "$1"; }
+# Print the ordered patch paths for one upstream from compiler/upstreams.toml.
+read_patches() {
+    local upstream=$1 p
+    while IFS= read -r p; do
+        [ -n "$p" ] && printf '%s\n' "$p"
+    done < <(python3 "$UPSTREAM" patches "$upstream")
+}
 
 jobs() {
     if [ -n "${BUILD_JOBS:-}" ]; then
@@ -66,12 +76,14 @@ mkdir -p "$(dirname "$LOG")" "$(dirname "$OUT")"
 
 # Rust patches. A patch may be applied as a commit (the local experiment tree)
 # or left uncommitted (a fresh CI checkout); the reverse check covers both and
-# makes reruns idempotent. Loop over every patch so a new one (for example the
-# generate-copyright or wasm file-lock fix) cannot be silently skipped.
-shopt -s nullglob
-RUST_PATCHES=("$REPO"/compiler/patches/rust/*.patch)
+# makes reruns idempotent. The list comes from compiler/upstreams.toml, so a new
+# patch cannot be silently skipped.
+RUST_PATCHES=()
+while IFS= read -r p; do
+    RUST_PATCHES+=("$p")
+done < <(read_patches rust)
 [ "${#RUST_PATCHES[@]}" -gt 0 ] || {
-    echo "no rust patches found under $REPO/compiler/patches/rust" >&2; exit 1; }
+    echo "no rust patches listed for upstream 'rust' in compiler/upstreams.toml" >&2; exit 1; }
 for p in "${RUST_PATCHES[@]}"; do
     hash=$(sha256_file "$p")
     if patch_recorded "$PATCH_STATE" "$hash"; then
@@ -91,9 +103,12 @@ done
 
 # clif-to-wasm patches (this checkout is the repository root, so the patches'
 # src/... paths resolve correctly).
-CLIF_PATCHES=("$REPO"/compiler/patches/clif-to-wasm/*.patch)
+CLIF_PATCHES=()
+while IFS= read -r p; do
+    CLIF_PATCHES+=("$p")
+done < <(read_patches clif-to-wasm)
 [ "${#CLIF_PATCHES[@]}" -gt 0 ] || {
-    echo "no clif-to-wasm patches found under $REPO/compiler/patches/clif-to-wasm" >&2; exit 1; }
+    echo "no clif-to-wasm patches listed in compiler/upstreams.toml" >&2; exit 1; }
 for p in "${CLIF_PATCHES[@]}"; do
     hash=$(sha256_file "$p")
     if patch_recorded "$CLIF_PATCH_STATE" "$hash"; then
@@ -118,9 +133,12 @@ done
 # directory, which left a fresh CI tree unpatched. Apply with --directory from
 # the root instead, then assert the content is really there.
 CG_PREFIX=compiler/rustc_codegen_cranelift
-CG_PATCHES=("$REPO"/compiler/patches/cg_clif/*.patch)
+CG_PATCHES=()
+while IFS= read -r p; do
+    CG_PATCHES+=("$p")
+done < <(read_patches cg_clif)
 [ "${#CG_PATCHES[@]}" -gt 0 ] || {
-    echo "no cg_clif patches found under $REPO/compiler/patches/cg_clif" >&2; exit 1; }
+    echo "no cg_clif patches listed in compiler/upstreams.toml" >&2; exit 1; }
 for p in "${CG_PATCHES[@]}"; do
     hash=$(sha256_file "$p")
     if patch_recorded "$PATCH_STATE" "$hash"; then
@@ -162,9 +180,9 @@ PY
 sed "s|@WASI_SDK@|$WASI_SDK|g" "$REPO/compiler/bootstrap.toml" > "$SRC/bootstrap.toml"
 cd "$SRC"
 # On GitHub Actions bootstrap assumes HEAD^1 is an upstream rust-lang/rust
-# commit. Here HEAD is the last of the 23 prior-art commits applied with
-# `git am` (whose hashes differ from upstream because the committer timestamp
-# differs), so download-ci-llvm asks for a nonexistent artifact and 404s.
+# commit. Here HEAD is the last prior-art commit applied with `git am` (whose
+# hashes differ from upstream because the committer timestamp differs), so
+# download-ci-llvm asks for a nonexistent artifact and 404s.
 # --ci=false uses the local freshness logic, which walks back to the pinned
 # upstream commit b6eeb93 before downloading LLVM.
 set +e

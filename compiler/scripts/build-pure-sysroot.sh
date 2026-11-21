@@ -4,12 +4,14 @@
 # compiler exactly. No native rustc compiles any shipped plugin crate.
 set -euo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+UPSTREAM="$REPO/compiler/scripts/upstream.py"
 TOOL="$REPO/toolchain"
 SYS="$TOOL/sysroot"
 TARGET="$TOOL/target/sysroot"
 export RUSTUP_HOME="${RUSTUP_HOME:-$TOOL/rustup}"
 export CARGO_HOME="${CARGO_HOME:-$TOOL/cargo}"
-export RUSTUP_TOOLCHAIN=nightly-2026-10-19
+NIGHTLY=$(python3 "$UPSTREAM" get rust-nightly version)
+export RUSTUP_TOOLCHAIN="$NIGHTLY"
 export RUSTC="$REPO/compiler/scripts/rustc-wasm-wrapper.sh"
 export RUSTC_BOOTSTRAP=1
 # Turn clif-to-wasm's "replace an unsupported function with a trap" into an
@@ -22,7 +24,7 @@ STAGE1="${COGWASM_STAGE1:-${STAGE_C_STAGE1:-$TOOL/rust/build/host/stage1/bin/rus
 [ -x "$STAGE1" ] || { echo "missing native stage1 rustc: $STAGE1" >&2; exit 1; }
 HOST=$("$STAGE1" -vV | sed -n 's/^host: //p')
 export COGWASM_HOST_TRIPLE="$HOST"
-export PATH="$RUSTUP_HOME/toolchains/nightly-2026-10-19-$HOST/lib/rustlib/$HOST/bin:$CARGO_HOME/bin:$PATH"
+export PATH="$RUSTUP_HOME/toolchains/$NIGHTLY-$HOST/lib/rustlib/$HOST/bin:$CARGO_HOME/bin:$PATH"
 
 unset COGWASM_SYSROOT STAGE_C_SYSROOT || true
 rm -rf "$SYS"

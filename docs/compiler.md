@@ -37,6 +37,10 @@ section.
 The existing pinned toolchain/downloads under `../toolchain/` (gitignored) are
 reused. New or changed pins:
 
+The authoritative machine-readable list, including the ordered patch series,
+is [`compiler/upstreams.toml`](../compiler/upstreams.toml); this table is the
+explanatory view.
+
 | Component | Source | Revision / version |
 |---|---|---|
 | rustc source | https://github.com/rust-lang/rust | `b6eeb93c992027a03e1fd120b6652546396b142c` (`nightly-2026-10-19`) |
@@ -59,16 +63,18 @@ It imports 26 WASI p1 functions plus `playground.spawn`, exports `memory` and
 ```
 compiler/                           # build rustc.wasm and the pure sysroot
 ├── bootstrap.toml                  # wasm32-wasip1 build config (LLVM only for stage1)
+├── upstreams.toml                  # machine-readable upstream revisions + patch lists
 ├── run.sh                          # plugins/check/bench/a2
 ├── scripts/
+│   ├── upstream.py                 # read/validate upstreams.toml (get/patches/check)
 │   ├── setup-sources.sh            # rust checkout, prior-art patches, wasi-sdk
 │   ├── build-rustc-wasm.sh         # apply compiler patches + x.py install
 │   ├── build-host.sh               # Wasmtime 50.0.2 p1 host
 │   ├── build-pure-sysroot.sh       # core/alloc/compiler_builtins via rustc.wasm
 │   ├── rustc-wasm-wrapper.sh       # Cargo RUSTC wrapper
 │   └── run-item3.sh                # memory.grow regression suite
-├── patches/                        # rust, cg_clif, clif-to-wasm, wild patches
-└── upstream/                       # upstream-ready PR drafts
+├── patches/                        # ordered series listed in upstreams.toml
+└── upstream/                       # upstream-ready PR drafts (checked for drift)
 crates/
 ├── cogwasm-host/                   # Wasmtime 50.0.2 p1 host (no wasi-threads)
 ├── cogwasm-runtime/                # helpers shared with the benchmark host

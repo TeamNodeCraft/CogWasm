@@ -12,6 +12,7 @@
 #   ./run.sh precompiled-check  .cwasm load + mismatch/truncation fallback
 set -euo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+UPSTREAM="$REPO/compiler/scripts/upstream.py"
 TOOL="$REPO/toolchain"
 RUSTC_WASM="$TOOL/artifacts/rustc.wasm"
 PURE="$TOOL/sysroot"
@@ -19,7 +20,8 @@ HOST="$TOOL/target/cogwasm-host/release/cogwasm-host"
 WILD="$TOOL/target/wild/release/wild"
 export RUSTUP_HOME="${RUSTUP_HOME:-$TOOL/rustup}"
 export CARGO_HOME="${CARGO_HOME:-$TOOL/cargo}"
-export RUSTUP_TOOLCHAIN=nightly-2026-10-19
+NIGHTLY=$(python3 "$UPSTREAM" get rust-nightly version)
+export RUSTUP_TOOLCHAIN="$NIGHTLY"
 STAGE1="${COGWASM_STAGE1:-${STAGE_C_STAGE1:-$TOOL/rust/build/host/stage1/bin/rustc}}"
 if [ -x "$STAGE1" ]; then
     HOST_TRIPLE=$("$STAGE1" -vV | sed -n 's/^host: //p')
@@ -28,7 +30,7 @@ else
 fi
 # rust-objcopy for libm's build script (and compiler_builtins in the sysroot).
 if [ -n "$HOST_TRIPLE" ]; then
-    export PATH="$RUSTUP_HOME/toolchains/nightly-2026-10-19-$HOST_TRIPLE/lib/rustlib/$HOST_TRIPLE/bin:$CARGO_HOME/bin:$PATH"
+    export PATH="$RUSTUP_HOME/toolchains/$NIGHTLY-$HOST_TRIPLE/lib/rustlib/$HOST_TRIPLE/bin:$CARGO_HOME/bin:$PATH"
 else
     export PATH="$CARGO_HOME/bin:$PATH"
 fi

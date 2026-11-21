@@ -14,9 +14,10 @@
 set -euo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+UPSTREAM="$REPO/compiler/scripts/upstream.py"
 TOOL="$REPO/toolchain"
-NIGHTLY=nightly-2026-10-19
-HOST_TOOLCHAIN=1.99.1
+NIGHTLY=$(python3 "$UPSTREAM" get rust-nightly version)
+HOST_TOOLCHAIN=$(python3 "$UPSTREAM" get rust-stable version)
 
 export RUSTUP_HOME="$TOOL/rustup"
 export CARGO_HOME="$TOOL/cargo"

@@ -15,6 +15,7 @@
 set -euo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+UPSTREAM="$REPO/compiler/scripts/upstream.py"
 TOOL="$REPO/toolchain"
 WORK="$TOOL"
 SRC="$WORK/rust"
@@ -22,35 +23,42 @@ PLAYGROUND="$TOOL/playground"
 export RUSTUP_HOME="${RUSTUP_HOME:-$TOOL/rustup}"
 export CARGO_HOME="${CARGO_HOME:-$TOOL/cargo}"
 export PATH="$CARGO_HOME/bin:$PATH"
-export RUSTUP_TOOLCHAIN=nightly-2026-10-19
+RUSTUP_TOOLCHAIN=$(python3 "$UPSTREAM" get rust-nightly version)
+export RUSTUP_TOOLCHAIN
 
-RUST_COMMIT=b6eeb93c992027a03e1fd120b6652546396b142c
-PLAYGROUND_REV=f5298630dda0f2dc2b44f6ae1b54add7a77d8316
+RUST_COMMIT=$(python3 "$UPSTREAM" get rust rev)
+RUST_URL=$(python3 "$UPSTREAM" get rust repo)
+PLAYGROUND_REV=$(python3 "$UPSTREAM" get playground rev)
+PLAYGROUND_URL=$(python3 "$UPSTREAM" get playground repo)
+PLAYGROUND_PATCH_DIR=$(python3 "$UPSTREAM" get playground patch_dir)
+PLAYGROUND_PATCHES=$(python3 "$UPSTREAM" get playground patch_series)
+WASI_SDK_VERSION=$(python3 "$UPSTREAM" get wasi-sdk version)
+WASI_SDK_BASE_URL=$(python3 "$UPSTREAM" get wasi-sdk url)
 
 # wasi-sdk publishes one archive per host. The spike was developed on Apple
 # silicon; CI is x86_64 Linux, so pick the archive instead of hardcoding macOS.
 case "$(uname -s)-$(uname -m)" in
-    Darwin-arm64)          WASI_SDK=wasi-sdk-34.0-arm64-macos ;;
-    Darwin-x86_64)         WASI_SDK=wasi-sdk-34.0-x86_64-macos ;;
-    Linux-x86_64|Linux-amd64) WASI_SDK=wasi-sdk-34.0-x86_64-linux ;;
-    Linux-aarch64|Linux-arm64) WASI_SDK=wasi-sdk-34.0-arm64-linux ;;
+    Darwin-arm64)          WASI_SDK="wasi-sdk-$WASI_SDK_VERSION-arm64-macos" ;;
+    Darwin-x86_64)         WASI_SDK="wasi-sdk-$WASI_SDK_VERSION-x86_64-macos" ;;
+    Linux-x86_64|Linux-amd64) WASI_SDK="wasi-sdk-$WASI_SDK_VERSION-x86_64-linux" ;;
+    Linux-aarch64|Linux-arm64) WASI_SDK="wasi-sdk-$WASI_SDK_VERSION-arm64-linux" ;;
     *)
         echo "unsupported host for wasi-sdk: $(uname -s) $(uname -m)" >&2
         exit 1
         ;;
 esac
-WASI_SDK_URL="https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-34/$WASI_SDK.tar.gz"
+WASI_SDK_URL="$WASI_SDK_BASE_URL/$WASI_SDK.tar.gz"
 
 log() { printf '\n== %s\n' "$*" >&2; }
 
 mkdir -p "$WORK"
 
-# The 23-patch series lives in the prior-art checkout; fetch it if the
+# The prior-art patch series lives in that checkout; fetch it if the
 # toolchain's playground checkout is not present.
 if [ ! -d "$PLAYGROUND/.git" ]; then
     log "fetching prior art @ $PLAYGROUND_REV"
     git init -q "$PLAYGROUND"
-    git -C "$PLAYGROUND" remote add origin https://github.com/ryancbuckley/rust-playground-inbrowser
+    git -C "$PLAYGROUND" remote add origin "$PLAYGROUND_URL"
     git -C "$PLAYGROUND" fetch -q --depth 1 origin "$PLAYGROUND_REV"
     git -C "$PLAYGROUND" checkout -q -b pinned FETCH_HEAD
 fi
@@ -61,7 +69,7 @@ got=$(git -C "$PLAYGROUND" rev-parse HEAD)
 if [ ! -d "$SRC/.git" ]; then
     log "fetching rust-lang/rust @ $RUST_COMMIT"
     git init -q "$SRC"
-    git -C "$SRC" remote add origin https://github.com/rust-lang/rust
+    git -C "$SRC" remote add origin "$RUST_URL"
     git -C "$SRC" fetch -q --depth 1 origin "$RUST_COMMIT"
     git -C "$SRC" checkout -q -b wasm-playground FETCH_HEAD
 fi
@@ -74,10 +82,10 @@ git -C "$SRC" cat-file -e "$RUST_COMMIT^{commit}" 2>/dev/null || {
 # a command substitution, not `git log | grep -q`: under `pipefail`, grep
 # exiting early can make git log fail with SIGPIPE and re-apply the series.
 if [ -z "$(git -C "$SRC" log --format=%s -n 60 --grep='^cg_clif: update to clif-to-wasm 0\.3\.0$')" ]; then
-    log "applying the prior-art rust patch series (23 patches)"
+    log "applying the prior-art rust patch series ($PLAYGROUND_PATCHES patches)"
     git -C "$SRC" config user.name playground
     git -C "$SRC" config user.email playground@localhost
-    git -C "$SRC" am -q "$PLAYGROUND"/patches/rust/*.patch
+    git -C "$SRC" am -q "$PLAYGROUND/$PLAYGROUND_PATCH_DIR"/*.patch
 fi
 
 if [ ! -d "$WORK/$WASI_SDK" ]; then
