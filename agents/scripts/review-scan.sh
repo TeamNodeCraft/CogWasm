@@ -149,6 +149,9 @@ fi
 note "cargo fmt / clippy (host crates)"
 host_crates=()
 for m in $(own_files '*Cargo.toml' | sort -u); do
+  # The root manifest is a virtual workspace, not a crate: lint its members
+  # through the per-member loop below.
+  if ! grep -q '^\[package\]' "$m"; then continue; fi
   if grep -q -E '^\s*wasmtime\s*=|^\s*clap\s*=' "$m" || [[ "$m" == config_rewriter/Cargo.toml ]]; then
     dir="$(dirname "$m")"
     if [[ $changed -eq 1 ]] && ! dir_changed "$dir"; then continue; fi

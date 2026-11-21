@@ -9,3 +9,6 @@ crate-type = ["cdylib"]
 [profile.release]
 panic = "abort"
 opt-level = 2
+
+# Standalone: not part of the root host workspace.
+[workspace]

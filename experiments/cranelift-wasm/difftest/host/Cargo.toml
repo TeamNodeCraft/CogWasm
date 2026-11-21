@@ -14,6 +14,7 @@ path = "src/bin/generate.rs"
 
 [dependencies]
 anyhow = "1"
-# Same pin as the stage-C host. Features match stage-c/host/Cargo.toml so the
-# release build can reuse toolchain/target/stage-c-host's compiled dependencies.
-wasmtime = { version = "=50.0.2", default-features = false, features = ["cranelift", "runtime", "std", "cache", "anyhow", "threads"] }
+# Same pin as the stage-C host (from the root workspace). Features match
+# stage-c/host/Cargo.toml so the release build can reuse
+# toolchain/target/stage-c-host's compiled dependencies.
+wasmtime = { workspace = true, features = ["cranelift", "runtime", "std", "cache", "anyhow", "threads"] }

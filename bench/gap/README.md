@@ -15,7 +15,7 @@ bench/gap/count-quick.sh RESULT.json
                                   # the modules bench/run.sh already built
 ```
 
-`run.sh` builds `gap-tool` (Rust, pinned crates in `Cargo.lock`), builds the
+`run.sh` builds `gap-tool` (Rust, pinned crates in the workspace `Cargo.lock`), builds the
 suite modules through `bench/run.py`, instruments every basic block with an
 exported counter, runs the suite seeds, and writes:
 - `results/analysis.json` — per-program totals, per-function counts, category

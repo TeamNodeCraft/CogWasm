@@ -10,14 +10,15 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
-clap = { version = "4", features = ["derive"] }
+clap = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sha2 = "0.10"
-# Same pinned Wasmtime and engine configuration as the product host. The
-# stage-c-host library supplies `engine()` and the precompiled-artifact loader,
-# so the benchmark measures the host the product actually ships.
-wasmtime = { version = "=50.0.2", default-features = false, features = ["cranelift", "runtime", "std", "cache", "anyhow", "threads"] }
-wasmtime-wasi = { version = "=50.0.2", default-features = false, features = ["p1"] }
+sha2 = { workspace = true }
+# Same pinned Wasmtime and engine configuration as the product host (the pin is
+# in the root workspace). The stage-c-host library supplies `engine()` and the
+# precompiled-artifact loader, so the benchmark measures the host the product
+# actually ships.
+wasmtime = { workspace = true, features = ["cranelift", "runtime", "std", "cache", "anyhow", "threads"] }
+wasmtime-wasi = { workspace = true, features = ["p1"] }
 wasmparser = "0.263"
 stage-c-host = { path = "../../experiments/cranelift-wasm/stage-c/host" }

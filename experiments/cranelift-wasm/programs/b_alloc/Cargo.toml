@@ -12,3 +12,6 @@ libm = { version = "0.2", default-features = false }
 [profile.release]
 panic = "abort"
 opt-level = 2
+
+# Standalone: not part of the root host workspace.
+[workspace]

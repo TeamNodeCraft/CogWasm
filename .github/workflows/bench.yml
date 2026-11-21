@@ -72,7 +72,7 @@ jobs:
           path: |
             experiments/cranelift-wasm/toolchain/cargo/registry
             experiments/cranelift-wasm/toolchain/cargo/git
-          key: cranelift-wasm-cargo-${{ runner.os }}-${{ hashFiles('experiments/cranelift-wasm/stage-c/host/Cargo.lock', 'experiments/cranelift-wasm/stage-c/programs/*/Cargo.lock', 'experiments/cranelift-wasm/stage-b/a2/harness/Cargo.lock') }}-v1
+          key: cranelift-wasm-cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'experiments/cranelift-wasm/stage-c/programs/*/Cargo.lock', 'experiments/cranelift-wasm/stage-b/a2/harness/Cargo.lock') }}-v1
           restore-keys: |
             cranelift-wasm-cargo-${{ runner.os }}-
 

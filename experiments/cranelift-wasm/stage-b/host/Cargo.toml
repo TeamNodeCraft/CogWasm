@@ -17,3 +17,6 @@ wasmparser = "0.263"
 wasmtime = { version = "=46.0.3", default-features = false, features = ["cranelift", "runtime", "std", "cache", "anyhow", "threads"] }
 wasmtime-wasi = { version = "=46.0.3", default-features = false, features = ["p1"] }
 wasmtime-wasi-threads = "=46.0.3"
+
+# Standalone: not part of the root host workspace.
+[workspace]

@@ -275,7 +275,8 @@ def package_notices(experiment: Path, package: dict, root: Path) -> tuple[list[s
 
 
 def registry_licence_files(experiment: Path, crate: str) -> list[Path]:
-    version = read_lock_version(experiment / "stage-c/host/Cargo.lock", crate)
+    root = experiment.parents[1]  # CogWasm repository root
+    version = read_lock_version(root / "Cargo.lock", crate)
     pattern = f"toolchain/cargo/registry/src/*/{crate}-{version}/LICENSE*"
     matches = sorted(experiment.glob(pattern))
     if not matches:
@@ -410,7 +411,7 @@ def main() -> None:
             f"clif-to-wasm: {git_revision(experiment / 'toolchain/clif-to-wasm')}",
             f"Wild: {git_revision(experiment / 'toolchain/wild')}",
             f"rust-playground-inbrowser: {git_revision(experiment / 'toolchain/playground')}",
-            f"Wasmtime: {read_lock_version(experiment / 'stage-c/host/Cargo.lock', 'wasmtime')}",
+            f"Wasmtime: {read_lock_version(root / 'Cargo.lock', 'wasmtime')}",
             "wasi-sdk: "
             + (
                 " ".join(

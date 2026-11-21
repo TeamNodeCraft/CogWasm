@@ -17,3 +17,6 @@ path = "src/main.rs"
 [[bin]]
 name = "wasm_optimizer"
 path = "src/opt.rs"
+
+# Standalone: not part of the root host workspace.
+[workspace]

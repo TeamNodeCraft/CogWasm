@@ -17,4 +17,4 @@ serde_json = "=1.0.149"
 wasm-encoder = { version = "=0.263.0", default-features = false, features = ["std", "wasmparser"] }
 wasmparser = "=0.263.0"
 wasmprinter = "=0.263.0"
-wasmtime = { version = "=50.0.2", default-features = false, features = ["cranelift", "runtime", "std", "cache", "anyhow", "threads"] }
+wasmtime = { workspace = true, features = ["cranelift", "runtime", "std", "cache", "anyhow", "threads"] }

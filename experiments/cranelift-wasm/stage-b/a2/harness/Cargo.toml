@@ -6,4 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1"
 wasmparser = "0.263"
-wasmtime = { version = "50.0.1", default-features = false, features = ["cranelift", "runtime", "std"] }
+wasmtime = { version = "=50.0.2", default-features = false, features = ["cranelift", "runtime", "std"] }
+
+# Standalone: not part of the root host workspace.
+[workspace]

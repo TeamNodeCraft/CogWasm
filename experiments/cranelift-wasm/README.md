@@ -24,7 +24,7 @@ isolated `RUSTUP_HOME`/`CARGO_HOME` so no other toolchain is touched.
 | cg_clif | https://github.com/rust-lang/rustc_codegen_cranelift | `4f78fd3e5f2ce8a688865b4a6197e6d33211c09c` | upstream moved here from `bjorn3/…` |
 | clif-to-wasm | https://github.com/ryancbuckley/clif-to-wasm | `0e4e0458f5a190a7fcdbb2298d9ad780678c44bc` | v0.3.0, built as a path dependency |
 | wild | https://github.com/wild-linker/wild | `fd79578abb968275788428a6c639d967d974128f` | 0.11.0; built with stable 1.99.1 |
-| wasmtime (host) | crates.io | `50.0.1` requirement, resolves `50.0.2` | pinned by `programs/host/Cargo.lock` |
+| wasmtime (host) | crates.io | `=50.0.2` | pinned once in the root `Cargo.toml` / `Cargo.lock` |
 | wasmparser (host) | crates.io | `0.263` | validation |
 
 The cg_clif patch is [`patches/0001-cg_clif-wasm-backend.patch`](patches/0001-cg_clif-wasm-backend.patch).
