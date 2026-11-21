@@ -294,12 +294,11 @@ across jobs. Depends on P3. This is **feature work**, flagged as separate from
 the restructure, and changes behaviour (resident compiler vs per-job reload).
 
 **Verify.** Supervisor golden tests in CI; the real-backend matrix from
-`docs/supervisor.md`; the Goal 2 rows that exist — first compile after install
-in well under 1 s, and a resident compiler service that keeps `rustc.wasm`
-loaded (instantiation in about 10 ms is a separate open item). Add a measurable
-check that the supervisor no longer reloads `rustc.wasm` per job: compare
-per-job wall time against `stage-c-host` resident edit-to-result (about 96 ms
-locally per the README).
+`docs/notes/supervisor.md`; the Goal 2 resident-service row in
+`agents/ROADMAP.md`: edit → result under 100 ms on a CI runner. Add a
+measurable check that the supervisor no longer reloads `rustc.wasm` per job:
+compare per-job wall time against `cogwasm-host` resident edit-to-result
+(about 96 ms locally per the README).
 
 **Rollback.** `git revert`; P0–P5 do not depend on it.
 
