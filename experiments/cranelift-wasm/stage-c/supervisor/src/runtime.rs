@@ -8,11 +8,16 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 
 use crate::store::Artifact;
 
 /// One running instance.
+///
+/// A plugin may implement the optional state contract:
+/// `cogwasm_state_version() -> i32`, `cogwasm_snapshot(ptr, cap) -> i32` and
+/// `cogwasm_restore(ptr, len) -> i32`. The defaults below make every instance
+/// stateless, which is the M1-M3 behaviour.
 pub trait Instance: Send {
     /// The generation this instance was created for.
     fn generation(&self) -> u64;
@@ -23,6 +28,34 @@ pub trait Instance: Send {
     ///
     /// Returns an error when the instance traps.
     fn call(&mut self, input: u64) -> Result<u64>;
+
+    /// The plugin's state ABI version, or `None` when it has no state contract.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the version export traps.
+    fn state_version(&mut self) -> Result<Option<u32>> {
+        Ok(None)
+    }
+
+    /// Snapshot the plugin's state, or `None` when it has no state contract.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the snapshot protocol is violated.
+    fn snapshot(&mut self) -> Result<Option<Vec<u8>>> {
+        Ok(None)
+    }
+
+    /// Restore a snapshot produced by [`Instance::snapshot`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the instance cannot restore state or the plugin
+    /// rejects it.
+    fn restore(&mut self, _state: &[u8]) -> Result<()> {
+        bail!("this instance cannot restore state")
+    }
 }
 
 /// Instantiates artifacts.

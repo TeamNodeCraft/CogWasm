@@ -1,6 +1,6 @@
 # Compile-level supervisor: plan
 
-Status: **M1–M3 done**. This is the host-side scheduler for Goal 1's
+Status: **M1–M4 done**. This is the host-side scheduler for Goal 1's
 tier 2 and Goal 2's resident compiler service. It keeps the compiler a pure
 function of (source, options) and puts the option policy, caching and swapping
 in the host, where they can be tested.
@@ -203,10 +203,11 @@ Reading:
 - **All three tiers return identical `run(seed)` values and output lengths**
   for every program (checked with `bench-host run` on the stored artifacts).
 
-M1, M2 and M3 are accepted: the thirteen golden tests pass in CI, the matrix
-above is the M2 evidence, and the swap table above is the M3 evidence. The
-composable-spec refactor has landed (M5b's first half). M4 (the state ABI for
-stateful plugins) is next, then the selector.
+M1, M2, M3 and M4 are accepted: sixteen golden tests pass in CI, the matrix
+above is the M2 evidence, the swap table above is the M3 evidence, and the
+state tests above are the M4 evidence. The composable-spec refactor has landed
+(M5b's first half). Next is the empirical selector, then the crate-level cache
+(M5).
 
 ## M3: the swap
 
@@ -239,6 +240,35 @@ the engine's compatibility hash, as `stage-c-precompile` does for `rustc.wasm`.
 M3 uses a cold restart: the new instance re-runs `run(seed)` with the same
 input, which is correct for a plugin whose state is derived from its inputs.
 Stateful plugins need M4's `snapshot`/`restore` contract.
+
+## State across a swap (M4)
+
+A stateful plugin exports four things beside `run`:
+
+| export | contract |
+| --- | --- |
+| `cogwasm_state_version() -> i32` | ABI version the plugin writes and reads |
+| `cogwasm_snapshot(ptr, cap) -> i32` | with `cap = 0`, return `-required`; otherwise write at `ptr` and return the length |
+| `cogwasm_restore(ptr, len) -> i32` | zero on success |
+| `wasm_alloc(size, align) -> i32` | the buffer the host uses for both calls |
+
+`Swapper::install_preserving_state` snapshots the old instance, instantiates the
+new one, checks that its version equals the old one, restores, and only then
+makes it current. Any failure — missing contract, changed version, rejected
+restore — leaves the old instance serving. A stateless old instance falls back
+to a cold restart.
+
+Evidence (hand-written stateful WAT plugin, no toolchain):
+
+- the counter continues across a swap: `run(5)`, `run(7)` -> 12, swap,
+  `run(1)` -> 13;
+- a version-1 -> version-2 swap is rejected and the old instance keeps serving;
+- a stateless plugin falls back to the cold restart.
+
+Not covered yet: in-flight host calls (a swap is still quiescent by
+construction), threads inside plugins, host imports, and allocator internals
+beyond what the plugin puts in its own snapshot. Those belong to the service,
+not the supervisor.
 
 ## Test matrix (M1)
 

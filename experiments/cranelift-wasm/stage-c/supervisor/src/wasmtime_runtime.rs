@@ -1,19 +1,28 @@
-//! The real runtime (M3): instantiate an artifact in Wasmtime and call its
-//! entry point.
+//! The real runtime (M3/M4): instantiate an artifact in Wasmtime, call its
+//! entry point, and optionally carry state across a swap.
 //!
-//! The plugins target `wasm32-unknown-unknown` and export `run(u64) -> u64`
-//! with no imports (the host-call plugins are out of scope for the reference
-//! runtime until the host-import contract lands). A swap is a new instance;
-//! the old one is dropped only after the new one exists.
+//! The plugins target `wasm32-unknown-unknown` and export `run(u64) -> u64`.
+//! A stateful plugin additionally exports:
+//!
+//! - `cogwasm_state_version() -> i32`
+//! - `cogwasm_snapshot(ptr, cap) -> i32`: with `cap = 0` return the negative
+//!   required length; otherwise write the state at `ptr` and return its length.
+//! - `cogwasm_restore(ptr, len) -> i32`: zero on success.
+//!
+//! and must export `wasm_alloc(size, align) -> ptr` so the host can provide the
+//! buffer. A swap is a new instance; the old one is dropped only after the new
+//! one exists and has accepted the state.
 
-use std::collections::HashMap;
-use std::sync::Mutex;
-
-use anyhow::{Result, anyhow};
-use wasmtime::{Engine, Instance as WasmInstance, Module, Store, TypedFunc};
+use anyhow::{Result, anyhow, bail};
+use wasmtime::{Engine, Instance as WasmInstance, Memory, Module, Store, TypedFunc};
 
 use crate::runtime::{Instance, Runtime};
 use crate::store::{Artifact, ArtifactMeta};
+
+type SnapshotFn = TypedFunc<(i32, i32), i32>;
+type RestoreFn = TypedFunc<(i32, i32), i32>;
+type AllocFn = TypedFunc<(i32, i32), i32>;
+type VersionFn = TypedFunc<(), i32>;
 
 /// A Wasmtime engine that instantiates plugin artifacts.
 ///
@@ -23,14 +32,14 @@ use crate::store::{Artifact, ArtifactMeta};
 /// host precompiles the artifact once, then swaps cheaply.
 pub struct WasmtimeRuntime {
     engine: Engine,
-    modules: Mutex<HashMap<String, Module>>,
+    modules: std::sync::Mutex<std::collections::HashMap<String, Module>>,
 }
 
 impl Default for WasmtimeRuntime {
     fn default() -> Self {
         Self {
             engine: Engine::default(),
-            modules: Mutex::new(HashMap::new()),
+            modules: std::sync::Mutex::new(std::collections::HashMap::new()),
         }
     }
 }
@@ -74,28 +83,31 @@ impl WasmtimeRuntime {
         modules.insert(artifact.key.clone(), module);
         Ok(())
     }
-}
 
-impl Runtime for WasmtimeRuntime {
-    fn instantiate(&self, artifact: &Artifact, generation: u64) -> Result<Box<dyn Instance>> {
+    fn module(&self, artifact: &Artifact) -> Result<Module> {
         let cached = self
             .modules
             .lock()
             .map_err(|_| anyhow!("the module cache lock is poisoned"))?
             .get(&artifact.key)
             .cloned();
-        let module = if let Some(module) = cached {
-            module
-        } else {
-            let module = Module::new(&self.engine, &artifact.bytes)
-                .map_err(|error| anyhow!("compiling artifact {}: {error}", artifact.key))?;
-            let mut modules = self
-                .modules
-                .lock()
-                .map_err(|_| anyhow!("the module cache lock is poisoned"))?;
-            modules.insert(artifact.key.clone(), module.clone());
-            module
-        };
+        if let Some(module) = cached {
+            return Ok(module);
+        }
+        let module = Module::new(&self.engine, &artifact.bytes)
+            .map_err(|error| anyhow!("compiling artifact {}: {error}", artifact.key))?;
+        let mut modules = self
+            .modules
+            .lock()
+            .map_err(|_| anyhow!("the module cache lock is poisoned"))?;
+        modules.insert(artifact.key.clone(), module.clone());
+        Ok(module)
+    }
+}
+
+impl Runtime for WasmtimeRuntime {
+    fn instantiate(&self, artifact: &Artifact, generation: u64) -> Result<Box<dyn Instance>> {
+        let module = self.module(artifact)?;
         let mut store = Store::new(&self.engine, ());
         let instance = WasmInstance::new(&mut store, &module, &[]).map_err(|error| {
             anyhow!("instantiating the artifact (does it import anything?): {error}")
@@ -103,10 +115,28 @@ impl Runtime for WasmtimeRuntime {
         let run = instance
             .get_typed_func::<u64, u64>(&mut store, "run")
             .map_err(|error| anyhow!("looking up the `run` export: {error}"))?;
+        let memory = instance.get_memory(&mut store, "memory");
+        let state_version = instance
+            .get_typed_func::<(), i32>(&mut store, "cogwasm_state_version")
+            .ok();
+        let snapshot = instance
+            .get_typed_func::<(i32, i32), i32>(&mut store, "cogwasm_snapshot")
+            .ok();
+        let restore = instance
+            .get_typed_func::<(i32, i32), i32>(&mut store, "cogwasm_restore")
+            .ok();
+        let alloc = instance
+            .get_typed_func::<(i32, i32), i32>(&mut store, "wasm_alloc")
+            .ok();
         Ok(Box::new(WasmtimeInstance {
             store,
             run,
             generation,
+            memory,
+            state_version,
+            snapshot,
+            restore,
+            alloc,
         }))
     }
 }
@@ -115,6 +145,11 @@ struct WasmtimeInstance {
     store: Store<()>,
     run: TypedFunc<u64, u64>,
     generation: u64,
+    memory: Option<Memory>,
+    state_version: Option<VersionFn>,
+    snapshot: Option<SnapshotFn>,
+    restore: Option<RestoreFn>,
+    alloc: Option<AllocFn>,
 }
 
 impl Instance for WasmtimeInstance {
@@ -127,19 +162,112 @@ impl Instance for WasmtimeInstance {
             .call(&mut self.store, input)
             .map_err(|error| anyhow!("calling the `run` export: {error}"))
     }
+
+    fn state_version(&mut self) -> Result<Option<u32>> {
+        let Some(version) = self.state_version.as_ref() else {
+            return Ok(None);
+        };
+        let raw = version
+            .call(&mut self.store, ())
+            .map_err(|error| anyhow!("calling `cogwasm_state_version`: {error}"))?;
+        Ok(Some(u32::try_from(raw).map_err(|_| {
+            anyhow!("cogwasm_state_version returned a negative value ({raw})")
+        })?))
+    }
+
+    fn snapshot(&mut self) -> Result<Option<Vec<u8>>> {
+        let (Some(snapshot), Some(alloc)) = (self.snapshot.as_ref(), self.alloc.as_ref()) else {
+            return Ok(None);
+        };
+        let memory = self
+            .memory
+            .ok_or_else(|| anyhow!("a stateful plugin must export `memory`"))?;
+        let needed = snapshot
+            .call(&mut self.store, (0, 0))
+            .map_err(|error| anyhow!("asking for the state size: {error}"))?;
+        if needed == 0 {
+            return Ok(Some(Vec::new()));
+        }
+        let required = needed
+            .checked_neg()
+            .and_then(|value| u32::try_from(value).ok())
+            .ok_or_else(|| anyhow!("cogwasm_snapshot reported an invalid size ({needed})"))?;
+        let length = i32::try_from(required)
+            .map_err(|_| anyhow!("state is too large for the wasm32 ABI ({required} bytes)"))?;
+        let pointer = alloc
+            .call(&mut self.store, (length, 8))
+            .map_err(|error| anyhow!("allocating the state buffer: {error}"))?;
+        let written = snapshot
+            .call(&mut self.store, (pointer, length))
+            .map_err(|error| anyhow!("writing the state: {error}"))?;
+        if written != length {
+            bail!("cogwasm_snapshot wrote {written} of {length} bytes");
+        }
+        let mut bytes = vec![0u8; required as usize];
+        memory
+            .read(&self.store, pointer_offset(pointer)?, &mut bytes)
+            .map_err(|error| anyhow!("reading the state: {error}"))?;
+        Ok(Some(bytes))
+    }
+
+    fn restore(&mut self, state: &[u8]) -> Result<()> {
+        let (Some(restore), Some(alloc)) = (self.restore.as_ref(), self.alloc.as_ref()) else {
+            bail!("the new plugin does not export the state contract");
+        };
+        let memory = self
+            .memory
+            .ok_or_else(|| anyhow!("a stateful plugin must export `memory`"))?;
+        let length = i32::try_from(state.len()).map_err(|_| {
+            anyhow!(
+                "state is too large for the wasm32 ABI ({} bytes)",
+                state.len()
+            )
+        })?;
+        let pointer = alloc
+            .call(&mut self.store, (length, 8))
+            .map_err(|error| anyhow!("allocating the restore buffer: {error}"))?;
+        memory
+            .write(&mut self.store, pointer_offset(pointer)?, state)
+            .map_err(|error| anyhow!("writing the state: {error}"))?;
+        let status = restore
+            .call(&mut self.store, (pointer, length))
+            .map_err(|error| anyhow!("calling `cogwasm_restore`: {error}"))?;
+        if status != 0 {
+            bail!("cogwasm_restore rejected the state (status {status})");
+        }
+        Ok(())
+    }
+}
+
+fn pointer_offset(pointer: i32) -> Result<usize> {
+    usize::try_from(pointer)
+        .map_err(|_| anyhow!("the plugin returned a negative pointer ({pointer})"))
 }
 
 /// An artifact whose bytes are WAT, for tests that need an instance without a
 /// toolchain.
+///
+/// The key is derived from the bytes, so two different modules never collide
+/// in the runtime's module cache.
 #[must_use]
 pub fn wat_artifact(wat: &str) -> Artifact {
+    use sha2::{Digest, Sha256};
     let bytes = wat.as_bytes().to_vec();
+    let digest = Sha256::digest(&bytes);
+    let key = format!(
+        "wat-{}",
+        digest[..6].iter().fold(String::new(), |mut out, byte| {
+            use std::fmt::Write as _;
+            write!(out, "{byte:02x}").expect("writing to a String cannot fail");
+            out
+        })
+    );
     let length = u64::try_from(bytes.len()).expect("artifact length fits in u64");
     Artifact {
-        key: "wat-test".to_owned(),
+        key: key.clone(),
         meta: ArtifactMeta {
             schema: crate::job::SCHEMA,
-            key: "wat-test".to_owned(),
+            key,
             options: crate::job::CompileOptions::default(),
             compiler: "wat".to_owned(),
             source_sha256: String::new(),

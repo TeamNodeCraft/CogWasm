@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 
 use crate::runtime::{Instance, Runtime};
 use crate::store::Artifact;
@@ -50,6 +50,45 @@ impl Swapper {
             .runtime
             .instantiate(artifact, generation)
             .with_context(|| format!("instantiating artifact {}", artifact.key))?;
+        self.current = Some(next);
+        self.generation = generation;
+        Ok(generation)
+    }
+
+    /// Install `artifact`, carrying the current instance's state into it.
+    ///
+    /// The new instance is created and must accept the state before it becomes
+    /// current; on any failure the old instance keeps serving. A stateless
+    /// instance falls back to a cold restart.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the artifact cannot be instantiated, the state
+    /// ABI version changed, or the new plugin rejects the state.
+    pub fn install_preserving_state(&mut self, artifact: &Artifact) -> Result<u64> {
+        let (version, state) = match self.current.as_mut() {
+            Some(instance) => (instance.state_version()?, instance.snapshot()?),
+            None => (None, None),
+        };
+        let generation = self
+            .generation
+            .checked_add(1)
+            .context("generation counter overflowed")?;
+        let mut next = self
+            .runtime
+            .instantiate(artifact, generation)
+            .with_context(|| format!("instantiating artifact {}", artifact.key))?;
+        if let Some(state) = state {
+            let next_version = next
+                .state_version()?
+                .ok_or_else(|| anyhow!("the new plugin does not export the state contract"))?;
+            if let Some(old) = version
+                && old != next_version
+            {
+                bail!("state ABI version changed from {old} to {next_version}");
+            }
+            next.restore(&state)?;
+        }
         self.current = Some(next);
         self.generation = generation;
         Ok(generation)

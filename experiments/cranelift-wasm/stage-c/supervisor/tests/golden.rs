@@ -269,3 +269,95 @@ fn incremental_without_a_directory_is_rejected() {
     let job = JobSpec::preset(source, Preset::Fast);
     assert!(job.validate().is_err(), "incremental needs a directory");
 }
+
+fn stateful_wat(version: i32) -> String {
+    format!(
+        r#"(module
+  (memory (export "memory") 1)
+  (global $counter (mut i64) (i64.const 0))
+  (func (export "wasm_alloc") (param i32 i32) (result i32) i32.const 64)
+  (func (export "run") (param $x i64) (result i64)
+    global.get $counter
+    local.get $x
+    i64.add
+    global.set $counter
+    global.get $counter)
+  (func (export "cogwasm_state_version") (result i32) i32.const {version})
+  (func (export "cogwasm_snapshot") (param $ptr i32) (param $cap i32) (result i32)
+    local.get $cap
+    i32.const 8
+    i32.lt_u
+    if (result i32)
+      i32.const -8
+    else
+      local.get $ptr
+      global.get $counter
+      i64.store
+      i32.const 8
+    end)
+  (func (export "cogwasm_restore") (param $ptr i32) (param $len i32) (result i32)
+    local.get $len
+    i32.const 8
+    i32.ne
+    if (result i32)
+      i32.const -1
+    else
+      local.get $ptr
+      i64.load
+      global.set $counter
+      i32.const 0
+    end))"#
+    )
+}
+
+#[test]
+fn state_survives_a_swap() {
+    let artifact = wat_artifact(&stateful_wat(1));
+    let runtime = Arc::new(WasmtimeRuntime::new());
+    let mut swapper = Swapper::new(runtime);
+
+    swapper.install(&artifact).unwrap();
+    assert_eq!(swapper.call(5).unwrap(), 5);
+    assert_eq!(swapper.call(7).unwrap(), 12);
+
+    let generation = swapper.install_preserving_state(&artifact).unwrap();
+    assert!(generation > 1);
+    assert_eq!(
+        swapper.call(1).unwrap(),
+        13,
+        "the counter must continue after the swap"
+    );
+}
+
+#[test]
+fn a_state_version_change_rejects_the_swap() {
+    let first = wat_artifact(&stateful_wat(1));
+    let second = wat_artifact(&stateful_wat(2));
+    let runtime = Arc::new(WasmtimeRuntime::new());
+    let mut swapper = Swapper::new(runtime);
+
+    swapper.install(&first).unwrap();
+    swapper.call(5).unwrap();
+    assert!(
+        swapper.install_preserving_state(&second).is_err(),
+        "a changed state ABI version must not be installed"
+    );
+    assert_eq!(
+        swapper.call(1).unwrap(),
+        6,
+        "the old instance must keep serving"
+    );
+}
+
+#[test]
+fn a_stateless_plugin_falls_back_to_a_cold_restart() {
+    let artifact =
+        wat_artifact(r#"(module (func (export "run") (param i64) (result i64) local.get 0))"#);
+    let runtime = Arc::new(WasmtimeRuntime::new());
+    let mut swapper = Swapper::new(runtime);
+
+    swapper.install(&artifact).unwrap();
+    assert_eq!(swapper.call(42).unwrap(), 42);
+    swapper.install_preserving_state(&artifact).unwrap();
+    assert_eq!(swapper.call(7).unwrap(), 7);
+}
