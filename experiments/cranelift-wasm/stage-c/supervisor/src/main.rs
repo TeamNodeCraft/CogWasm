@@ -14,7 +14,7 @@ use clap::{Parser, Subcommand};
 use cogwasm_supervisor::{
     Artifact, ArtifactStore, CompileOptions, FakeCompiler, JobSpec, Measurement, Objective, Preset,
     RealCompiler, RealCompilerConfig, Runtime, Scoreboard, SourceSpec, Supervisor, Swapper,
-    WasmtimeRuntime,
+    WasmtimeRuntime, Workspace,
 };
 use serde::Serialize;
 
@@ -142,6 +142,34 @@ enum Command {
         #[arg(long)]
         probe: bool,
     },
+    /// Build a multi-crate workspace in dependency order.
+    Workspace {
+        #[arg(long)]
+        manifest: PathBuf,
+        #[arg(long)]
+        host: PathBuf,
+        #[arg(long)]
+        rustc: PathBuf,
+        #[arg(long)]
+        precompiled: Option<PathBuf>,
+        #[arg(long)]
+        sysroot: PathBuf,
+        #[arg(long)]
+        linker: PathBuf,
+        #[arg(long)]
+        cache_dir: Option<PathBuf>,
+        #[arg(long)]
+        work: PathBuf,
+        #[arg(long)]
+        store: PathBuf,
+        #[arg(long)]
+        compiler_id: String,
+        /// Spec for every crate.
+        #[arg(long, default_value = "opt")]
+        spec: String,
+        #[arg(long)]
+        json: Option<PathBuf>,
+    },
 }
 
 #[derive(Serialize)]
@@ -167,6 +195,10 @@ struct MatrixReport {
     rows: Vec<MatrixRow>,
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "flat dispatch over the clap subcommands"
+)]
 fn main() -> Result<()> {
     match Cli::parse().command {
         Command::Key { job, compiler } => {
@@ -265,6 +297,32 @@ fn main() -> Result<()> {
                 compiler_id,
             };
             demo(&config, &store, &source, seed, serve_calls, probe)?;
+        }
+        Command::Workspace {
+            manifest,
+            host,
+            rustc,
+            precompiled,
+            sysroot,
+            linker,
+            cache_dir,
+            work,
+            store,
+            compiler_id,
+            spec,
+            json,
+        } => {
+            let config = RealCompilerConfig {
+                host,
+                rustc,
+                sysroot,
+                linker,
+                cache_dir,
+                precompiled,
+                work_root: work.clone(),
+                compiler_id,
+            };
+            build_workspace(&manifest, &spec, &config, &store, &work, json.as_deref())?;
         }
     }
     Ok(())
@@ -500,6 +558,45 @@ fn spawn_opt(
         job.request_id = Some("background-opt".to_owned());
         Ok(supervisor.build(&job)?.artifact().clone())
     })
+}
+
+fn print_workspace(builds: &[cogwasm_supervisor::CrateBuild]) {
+    println!(
+        "{:<18} {:<7} {:<7} {:>9} {:>10}",
+        "crate", "kind", "state", "bytes", "compile_ms"
+    );
+    for build in builds {
+        println!(
+            "{:<18} {:<7} {:<7} {:>9} {:>10}",
+            build.name,
+            build.kind.as_str(),
+            if build.hit { "hit" } else { "built" },
+            build.bytes,
+            build
+                .compile_ms
+                .map_or_else(|| "-".to_owned(), |ms| ms.to_string())
+        );
+    }
+}
+
+fn build_workspace(
+    manifest: &Path,
+    spec: &str,
+    config: &RealCompilerConfig,
+    store: &Path,
+    work_root: &Path,
+    json: Option<&Path>,
+) -> Result<()> {
+    let workspace = Workspace::from_json(manifest)?;
+    let options = CompileOptions::from_spec(spec).map_err(anyhow::Error::msg)?;
+    let supervisor = Supervisor::new(ArtifactStore::new(store), RealCompiler::new(config.clone()));
+    let builds = workspace.build(&supervisor, &options, work_root)?;
+    print_workspace(&builds);
+    if let Some(path) = json {
+        let encoded = serde_json::to_vec_pretty(&builds).context("serialising the workspace")?;
+        std::fs::write(path, encoded).with_context(|| format!("writing {}", path.display()))?;
+    }
+    Ok(())
 }
 
 fn toggle_probe(source: &Path) -> Result<()> {

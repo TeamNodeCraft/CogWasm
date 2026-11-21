@@ -269,6 +269,8 @@ pub fn wat_artifact(wat: &str) -> Artifact {
             schema: crate::job::SCHEMA,
             key,
             options: crate::job::CompileOptions::default(),
+            kind: crate::job::CrateKind::Cdylib,
+            crate_name: "wat-test".to_owned(),
             compiler: "wat".to_owned(),
             source_sha256: String::new(),
             source_path: String::new(),

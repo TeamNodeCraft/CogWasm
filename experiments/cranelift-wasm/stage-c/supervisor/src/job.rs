@@ -334,6 +334,35 @@ impl FromStr for Preset {
     }
 }
 
+/// What the crate produces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum CrateKind {
+    /// A linked plugin, the thing the supervisor swaps in.
+    #[default]
+    Cdylib,
+    /// A library consumed as `--extern` by another crate.
+    Rlib,
+}
+
+impl CrateKind {
+    /// The value rustc expects after `--crate-type`.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Cdylib => "cdylib",
+            Self::Rlib => "rlib",
+        }
+    }
+}
+
+/// One `--extern name=path` input.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExternSpec {
+    pub name: String,
+    pub path: PathBuf,
+}
+
 /// The source unit to compile.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SourceSpec {
@@ -382,7 +411,11 @@ pub struct JobSpec {
     pub schema: u32,
     pub source: SourceSpec,
     pub target: String,
+    pub kind: CrateKind,
     pub options: CompileOptions,
+    /// `--extern` libraries this crate links against.
+    #[serde(default)]
+    pub externs: Vec<ExternSpec>,
     #[serde(default)]
     pub budgets: Budgets,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -402,7 +435,9 @@ impl JobSpec {
             schema: SCHEMA,
             source,
             target: "wasm32-unknown-unknown".to_owned(),
+            kind: CrateKind::Cdylib,
             options,
+            externs: Vec::new(),
             budgets: Budgets::default(),
             incremental_dir: None,
             emit: vec![Emit::Wasm],
@@ -442,6 +477,15 @@ impl JobSpec {
         self.options.validate()?;
         if self.options.incremental && self.incremental_dir.is_none() {
             bail!("incremental option needs an incremental directory");
+        }
+        let mut names = std::collections::BTreeSet::new();
+        for extern_spec in &self.externs {
+            if extern_spec.name.is_empty() {
+                bail!("an --extern name is empty");
+            }
+            if !names.insert(extern_spec.name.as_str()) {
+                bail!("duplicate --extern name {:?}", extern_spec.name);
+            }
         }
         Ok(())
     }

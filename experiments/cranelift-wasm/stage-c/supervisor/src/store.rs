@@ -14,7 +14,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::compiler::CompileOutput;
-use crate::job::{CompileOptions, Emit, JobSpec};
+use crate::job::{CompileOptions, CrateKind, Emit, JobSpec};
 
 /// Metadata stored beside every artifact.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -22,6 +22,10 @@ pub struct ArtifactMeta {
     pub schema: u32,
     pub key: String,
     pub options: CompileOptions,
+    #[serde(default)]
+    pub kind: CrateKind,
+    #[serde(default)]
+    pub crate_name: String,
     pub compiler: String,
     pub source_sha256: String,
     pub source_path: String,
@@ -66,7 +70,15 @@ impl ArtifactStore {
     /// Returns an error when the source file cannot be read.
     pub fn key_for(job: &JobSpec, compiler: &str) -> Result<String> {
         let source = source_sha256(&job.source.path)?;
-        let material = KeyMaterial::new(job, compiler, &source);
+        let externs = job
+            .externs
+            .iter()
+            .map(|item| {
+                let digest = source_sha256(&item.path)?;
+                Ok((item.name.clone(), digest))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let material = KeyMaterial::new(job, compiler, &source, externs);
         let encoded = serde_json::to_vec(&material).context("serialising the cache key")?;
         Ok(hex(&Sha256::digest(encoded)))
     }
@@ -90,6 +102,8 @@ impl ArtifactStore {
             schema: job.schema,
             key: key.clone(),
             options: job.options.clone(),
+            kind: job.kind,
+            crate_name: job.source.crate_name.clone(),
             compiler: compiler.to_owned(),
             source_sha256,
             source_path: job.source.path.display().to_string(),
@@ -118,7 +132,7 @@ impl ArtifactStore {
             .with_context(|| format!("reading metadata for {key}"))?;
         let meta: ArtifactMeta =
             serde_json::from_slice(&meta_bytes).context("parsing artifact metadata")?;
-        let bytes = fs::read(dir.join("artifact.wasm"))
+        let bytes = fs::read(dir.join(meta.file_name()))
             .with_context(|| format!("reading artifact {key}"))?;
         let length = u64::try_from(bytes.len()).context("artifact length")?;
         if meta.bytes != length {
@@ -141,11 +155,11 @@ impl ArtifactStore {
     /// Returns an error when the directory or files cannot be written.
     pub fn put(&self, artifact: &Artifact) -> Result<()> {
         let dir = self.root.join(&artifact.key);
-        if dir.join("artifact.wasm").is_file() {
+        if dir.join(artifact.meta.file_name()).is_file() {
             return Ok(());
         }
         fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
-        fs::write(dir.join("artifact.wasm"), &artifact.bytes)
+        fs::write(dir.join(artifact.meta.file_name()), &artifact.bytes)
             .with_context(|| format!("writing artifact {}", artifact.key))?;
         let meta = serde_json::to_vec_pretty(&artifact.meta).context("serialising metadata")?;
         fs::write(dir.join("meta.json"), meta)
@@ -170,22 +184,45 @@ struct KeyMaterial<'a> {
     schema: u32,
     compiler: &'a str,
     target: &'a str,
+    kind: CrateKind,
+    crate_name: &'a str,
     options: &'a CompileOptions,
+    externs: Vec<(String, String)>,
     source_path: String,
     source_sha256: &'a str,
     emit: &'a [Emit],
 }
 
 impl<'a> KeyMaterial<'a> {
-    fn new(job: &'a JobSpec, compiler: &'a str, source_sha256: &'a str) -> Self {
+    fn new(
+        job: &'a JobSpec,
+        compiler: &'a str,
+        source_sha256: &'a str,
+        externs: Vec<(String, String)>,
+    ) -> Self {
         Self {
             schema: job.schema,
             compiler,
             target: &job.target,
+            kind: job.kind,
+            crate_name: &job.source.crate_name,
             options: &job.options,
+            externs,
             source_path: job.source.path.display().to_string(),
             source_sha256,
             emit: &job.emit,
+        }
+    }
+}
+
+impl ArtifactMeta {
+    /// The file name of the artifact inside its key directory. rustc finds an
+    /// `--extern` rlib by name, so rlibs must be `lib<crate>.rlib`.
+    #[must_use]
+    pub fn file_name(&self) -> String {
+        match self.kind {
+            CrateKind::Cdylib => "artifact.wasm".to_owned(),
+            CrateKind::Rlib => format!("lib{}.rlib", self.crate_name),
         }
     }
 }

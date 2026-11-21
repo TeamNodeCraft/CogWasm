@@ -82,17 +82,24 @@ impl Compiler for RealCompiler {
             .arg(&self.config.sysroot)
             .arg("--edition")
             .arg(&job.source.edition)
+            .arg("--crate-name")
+            .arg(&job.source.crate_name)
             .arg("--crate-type")
-            .arg("cdylib")
+            .arg(job.kind.as_str())
             .arg("-C")
             .arg("panic=abort")
             .arg("-Zcodegen-backend=cranelift")
             .arg(format!("-Clinker={}", self.config.linker.display()))
             .arg("-Clinker-flavor=wasm-ld")
-            .args(job.compiler_flags())
-            .arg(&job.source.path)
-            .arg("-o")
-            .arg(&out);
+            .args(job.compiler_flags());
+        for extern_spec in &job.externs {
+            command.arg("--extern").arg(format!(
+                "{}={}",
+                extern_spec.name,
+                extern_spec.path.display()
+            ));
+        }
+        command.arg(&job.source.path).arg("-o").arg(&out);
 
         let started = Instant::now();
         let result = command.output().map_err(|error| {

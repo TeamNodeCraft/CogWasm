@@ -26,10 +26,12 @@ pub mod store;
 pub mod supervisor;
 pub mod swap;
 pub mod wasmtime_runtime;
+pub mod workspace;
 
 pub use compiler::{CompileError, CompileOutput, Compiler, FakeCompiler};
 pub use job::{
-    Budgets, CompileOptions, Emit, JobSpec, OptLevel, Preset, SCHEMA, SourceSpec, Strip,
+    Budgets, CompileOptions, CrateKind, Emit, ExternSpec, JobSpec, OptLevel, Preset, SCHEMA,
+    SourceSpec, Strip,
 };
 pub use real::{RealCompiler, RealCompilerConfig};
 pub use runtime::{FakeRuntime, Instance, Runtime};
@@ -38,3 +40,4 @@ pub use store::{Artifact, ArtifactMeta, ArtifactStore};
 pub use supervisor::{Begin, BuildOutcome, BuildTicket, Supervisor};
 pub use swap::Swapper;
 pub use wasmtime_runtime::{WasmtimeRuntime, wat_artifact};
+pub use workspace::{CrateBuild, CrateDef, Workspace};

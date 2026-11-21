@@ -1,6 +1,6 @@
 # Compile-level supervisor: plan
 
-Status: **M1–M5b done**. This is the host-side scheduler for Goal 1's
+Status: **M1–M5b and M5 done**. This is the host-side scheduler for Goal 1's
 tier 2 and Goal 2's resident compiler service. It keeps the compiler a pure
 function of (source, options) and puts the option policy, caching and swapping
 in the host, where they can be tested.
@@ -203,11 +203,12 @@ Reading:
 - **All three tiers return identical `run(seed)` values and output lengths**
   for every program (checked with `bench-host run` on the stored artifacts).
 
-M1–M4 and M5b are accepted: twenty-three tests pass in CI (sixteen golden,
-seven selector), the matrix above is the M2 evidence, the swap table is the
-M3 evidence, the state tests are the M4 evidence, and the selection table
-above is the M5b evidence. Next is the crate-level cache and multi-crate
-workspace (M5).
+M1–M5b and M5 are accepted: twenty-eight tests pass in CI (sixteen golden,
+seven selector, five workspace), the matrix above is the M2 evidence, the swap
+table is the M3 evidence, the state tests are the M4 evidence, the selection
+table is the M5b evidence, and the workspace table is the M5 evidence. What
+remains is M6, the compiler-side per-CGU boundary, which is research gated on
+rustc exposing a reusable unit.
 
 ## M3: the swap
 
@@ -269,6 +270,48 @@ Not covered yet: in-flight host calls (a swap is still quiescent by
 construction), threads inside plugins, host imports, and allocator internals
 beyond what the plugin puts in its own snapshot. Those belong to the service,
 not the supervisor.
+
+## Workspaces (M5)
+
+A workspace manifest is a JSON list of crates:
+
+```json
+{"crates": [
+  {"name": "math_lib", "source": "/tmp/ws/math_lib.rs", "deps": []},
+  {"name": "app",      "source": "/tmp/ws/app.rs",      "deps": ["math_lib"]}
+]}
+```
+
+`workspace --manifest ... --spec opt` topologically sorts the crates and
+builds each as its own [`JobSpec`]: a crate that others depend on becomes an
+`rlib`, the roots become `cdylib` plugins. The job carries `--extern` inputs,
+and the cache key covers the **content hash of every extern**, so a changed
+rlib invalidates its dependents while an unchanged one stays cached.
+
+Real experiment, two crates, `opt` spec:
+
+| event | math_lib (rlib) | app (cdylib) |
+| --- | --- | --- |
+| cold | built, 2,494 B, 55 ms | built, 495 B, 77 ms |
+| unchanged | hit | hit |
+| edit math_lib | built | built (its extern hash changed) |
+| edit app | hit | built |
+| unchanged | hit | hit |
+
+The linked app runs correctly (`run(21) = 42`), and the app's key changes when
+the rlib changes even though the app source did not.
+
+Two constraints found by doing it:
+
+- **rustc finds an `--extern` rlib by name**, so the store names rlib files
+  `lib<crate>.rlib`, not `artifact.rlib`; the first real run failed with
+  "can't find crate" until that was fixed.
+- **cg_clif rlibs contain metadata; the object is resolved at link time.**
+  The archive is small (2.5 KB) and Wild links the final cdylib; this works,
+  but it means the rlib cache entry is not a reusable object file.
+
+This is a scheduler, not cargo: no build scripts, proc macros, feature
+resolution or version constraints. Those belong to the host above it.
 
 ## Empirical selection (M5b)
 
