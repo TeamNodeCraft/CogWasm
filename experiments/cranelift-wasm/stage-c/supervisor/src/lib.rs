@@ -3,7 +3,7 @@
 //! The compiler stays a pure function of (source, options); this crate owns the
 //! parts that are policy rather than compilation:
 //!
-//! - the tier map ([`Tier`]) from a requested output to compiler flags;
+//! - the option space ([`CompileOptions`]) and its named presets ([`Preset`]);
 //! - a content-addressed artifact store ([`ArtifactStore`]);
 //! - the scheduler seam that drops a build when a newer request supersedes it
 //!   ([`Supervisor`]);
@@ -27,7 +27,9 @@ pub mod swap;
 pub mod wasmtime_runtime;
 
 pub use compiler::{CompileError, CompileOutput, Compiler, FakeCompiler};
-pub use job::{Budgets, Emit, JobSpec, SCHEMA, SourceSpec, Tier};
+pub use job::{
+    Budgets, CompileOptions, Emit, JobSpec, OptLevel, Preset, SCHEMA, SourceSpec, Strip,
+};
 pub use real::{RealCompiler, RealCompilerConfig};
 pub use runtime::{FakeRuntime, Instance, Runtime};
 pub use store::{Artifact, ArtifactMeta, ArtifactStore};

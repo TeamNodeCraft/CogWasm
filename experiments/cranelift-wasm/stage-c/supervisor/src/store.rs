@@ -1,7 +1,7 @@
 //! Content-addressed artifact store.
 //!
 //! A key covers every input that can change the bytes: contract schema,
-//! compiler identity, target, tier, flags, the source path and the source
+//! compiler identity, target, the option spec, the source path and the source
 //! content. The path is deliberately part of the key: rustc object files embed
 //! the source path, so two checkouts of identical sources do not produce
 //! identical artifacts.
@@ -14,14 +14,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::compiler::CompileOutput;
-use crate::job::{Emit, JobSpec, Tier};
+use crate::job::{CompileOptions, Emit, JobSpec};
 
 /// Metadata stored beside every artifact.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArtifactMeta {
     pub schema: u32,
     pub key: String,
-    pub tier: Tier,
+    pub options: CompileOptions,
     pub compiler: String,
     pub source_sha256: String,
     pub source_path: String,
@@ -36,7 +36,6 @@ pub struct ArtifactMeta {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Artifact {
     pub key: String,
-    pub tier: Tier,
     pub bytes: Vec<u8>,
     pub meta: ArtifactMeta,
 }
@@ -90,7 +89,7 @@ impl ArtifactStore {
         let meta = ArtifactMeta {
             schema: job.schema,
             key: key.clone(),
-            tier: job.tier,
+            options: job.options.clone(),
             compiler: compiler.to_owned(),
             source_sha256,
             source_path: job.source.path.display().to_string(),
@@ -100,7 +99,6 @@ impl ArtifactStore {
         };
         Ok(Artifact {
             key,
-            tier: job.tier,
             bytes: output.bytes.clone(),
             meta,
         })
@@ -131,7 +129,6 @@ impl ArtifactStore {
         }
         Ok(Some(Artifact {
             key: meta.key.clone(),
-            tier: meta.tier,
             bytes,
             meta,
         }))
@@ -173,8 +170,7 @@ struct KeyMaterial<'a> {
     schema: u32,
     compiler: &'a str,
     target: &'a str,
-    tier: Tier,
-    flags: Vec<String>,
+    options: &'a CompileOptions,
     source_path: String,
     source_sha256: &'a str,
     emit: &'a [Emit],
@@ -186,8 +182,7 @@ impl<'a> KeyMaterial<'a> {
             schema: job.schema,
             compiler,
             target: &job.target,
-            tier: job.tier,
-            flags: job.compiler_flags(),
+            options: &job.options,
             source_path: job.source.path.display().to_string(),
             source_sha256,
             emit: &job.emit,

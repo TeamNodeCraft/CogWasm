@@ -44,7 +44,7 @@ impl BuildOutcome {
 #[derive(Debug)]
 pub enum Begin {
     /// No compile needed.
-    Cached(Artifact),
+    Cached(Box<Artifact>),
     /// A compile is needed; hand the ticket back to [`Supervisor::finish`].
     Build(BuildTicket),
 }
@@ -107,7 +107,7 @@ impl<C: Compiler> Supervisor<C> {
         job.validate()?;
         let key = ArtifactStore::key_for(job, self.compiler.id())?;
         if let Some(artifact) = self.store.get(&key)? {
-            return Ok(Begin::Cached(artifact));
+            return Ok(Begin::Cached(Box::new(artifact)));
         }
         let mut latest = self
             .latest
@@ -154,7 +154,7 @@ impl<C: Compiler> Supervisor<C> {
     /// the compiler fails, or a concurrent request supersedes this build.
     pub fn build(&self, job: &JobSpec) -> Result<BuildOutcome> {
         match self.begin(job)? {
-            Begin::Cached(artifact) => Ok(BuildOutcome::Hit(artifact)),
+            Begin::Cached(artifact) => Ok(BuildOutcome::Hit(*artifact)),
             Begin::Build(ticket) => {
                 let output = self
                     .compiler

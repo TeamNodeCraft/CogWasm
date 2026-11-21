@@ -8,7 +8,7 @@ use std::fmt;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
-use crate::job::{JobSpec, Tier};
+use crate::job::{CompileOptions, JobSpec};
 
 /// Why a build did not produce an artifact.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -107,7 +107,7 @@ pub struct FakeCompiler {
     id: String,
     invocations: AtomicUsize,
     gate: Option<Arc<Gate>>,
-    reject_tier: Option<Tier>,
+    reject: Option<CompileOptions>,
 }
 
 impl FakeCompiler {
@@ -125,7 +125,7 @@ impl FakeCompiler {
             id: id.into(),
             invocations: AtomicUsize::new(0),
             gate: None,
-            reject_tier: None,
+            reject: None,
         }
     }
 
@@ -136,10 +136,11 @@ impl FakeCompiler {
         self
     }
 
-    /// Reject every build for `tier`, as a broken optimising tier would.
+    /// Reject every build whose spec equals `options`, as a broken
+    /// combination would.
     #[must_use]
-    pub fn rejecting(mut self, tier: Tier) -> Self {
-        self.reject_tier = Some(tier);
+    pub fn rejecting(mut self, options: CompileOptions) -> Self {
+        self.reject = Some(options);
         self
     }
 
@@ -166,16 +167,15 @@ impl Compiler for FakeCompiler {
         if let Some(gate) = &self.gate {
             gate.wait();
         }
-        if self.reject_tier == Some(job.tier) {
-            return Err(CompileError::Rejected(format!(
-                "the {} tier is broken in this fake",
-                job.tier.as_str()
-            )));
+        if self.reject.as_ref() == Some(&job.options) {
+            return Err(CompileError::Rejected(
+                "this option combination is broken in the fake".to_owned(),
+            ));
         }
         Ok(CompileOutput::new(
             format!(
-                "fake artifact\nkey: {key}\ntier: {}\nsource: {}\n",
-                job.tier.as_str(),
+                "fake artifact\nkey: {key}\nspec: {:?}\nsource: {}\n",
+                job.options,
                 job.source.path.display()
             )
             .into_bytes(),

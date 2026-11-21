@@ -1,17 +1,17 @@
-# Tier 2 supervisor: plan
+# Compile-level supervisor: plan
 
 Status: **M1–M3 done**. This is the host-side scheduler for Goal 1's
 tier 2 and Goal 2's resident compiler service. It keeps the compiler a pure
-function of (source, options) and puts tiering, caching and swapping in the
-host, where they can be tested.
+function of (source, options) and puts the option policy, caching and swapping
+in the host, where they can be tested.
 
 ## The decision
 
 Build a **thin supervisor**, not a graph compiler.
 
 - The compiler (rustc.wasm + clif-to-wasm + Wild) stays a pure function and
-  gains no knowledge of tiers or swapping.
-- A host-side supervisor owns the tier policy, the artifact cache, the
+  gains no knowledge of the option space or swapping.
+- A host-side supervisor owns the option policy, the artifact cache, the
   background build and the swap.
 - The swap is always **instance-level at a quiescent point**. WebAssembly has
   no way to replace a function in a live instance, and the engine call stack
@@ -76,19 +76,46 @@ Components:
 - **`Swapper`**: quiesce, generation counter, instantiate, optional
   `snapshot`/`restore`.
 
-## Tiers
+## Options and presets
 
-| tier | flags | purpose |
+A request is a whitelisted [`CompileOptions`](../stage-c/supervisor/src/job.rs)
+spec, not a tier: `opt_level`, `mir_opt_level`, `inline_wasm` (and threshold),
+`incremental`, `strip`, `codegen_units`, `debug`. Every field is validated, the
+cache key covers the whole spec, and the artifact records it, so any
+combination is reproducible and explainable. An app may request combinations
+the supervisor has never seen.
+
+`fast`, `opt` and `release` remain as named presets:
+
+| preset | spec | purpose |
 | --- | --- | --- |
-| T0 fast | opt-level 2 + `-Cincremental=<dir>` | edit loop; 1.3–2.2× faster than T1 after a one-line edit |
-| T1 optimised | opt-level 2 + `-Zmir-inline-wasm` | background build; `strings` −41.8% |
-| T2 small | opt-level 2 + `-Zmir-inline-wasm` + `-Cstrip=symbols` | distribution only; never a runtime tier |
+| `fast` | opt-level 2, incremental, no inliner | edit loop; 1.3–2.2× faster to rebuild |
+| `opt` | opt-level 2, inliner | background build; `strings` −41.8% |
+| `release` | `opt` + `strip=symbols` | distribution; never a runtime tier |
 
-`-Copt-level=s` alone was *larger* than opt-level 2 in the M2 matrix, so T2
-uses the optimising flags plus a symbol strip instead.
+Why two runtime tiers and a strip option, measured on the stored artifacts:
 
-Exact flags are set from the job spec; only the supervisor knows the tier
-names.
+| program | fast | opt | release | opt/fast |
+| --- | ---: | ---: | ---: | ---: |
+| `nbody` | 158.4 ms | 70.4 ms | 68.8 ms | **0.445** |
+| `strings` | 1.492 ms | 0.763 ms | 0.744 ms | **0.512** |
+| `collections` | 0.0615 ms | 0.0543 ms | 0.0514 ms | 0.882 |
+| `generated_stress` | 0.0614 ms | 0.0590 ms | 0.0588 ms | 0.962 |
+
+- **`opt` is not optional**: incremental code is 2.0–2.2× slower on the two
+  programs that matter most, because it gives up the inliner.
+- **`release` is not a third optimisation round**: it is `opt` plus a symbol
+  strip — same compile time, same execution, 26–42% smaller. It is a
+  packaging flag on the spec, not a runtime tier.
+
+The supervisor stores and compares the full spec; the presets are only
+conveniences. The CLI accepts either: `--spec fast` or
+`--spec "opt-level=3,mir-opt-level=3,inline=yes,strip=symbols,codegen-units=4"`.
+
+An empirical selector is the next layer, not part of the core: the host
+records `(spec, compile_ms, exec_ms, size)` per program and picks the best spec
+with enough samples and hysteresis. The compiler and the swap machinery do not
+change for it.
 
 ## Contract
 
@@ -134,11 +161,12 @@ Rules:
 
 | milestone | deliverable | accepted when |
 | --- | --- | --- |
-| M1 | contract note + `supervisor` crate with `JobSpec`, `ArtifactStore`, `Fake`, golden tests | tests pass without a toolchain: cache hit, edit rebuild, tier switch, invalidation, failure fallback, swap ordering |
-| M2 | `Real` backend driving the existing host; tier matrix on `generated_stress` + three suite programs | compile/size/exec published per tier; results identical across tiers |
+| M1 | contract note + `supervisor` crate with `JobSpec`, `ArtifactStore`, `Fake`, golden tests | tests pass without a toolchain: cache hit, edit rebuild, spec switch, invalidation, failure fallback, swap ordering |
+| M2 | `Real` backend driving the existing host; spec matrix on `generated_stress` + three suite programs | compile/size/exec published per spec; results identical across specs |
 | M3 | cold-restart swap demo | edit→T0 and edit→T1-applied latencies, swap cost, published |
 | M4 | state ABI + swap of a stateful plugin | state survives the swap; ABI version mismatch rejects |
 | M5 | crate-level cache and multi-crate workspace; remote cache | unchanged crates never rebuild; CI cache hit rate published |
+| M5b | composable option specs and an empirical selector | any whitelisted spec is requestable; the selector picks with enough samples and hysteresis |
 | M6 | research: per-CGU artifact boundary in rustc | gated on a compiler change; evidence: 92.7% of object bytes are reusable |
 
 ## M2 matrix
@@ -175,9 +203,10 @@ Reading:
 - **All three tiers return identical `run(seed)` values and output lengths**
   for every program (checked with `bench-host run` on the stored artifacts).
 
-M1, M2 and M3 are accepted: the nine golden tests pass in CI, the matrix above
-is the M2 evidence, and the swap table above is the M3 evidence. M4 (the
-state ABI for stateful plugins) is next.
+M1, M2 and M3 are accepted: the thirteen golden tests pass in CI, the matrix
+above is the M2 evidence, and the swap table above is the M3 evidence. The
+composable-spec refactor has landed (M5b's first half). M4 (the state ABI for
+stateful plugins) is next, then the selector.
 
 ## M3: the swap
 

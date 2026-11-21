@@ -1,79 +1,309 @@
-//! The compile request and the tier policy.
+//! The compile request and the option space.
 //!
 //! A [`JobSpec`] is the host-to-supervisor contract; it is versioned by
 //! [`SCHEMA`] and serialisable so it can be logged, cached and replayed.
-//! [`Tier`] is the only place that knows which flags a tier means: the compiler
-//! never sees a tier name.
+//!
+//! [`CompileOptions`] is the request itself: a whitelisted set of knobs the
+//! supervisor can vary. [`Preset`] names the three combinations that matter in
+//! practice (`fast`, `opt`, `release`), but they are aliases for a spec, not
+//! the only values. The compiler never sees an option name; it sees flags.
 
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::str::FromStr;
 
 /// Contract version. Bumping it invalidates every cache key, deliberately.
-pub const SCHEMA: u32 = 1;
+pub const SCHEMA: u32 = 2;
 
-/// Which output the caller asked for.
-///
-/// `Fast` is the edit loop (rustc's incremental mode), `Opt` is the background
-/// optimising build, and `Small` is a distribution artifact that is never
-/// swapped into a running tier.
+/// `-Copt-level`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum Tier {
-    Fast,
-    Opt,
-    Small,
+pub enum OptLevel {
+    O0,
+    O1,
+    O2,
+    O3,
+    S,
+    Z,
 }
 
-impl Tier {
-    /// The stable name used in keys, logs and the CLI.
+impl OptLevel {
+    /// The value rustc expects after `-Copt-level=`.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::O0 => "0",
+            Self::O1 => "1",
+            Self::O2 => "2",
+            Self::O3 => "3",
+            Self::S => "s",
+            Self::Z => "z",
+        }
+    }
+}
+
+impl FromStr for OptLevel {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "0" => Ok(Self::O0),
+            "1" => Ok(Self::O1),
+            "2" => Ok(Self::O2),
+            "3" => Ok(Self::O3),
+            "s" => Ok(Self::S),
+            "z" => Ok(Self::Z),
+            other => Err(format!("unknown opt-level {other:?} (0, 1, 2, 3, s or z)")),
+        }
+    }
+}
+
+/// `-Cstrip`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Strip {
+    None,
+    Debuginfo,
+    Symbols,
+}
+
+impl Strip {
+    /// The value rustc expects after `-Cstrip=`, or `None` for no flag.
+    #[must_use]
+    pub fn as_str(self) -> Option<&'static str> {
+        match self {
+            Self::None => None,
+            Self::Debuginfo => Some("debuginfo"),
+            Self::Symbols => Some("symbols"),
+        }
+    }
+}
+
+impl FromStr for Strip {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "none" => Ok(Self::None),
+            "debuginfo" => Ok(Self::Debuginfo),
+            "symbols" => Ok(Self::Symbols),
+            other => Err(format!(
+                "unknown strip {other:?} (none, debuginfo or symbols)"
+            )),
+        }
+    }
+}
+
+/// The knobs a request may vary. Every field is checked before it reaches the
+/// compiler, so an app can choose combinations but never arbitrary flags.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompileOptions {
+    pub opt_level: OptLevel,
+    pub mir_opt_level: u8,
+    /// The loop-aware MIR inliner from step 5b.
+    #[serde(default)]
+    pub inline_wasm: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inline_threshold: Option<usize>,
+    /// rustc's incremental mode; the job must name a directory.
+    #[serde(default)]
+    pub incremental: bool,
+    pub strip: Strip,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codegen_units: Option<u32>,
+    /// Emit debug info (cannot be combined with a strip).
+    #[serde(default)]
+    pub debug: bool,
+}
+
+impl Default for CompileOptions {
+    fn default() -> Self {
+        Self {
+            opt_level: OptLevel::O2,
+            mir_opt_level: 2,
+            inline_wasm: false,
+            inline_threshold: None,
+            incremental: false,
+            strip: Strip::None,
+            codegen_units: None,
+            debug: false,
+        }
+    }
+}
+
+impl CompileOptions {
+    /// Reject combinations that cannot mean anything.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for a MIR level above 3, debug info combined with a
+    /// strip, or an inliner threshold without the inliner.
+    pub fn validate(&self) -> Result<()> {
+        if self.mir_opt_level > 3 {
+            bail!("mir-opt-level must be 0..=3, got {}", self.mir_opt_level);
+        }
+        if self.debug && self.strip != Strip::None {
+            bail!(
+                "debug info cannot be combined with strip={}",
+                strip_name(self.strip)
+            );
+        }
+        if self.inline_threshold.is_some() && !self.inline_wasm {
+            bail!("inline-threshold requires inline-wasm");
+        }
+        Ok(())
+    }
+
+    /// The rustc flags this spec means.
+    #[must_use]
+    pub fn flags(&self, incremental_dir: Option<&PathBuf>) -> Vec<String> {
+        let mut flags = vec![
+            format!("-Copt-level={}", self.opt_level.as_str()),
+            format!("-Zmir-opt-level={}", self.mir_opt_level),
+        ];
+        if self.inline_wasm {
+            flags.push("-Zmir-inline-wasm".to_owned());
+            if let Some(threshold) = self.inline_threshold {
+                flags.push(format!("-Zmir-inline-wasm-threshold={threshold}"));
+            }
+        }
+        if self.incremental
+            && let Some(dir) = incremental_dir
+        {
+            flags.push(format!("-Cincremental={}", dir.display()));
+        }
+        if let Some(strip) = self.strip.as_str() {
+            flags.push(format!("-Cstrip={strip}"));
+        }
+        if let Some(units) = self.codegen_units {
+            flags.push(format!("-Ccodegen-units={units}"));
+        }
+        if self.debug {
+            flags.push("-Cdebuginfo=2".to_owned());
+        }
+        flags
+    }
+
+    /// Parse `"fast"`, `"opt"`, `"release"` or a comma-separated option list
+    /// such as `"opt-level=2,inline=yes,strip=symbols"`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message naming the first unknown key or value.
+    pub fn from_spec(text: &str) -> Result<Self, String> {
+        if let Ok(preset) = Preset::from_str(text) {
+            return Ok(preset.options());
+        }
+        let mut options = Self::default();
+        for part in text.split(',') {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
+            }
+            let (key, value) = part
+                .split_once('=')
+                .ok_or_else(|| format!("expected key=value, got {part:?}"))?;
+            match key {
+                "opt-level" => options.opt_level = OptLevel::from_str(value)?,
+                "mir-opt-level" => {
+                    options.mir_opt_level = value
+                        .parse()
+                        .map_err(|_| format!("mir-opt-level must be 0..=3, got {value:?}"))?;
+                }
+                "inline" => options.inline_wasm = parse_bool(value)?,
+                "inline-threshold" => {
+                    options.inline_threshold = Some(value.parse().map_err(|_| {
+                        format!("inline-threshold must be a number, got {value:?}")
+                    })?);
+                }
+                "incremental" => options.incremental = parse_bool(value)?,
+                "strip" => options.strip = Strip::from_str(value)?,
+                "codegen-units" => {
+                    options.codegen_units =
+                        Some(value.parse().map_err(|_| {
+                            format!("codegen-units must be a number, got {value:?}")
+                        })?);
+                }
+                "debug" => options.debug = parse_bool(value)?,
+                other => return Err(format!("unknown option {other:?}")),
+            }
+        }
+        options.validate().map_err(|error| error.to_string())?;
+        Ok(options)
+    }
+}
+
+fn parse_bool(value: &str) -> Result<bool, String> {
+    match value {
+        "yes" | "true" | "1" => Ok(true),
+        "no" | "false" | "0" => Ok(false),
+        other => Err(format!("expected yes/no, got {other:?}")),
+    }
+}
+
+fn strip_name(strip: Strip) -> &'static str {
+    match strip {
+        Strip::None => "none",
+        Strip::Debuginfo => "debuginfo",
+        Strip::Symbols => "symbols",
+    }
+}
+
+/// Named points in the option space. They are conveniences: the supervisor
+/// still stores and compares the full [`CompileOptions`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Preset {
+    /// Edit loop: incremental, no inliner.
+    Fast,
+    /// Background optimising build.
+    Opt,
+    /// Distribution: optimised and symbol-stripped.
+    Release,
+}
+
+impl Preset {
+    /// The spec this preset expands to.
+    #[must_use]
+    pub fn options(self) -> CompileOptions {
+        match self {
+            Self::Fast => CompileOptions {
+                incremental: true,
+                ..CompileOptions::default()
+            },
+            Self::Opt => CompileOptions {
+                inline_wasm: true,
+                ..CompileOptions::default()
+            },
+            Self::Release => CompileOptions {
+                inline_wasm: true,
+                strip: Strip::Symbols,
+                ..CompileOptions::default()
+            },
+        }
+    }
+
+    /// The preset name as written on the command line.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Fast => "fast",
             Self::Opt => "opt",
-            Self::Small => "small",
-        }
-    }
-
-    /// Compiler flags this tier means. The mapping lives here, in the host,
-    /// and never inside the compiler.
-    #[must_use]
-    pub fn flags(self) -> Vec<String> {
-        match self {
-            // The measured fast tier: incremental is about 3x faster to build
-            // than the full optimising build on the benchmark suite. The
-            // incremental directory comes from the job, so the flag is added
-            // by `compiler_flags` rather than here.
-            Self::Fast => vec!["-Copt-level=2".to_owned()],
-            // The measured optimising tier: opt-level 2 plus the loop-aware
-            // MIR inliner from step 5b.
-            Self::Opt => vec!["-Copt-level=2".to_owned(), "-Zmir-inline-wasm".to_owned()],
-            // Distribution only: never swapped into a running tier.
-            // Distribution: the optimising flags plus a symbol strip, which is
-            // the lever that actually shrinks the wasm (`-Copt-level=s` alone
-            // was larger than opt-level 2 in the M2 matrix). Never swapped
-            // into a running tier.
-            Self::Small => vec![
-                "-Copt-level=2".to_owned(),
-                "-Zmir-inline-wasm".to_owned(),
-                "-Cstrip=symbols".to_owned(),
-            ],
+            Self::Release => "release",
         }
     }
 }
 
-impl std::str::FromStr for Tier {
+impl FromStr for Preset {
     type Err = String;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             "fast" => Ok(Self::Fast),
             "opt" => Ok(Self::Opt),
-            "small" => Ok(Self::Small),
-            other => Err(format!(
-                "unknown tier {other:?} (expected fast, opt or small)"
-            )),
+            "release" => Ok(Self::Release),
+            other => Err(format!("unknown preset {other:?}")),
         }
     }
 }
@@ -126,7 +356,7 @@ pub struct JobSpec {
     pub schema: u32,
     pub source: SourceSpec,
     pub target: String,
-    pub tier: Tier,
+    pub options: CompileOptions,
     #[serde(default)]
     pub budgets: Budgets,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -138,14 +368,15 @@ pub struct JobSpec {
 }
 
 impl JobSpec {
-    /// A request for `source` at `tier`, targeting `wasm32-unknown-unknown`.
+    /// A request for `source` with `options`, targeting
+    /// `wasm32-unknown-unknown`.
     #[must_use]
-    pub fn new(source: SourceSpec, tier: Tier) -> Self {
+    pub fn new(source: SourceSpec, options: CompileOptions) -> Self {
         Self {
             schema: SCHEMA,
             source,
             target: "wasm32-unknown-unknown".to_owned(),
-            tier,
+            options,
             budgets: Budgets::default(),
             incremental_dir: None,
             emit: vec![Emit::Wasm],
@@ -153,12 +384,19 @@ impl JobSpec {
         }
     }
 
+    /// A request for `source` at a named preset.
+    #[must_use]
+    pub fn preset(source: SourceSpec, preset: Preset) -> Self {
+        Self::new(source, preset.options())
+    }
+
     /// Reject requests the supervisor cannot honour before any work starts.
     ///
     /// # Errors
     ///
     /// Returns an error for an unknown schema version, an empty source path,
-    /// an empty crate name or an unsupported edition.
+    /// an empty crate name, an unsupported edition, invalid options, or an
+    /// incremental request without a directory.
     pub fn validate(&self) -> Result<()> {
         if self.schema != SCHEMA {
             bail!(
@@ -175,17 +413,16 @@ impl JobSpec {
         if !matches!(self.source.edition.as_str(), "2018" | "2021" | "2024") {
             bail!("unsupported edition {:?}", self.source.edition);
         }
+        self.options.validate()?;
+        if self.options.incremental && self.incremental_dir.is_none() {
+            bail!("incremental option needs an incremental directory");
+        }
         Ok(())
     }
 
-    /// Every flag the compiler receives for this job, tier flags plus the
-    /// incremental directory when the job names one.
+    /// Every flag the compiler receives for this job.
     #[must_use]
     pub fn compiler_flags(&self) -> Vec<String> {
-        let mut flags = self.tier.flags();
-        if let Some(dir) = &self.incremental_dir {
-            flags.push(format!("-Cincremental={}", dir.display()));
-        }
-        flags
+        self.options.flags(self.incremental_dir.as_ref())
     }
 }

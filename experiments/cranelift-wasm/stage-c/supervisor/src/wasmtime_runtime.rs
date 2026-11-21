@@ -137,11 +137,10 @@ pub fn wat_artifact(wat: &str) -> Artifact {
     let length = u64::try_from(bytes.len()).expect("artifact length fits in u64");
     Artifact {
         key: "wat-test".to_owned(),
-        tier: crate::job::Tier::Fast,
         meta: ArtifactMeta {
             schema: crate::job::SCHEMA,
             key: "wat-test".to_owned(),
-            tier: crate::job::Tier::Fast,
+            options: crate::job::CompileOptions::default(),
             compiler: "wat".to_owned(),
             source_sha256: String::new(),
             source_path: String::new(),

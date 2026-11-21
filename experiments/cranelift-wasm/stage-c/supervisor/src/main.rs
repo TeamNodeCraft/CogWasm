@@ -6,15 +6,14 @@
 
 use std::fs::File;
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand};
 use cogwasm_supervisor::{
-    Artifact, ArtifactStore, FakeCompiler, JobSpec, RealCompiler, RealCompilerConfig, SourceSpec,
-    Supervisor, Swapper, Tier, WasmtimeRuntime,
+    Artifact, ArtifactStore, CompileOptions, FakeCompiler, JobSpec, Preset, RealCompiler,
+    RealCompilerConfig, SourceSpec, Supervisor, Swapper, WasmtimeRuntime,
 };
 use serde::Serialize;
 
@@ -71,9 +70,10 @@ enum Command {
         /// Compiler identity used in the keys (a rustc.wasm hash or version).
         #[arg(long)]
         compiler_id: String,
-        /// Comma-separated tiers to build.
-        #[arg(long, value_delimiter = ',', default_value = "fast,opt,small")]
-        tiers: Vec<String>,
+        /// Option specs: a preset (`fast`, `opt`, `release`) or a
+        /// comma-separated key=value list. Repeat the flag for several specs.
+        #[arg(long = "spec", value_name = "SPEC")]
+        specs: Vec<String>,
         /// Prepared program sources (each includes the benchmark prelude).
         #[arg(long, required = true, num_args = 1..)]
         programs: Vec<PathBuf>,
@@ -118,7 +118,8 @@ enum Command {
 #[derive(Serialize)]
 struct MatrixRow {
     program: String,
-    tier: String,
+    spec: String,
+    options: CompileOptions,
     key: String,
     bytes: u64,
     compile_ms: Option<u64>,
@@ -151,7 +152,7 @@ fn main() -> Result<()> {
             work,
             store,
             compiler_id,
-            tiers,
+            specs,
             programs,
             json,
         } => {
@@ -165,7 +166,7 @@ fn main() -> Result<()> {
                 work_root: work,
                 compiler_id,
             };
-            let report = matrix(&config, &store, &tiers, &programs)?;
+            let report = matrix(&config, &store, &specs, &programs)?;
             if let Some(path) = json {
                 let encoded =
                     serde_json::to_vec_pretty(&report).context("serialising the matrix")?;
@@ -225,40 +226,45 @@ fn build_fake(job: &JobSpec, store: &Path, compiler: &str) -> Result<()> {
 fn matrix(
     config: &RealCompilerConfig,
     store: &Path,
-    tiers: &[String],
+    specs: &[String],
     programs: &[PathBuf],
 ) -> Result<MatrixReport> {
     if programs.is_empty() {
         bail!("matrix needs at least one --programs entry");
     }
-    let tiers = tiers
+    let specs = if specs.is_empty() {
+        vec!["fast".to_owned(), "opt".to_owned(), "release".to_owned()]
+    } else {
+        specs.to_vec()
+    };
+    let specs = specs
         .iter()
-        .map(|name| Tier::from_str(name).map_err(anyhow::Error::msg))
+        .map(|text| {
+            CompileOptions::from_spec(text)
+                .map(|options| (text.clone(), options))
+                .map_err(anyhow::Error::msg)
+        })
         .collect::<Result<Vec<_>>>()?;
     let supervisor = Supervisor::new(ArtifactStore::new(store), RealCompiler::new(config.clone()));
     let mut rows = Vec::new();
     println!(
-        "{:<22} {:<6} {:<7} {:>9} {:>10}",
-        "program", "tier", "state", "bytes", "compile_ms"
+        "{:<22} {:<24} {:<7} {:>9} {:>10}",
+        "program", "spec", "state", "bytes", "compile_ms"
     );
     for program in programs {
         let source = SourceSpec::new(program, crate_name(program)?);
-        for tier in &tiers {
-            let mut job = JobSpec::new(source.clone(), *tier);
-            if *tier == Tier::Fast {
-                job.incremental_dir = Some(
-                    config
-                        .work_root
-                        .join("incremental")
-                        .join(&source.crate_name),
-                );
+        for (text, options) in &specs {
+            let mut job = JobSpec::new(source.clone(), options.clone());
+            if options.incremental {
+                let key = ArtifactStore::key_for(&job, &config.compiler_id)?;
+                job.incremental_dir = Some(config.work_root.join("incremental").join(key));
             }
             let outcome = supervisor.build(&job)?;
             let artifact = outcome.artifact();
             println!(
-                "{:<22} {:<6} {:<7} {:>9} {:>10}",
+                "{:<22} {:<24} {:<7} {:>9} {:>10}",
                 source.crate_name,
-                tier.as_str(),
+                text,
                 if outcome.was_hit() { "hit" } else { "built" },
                 artifact.bytes.len(),
                 artifact
@@ -268,7 +274,8 @@ fn matrix(
             );
             rows.push(MatrixRow {
                 program: source.crate_name.clone(),
-                tier: tier.as_str().to_owned(),
+                spec: text.clone(),
+                options: options.clone(),
                 key: artifact.key.clone(),
                 bytes: artifact.meta.bytes,
                 compile_ms: artifact.meta.compile_ms,
@@ -289,17 +296,18 @@ fn demo(
 ) -> Result<()> {
     let supervisor = Supervisor::new(ArtifactStore::new(store), RealCompiler::new(config.clone()));
     let name = crate_name(source)?;
-    let make_job = |tier: Tier| {
-        let mut job = JobSpec::new(SourceSpec::new(source.to_path_buf(), name.clone()), tier);
-        if tier == Tier::Fast {
-            job.incremental_dir = Some(config.work_root.join("incremental").join(&name));
+    let make_job = |options: CompileOptions| -> Result<JobSpec> {
+        let mut job = JobSpec::new(SourceSpec::new(source.to_path_buf(), name.clone()), options);
+        if job.options.incremental {
+            let key = ArtifactStore::key_for(&job, &config.compiler_id)?;
+            job.incremental_dir = Some(config.work_root.join("incremental").join(key));
         }
-        job
+        Ok(job)
     };
     let runtime = Arc::new(WasmtimeRuntime::new());
     let mut swapper = Swapper::new(runtime.clone());
 
-    let cold = supervisor.build(&make_job(Tier::Fast))?;
+    let cold = supervisor.build(&make_job(Preset::Fast.options())?)?;
     let first = swapper.install(cold.artifact())?;
     let baseline = swapper.call(seed)?;
     println!(
@@ -312,7 +320,7 @@ fn demo(
         toggle_probe(source)?;
     }
     let edit = Instant::now();
-    let fast = supervisor.build(&make_job(Tier::Fast))?;
+    let fast = supervisor.build(&make_job(Preset::Fast.options())?)?;
     let edit_to_t0 = edit.elapsed();
     let swap = Instant::now();
     let second = swapper.install(fast.artifact())?;
@@ -367,7 +375,7 @@ fn spawn_opt(
     let name = name.to_owned();
     std::thread::spawn(move || {
         let supervisor = Supervisor::new(ArtifactStore::new(store), RealCompiler::new(config));
-        let mut job = JobSpec::new(SourceSpec::new(source, name), Tier::Opt);
+        let mut job = JobSpec::preset(SourceSpec::new(source, name), Preset::Opt);
         job.request_id = Some("background-opt".to_owned());
         Ok(supervisor.build(&job)?.artifact().clone())
     })

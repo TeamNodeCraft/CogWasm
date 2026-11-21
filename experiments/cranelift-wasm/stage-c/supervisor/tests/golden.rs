@@ -2,12 +2,12 @@
 //! fallback, supersession and swap ordering, with no toolchain involved.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use cogwasm_supervisor::{
-    ArtifactStore, Begin, CompileOutput, FakeCompiler, FakeRuntime, JobSpec, Runtime, SourceSpec,
-    Supervisor, Swapper, Tier, WasmtimeRuntime, wat_artifact,
+    ArtifactStore, Begin, CompileOptions, CompileOutput, FakeCompiler, FakeRuntime, JobSpec,
+    Preset, Runtime, SourceSpec, Supervisor, Swapper, WasmtimeRuntime, wat_artifact,
 };
 use tempfile::TempDir;
 
@@ -17,8 +17,16 @@ fn source(dir: &TempDir, name: &str, body: &str) -> PathBuf {
     path
 }
 
-fn job(path: &PathBuf, tier: Tier) -> JobSpec {
-    JobSpec::new(SourceSpec::new(path, "generated_stress"), tier)
+fn job(path: &PathBuf, preset: Preset) -> JobSpec {
+    let mut job = JobSpec::preset(SourceSpec::new(path, "generated_stress"), preset);
+    if job.options.incremental {
+        job.incremental_dir = Some(
+            path.parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join("incremental"),
+        );
+    }
+    job
 }
 
 fn store(dir: &TempDir) -> ArtifactStore {
@@ -30,7 +38,7 @@ fn unchanged_source_hits_the_cache() {
     let dir = TempDir::new().unwrap();
     let src = source(&dir, "a.rs", "pub fn f() -> u64 { 1 }\n");
     let supervisor = Supervisor::new(store(&dir), FakeCompiler::new());
-    let job = job(&src, Tier::Fast);
+    let job = job(&src, Preset::Fast);
 
     let first = supervisor.build(&job).unwrap();
     assert!(!first.was_hit(), "the first build must compile");
@@ -45,7 +53,7 @@ fn an_edit_rebuilds() {
     let dir = TempDir::new().unwrap();
     let src = source(&dir, "a.rs", "pub fn f() -> u64 { 1 }\n");
     let supervisor = Supervisor::new(store(&dir), FakeCompiler::new());
-    let job = job(&src, Tier::Fast);
+    let job = job(&src, Preset::Fast);
 
     let first = supervisor.build(&job).unwrap();
     fs::write(&src, "pub fn f() -> u64 { 2 }\n").unwrap();
@@ -57,13 +65,13 @@ fn an_edit_rebuilds() {
 }
 
 #[test]
-fn tiers_have_distinct_artifacts() {
+fn presets_have_distinct_artifacts() {
     let dir = TempDir::new().unwrap();
     let src = source(&dir, "a.rs", "pub fn f() -> u64 { 1 }\n");
     let supervisor = Supervisor::new(store(&dir), FakeCompiler::new());
 
-    let fast = supervisor.build(&job(&src, Tier::Fast)).unwrap();
-    let opt = supervisor.build(&job(&src, Tier::Opt)).unwrap();
+    let fast = supervisor.build(&job(&src, Preset::Fast)).unwrap();
+    let opt = supervisor.build(&job(&src, Preset::Opt)).unwrap();
 
     assert_ne!(fast.artifact().key, opt.artifact().key);
     assert!(
@@ -86,7 +94,7 @@ fn tiers_have_distinct_artifacts() {
 fn a_compiler_change_invalidates_the_cache() {
     let dir = TempDir::new().unwrap();
     let src = source(&dir, "a.rs", "pub fn f() -> u64 { 1 }\n");
-    let job = job(&src, Tier::Fast);
+    let job = job(&src, Preset::Fast);
 
     let old = Supervisor::new(store(&dir), FakeCompiler::with_id("compiler-a"));
     old.build(&job).unwrap();
@@ -107,8 +115,8 @@ fn the_source_path_is_part_of_the_key() {
     let second = source(&dir, "b.rs", body);
     let supervisor = Supervisor::new(store(&dir), FakeCompiler::new());
 
-    let a = supervisor.build(&job(&first, Tier::Fast)).unwrap();
-    let b = supervisor.build(&job(&second, Tier::Fast)).unwrap();
+    let a = supervisor.build(&job(&first, Preset::Fast)).unwrap();
+    let b = supervisor.build(&job(&second, Preset::Fast)).unwrap();
 
     assert_ne!(a.artifact().key, b.artifact().key);
     assert!(!b.was_hit());
@@ -118,9 +126,12 @@ fn the_source_path_is_part_of_the_key() {
 fn a_failed_tier_keeps_the_previous_artifact() {
     let dir = TempDir::new().unwrap();
     let src = source(&dir, "a.rs", "pub fn f() -> u64 { 1 }\n");
-    let supervisor = Supervisor::new(store(&dir), FakeCompiler::new().rejecting(Tier::Opt));
-    let fast = job(&src, Tier::Fast);
-    let opt = job(&src, Tier::Opt);
+    let supervisor = Supervisor::new(
+        store(&dir),
+        FakeCompiler::new().rejecting(Preset::Opt.options()),
+    );
+    let fast = job(&src, Preset::Fast);
+    let opt = job(&src, Preset::Opt);
 
     supervisor.build(&fast).unwrap();
     assert!(supervisor.build(&opt).is_err(), "the broken tier must fail");
@@ -133,7 +144,7 @@ fn a_superseded_build_is_dropped() {
     let dir = TempDir::new().unwrap();
     let src = source(&dir, "a.rs", "pub fn f() -> u64 { 1 }\n");
     let supervisor = Supervisor::new(store(&dir), FakeCompiler::new());
-    let job = job(&src, Tier::Fast);
+    let job = job(&src, Preset::Fast);
 
     let Begin::Build(first) = supervisor.begin(&job).unwrap() else {
         panic!("the first request must need a build");
@@ -162,8 +173,8 @@ fn a_swap_sends_calls_to_the_new_generation() {
     let dir = TempDir::new().unwrap();
     let src = source(&dir, "a.rs", "pub fn f() -> u64 { 1 }\n");
     let supervisor = Supervisor::new(store(&dir), FakeCompiler::new());
-    let fast = supervisor.build(&job(&src, Tier::Fast)).unwrap();
-    let opt = supervisor.build(&job(&src, Tier::Opt)).unwrap();
+    let fast = supervisor.build(&job(&src, Preset::Fast)).unwrap();
+    let opt = supervisor.build(&job(&src, Preset::Opt)).unwrap();
 
     let runtime = Arc::new(FakeRuntime::new());
     let handle: Arc<dyn Runtime> = runtime.clone();
@@ -197,4 +208,64 @@ fn the_wasmtime_runtime_calls_run() {
     assert_eq!(instance.generation(), 1);
     assert_eq!(instance.call(42).unwrap(), 42);
     assert_eq!(instance.call(u64::MAX).unwrap(), u64::MAX);
+}
+
+#[test]
+fn specs_parse_presets_and_combinations() {
+    let fast = CompileOptions::from_spec("fast").unwrap();
+    assert!(fast.incremental);
+    assert!(!fast.inline_wasm);
+
+    let opt = CompileOptions::from_spec("opt").unwrap();
+    assert!(opt.inline_wasm);
+    assert!(!opt.incremental);
+
+    let custom = CompileOptions::from_spec(
+        "opt-level=3,inline=yes,inline-threshold=500,strip=symbols,codegen-units=4,mir-opt-level=3",
+    )
+    .unwrap();
+    assert!(custom.inline_wasm);
+    assert_eq!(custom.inline_threshold, Some(500));
+    assert_eq!(custom.codegen_units, Some(4));
+    assert_eq!(custom.mir_opt_level, 3);
+    assert_eq!(custom.strip, cogwasm_supervisor::Strip::Symbols);
+
+    assert!(CompileOptions::from_spec("nonsense=1").is_err());
+    assert!(CompileOptions::from_spec("debug=yes,strip=symbols").is_err());
+    assert!(CompileOptions::from_spec("inline-threshold=10").is_err());
+}
+
+#[test]
+fn strip_changes_the_key_but_not_the_program() {
+    let dir = TempDir::new().unwrap();
+    let src = source(&dir, "a.rs", "pub fn f() -> u64 { 1 }\n");
+    let supervisor = Supervisor::new(store(&dir), FakeCompiler::new());
+
+    let opt = supervisor.build(&job(&src, Preset::Opt)).unwrap();
+    let release = supervisor.build(&job(&src, Preset::Release)).unwrap();
+
+    assert_ne!(opt.artifact().key, release.artifact().key);
+}
+
+#[test]
+fn an_arbitrary_combination_reaches_the_flags() {
+    let options = CompileOptions::from_spec(
+        "opt-level=3,mir-opt-level=1,inline=yes,inline-threshold=250,strip=symbols,codegen-units=4",
+    )
+    .unwrap();
+    let flags = options.flags(None);
+    let joined = flags.join(" ");
+    assert!(joined.contains("-Copt-level=3"));
+    assert!(joined.contains("-Zmir-opt-level=1"));
+    assert!(joined.contains("-Zmir-inline-wasm"));
+    assert!(joined.contains("-Zmir-inline-wasm-threshold=250"));
+    assert!(joined.contains("-Cstrip=symbols"));
+    assert!(joined.contains("-Ccodegen-units=4"));
+}
+
+#[test]
+fn incremental_without_a_directory_is_rejected() {
+    let source = SourceSpec::new("/tmp/whatever.rs", "stress");
+    let job = JobSpec::preset(source, Preset::Fast);
+    assert!(job.validate().is_err(), "incremental needs a directory");
 }
