@@ -15,6 +15,10 @@ members = [
     "bench/host",
     "bench/gap",
 ]
+# toolchain/ (ignored) holds upstream checkouts with their own Cargo
+# workspaces: the rust tree (src/bootstrap), clif-to-wasm, Wild. Without this,
+# Cargo walks up from them to this manifest and refuses to build them.
+exclude = ["toolchain"]
 
 [workspace.dependencies]
 wasmtime = { version = "=50.0.2", default-features = false }
