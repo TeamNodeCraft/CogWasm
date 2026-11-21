@@ -175,7 +175,18 @@ Determinism evidence and variation found:
   `<program>.fuel.wasm` and remove it before every sample, so both samples
   start from the same state and the benchmark's own module is never replaced
   by a fuel-run build.
-* No allocator or clock dependence was observed after those fixes.
+* rustc formats the wall clock into the name of its ICE-report file:
+  `rustc_driver_impl::ice_path_with_config` calls `jiff::Zoned::now()` and
+  `strftime`. The formatter's fuel cost depends on the civil date and time it
+  is given, so samples that crossed a second boundary differed by a few fuel
+  units (5 in the failure that prompted this note), and separate invocations
+  moved with the wall clock. Fuel runs now give WASI a fixed wall and
+  monotonic clock and pin `TZ=UTC`; the timed runs keep the real clock and
+  time zone. A WASI trace of a fuel compile shows exactly one realtime
+  `clock_time_get`, from `ice_path_with_config`, and the rest monotonic reads
+  from Cranelift's timing profiler. Ten invocations with eight samples each
+  then produced one value for every sample.
+* No allocator dependence was observed after those fixes.
 * Fuel is a fixed per-operator cost charged by the interpreter instrumentation,
   not a native instruction count, so it does not depend on the CPU or on
   Cranelift's register allocation. We verified repeated runs on the development

@@ -207,6 +207,7 @@ fn store_options(fuel: Option<u64>, deterministic_random: bool) -> StoreOptions 
         deterministic_random: deterministic_random.then_some(0),
         fuel,
         limits: Some(Limits::default()),
+        deterministic_clock: fuel.is_some(),
     }
 }
 
