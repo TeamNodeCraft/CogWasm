@@ -11,7 +11,7 @@ use std::sync::Mutex;
 
 use anyhow::{Result, anyhow};
 
-use crate::compiler::Compiler;
+use crate::compiler::{CompileOutput, Compiler};
 use crate::job::JobSpec;
 use crate::store::{Artifact, ArtifactStore};
 
@@ -130,7 +130,7 @@ impl<C: Compiler> Supervisor<C> {
         &self,
         job: &JobSpec,
         ticket: &BuildTicket,
-        bytes: Vec<u8>,
+        output: &CompileOutput,
     ) -> Result<Option<Artifact>> {
         {
             let latest = self
@@ -141,7 +141,7 @@ impl<C: Compiler> Supervisor<C> {
                 return Ok(None);
             }
         }
-        let artifact = self.store.artifact_for(job, self.compiler.id(), bytes)?;
+        let artifact = self.store.artifact_for(job, self.compiler.id(), output)?;
         self.store.put(&artifact)?;
         Ok(Some(artifact))
     }
@@ -156,11 +156,11 @@ impl<C: Compiler> Supervisor<C> {
         match self.begin(job)? {
             Begin::Cached(artifact) => Ok(BuildOutcome::Hit(artifact)),
             Begin::Build(ticket) => {
-                let bytes = self
+                let output = self
                     .compiler
                     .compile(job, &ticket.key)
                     .map_err(anyhow::Error::new)?;
-                match self.finish(job, &ticket, bytes)? {
+                match self.finish(job, &ticket, &output)? {
                     Some(artifact) => Ok(BuildOutcome::Built(artifact)),
                     None => Err(anyhow!("build for {} was superseded", ticket.key)),
                 }

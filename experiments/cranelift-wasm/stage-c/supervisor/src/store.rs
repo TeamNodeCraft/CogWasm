@@ -13,6 +13,7 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::compiler::CompileOutput;
 use crate::job::{Emit, JobSpec, Tier};
 
 /// Metadata stored beside every artifact.
@@ -25,6 +26,10 @@ pub struct ArtifactMeta {
     pub source_sha256: String,
     pub source_path: String,
     pub bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compile_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link_ms: Option<u64>,
 }
 
 /// A compiled artifact and the metadata that describes how it was made.
@@ -73,10 +78,15 @@ impl ArtifactStore {
     ///
     /// Returns an error when the source cannot be read or the key cannot be
     /// computed.
-    pub fn artifact_for(&self, job: &JobSpec, compiler: &str, bytes: Vec<u8>) -> Result<Artifact> {
+    pub fn artifact_for(
+        &self,
+        job: &JobSpec,
+        compiler: &str,
+        output: &CompileOutput,
+    ) -> Result<Artifact> {
         let key = Self::key_for(job, compiler)?;
         let source_sha256 = source_sha256(&job.source.path)?;
-        let length = u64::try_from(bytes.len()).context("artifact length")?;
+        let length = u64::try_from(output.bytes.len()).context("artifact length")?;
         let meta = ArtifactMeta {
             schema: job.schema,
             key: key.clone(),
@@ -85,11 +95,13 @@ impl ArtifactStore {
             source_sha256,
             source_path: job.source.path.display().to_string(),
             bytes: length,
+            compile_ms: output.compile_ms,
+            link_ms: output.link_ms,
         };
         Ok(Artifact {
             key,
             tier: job.tier,
-            bytes,
+            bytes: output.bytes.clone(),
             meta,
         })
     }

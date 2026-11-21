@@ -6,8 +6,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use cogwasm_supervisor::{
-    ArtifactStore, Begin, FakeCompiler, FakeRuntime, JobSpec, Runtime, SourceSpec, Supervisor,
-    Swapper, Tier,
+    ArtifactStore, Begin, CompileOutput, FakeCompiler, FakeRuntime, JobSpec, Runtime, SourceSpec,
+    Supervisor, Swapper, Tier,
 };
 use tempfile::TempDir;
 
@@ -145,13 +145,13 @@ fn a_superseded_build_is_dropped() {
 
     assert!(
         supervisor
-            .finish(&job, &first, b"stale".to_vec())
+            .finish(&job, &first, &CompileOutput::new(b"stale".to_vec()))
             .unwrap()
             .is_none(),
         "the older build must not be stored"
     );
     let stored = supervisor
-        .finish(&job, &second, b"fresh".to_vec())
+        .finish(&job, &second, &CompileOutput::new(b"fresh".to_vec()))
         .unwrap()
         .expect("the newest build is stored");
     assert_eq!(stored.bytes, b"fresh");

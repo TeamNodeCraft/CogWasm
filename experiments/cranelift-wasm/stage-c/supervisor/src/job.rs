@@ -42,13 +42,38 @@ impl Tier {
     pub fn flags(self) -> Vec<String> {
         match self {
             // The measured fast tier: incremental is about 3x faster to build
-            // than the full optimising build on the benchmark suite.
-            Self::Fast => vec!["-Copt-level=2".to_owned(), "-Cincremental".to_owned()],
+            // than the full optimising build on the benchmark suite. The
+            // incremental directory comes from the job, so the flag is added
+            // by `compiler_flags` rather than here.
+            Self::Fast => vec!["-Copt-level=2".to_owned()],
             // The measured optimising tier: opt-level 2 plus the loop-aware
             // MIR inliner from step 5b.
             Self::Opt => vec!["-Copt-level=2".to_owned(), "-Zmir-inline-wasm".to_owned()],
             // Distribution only: never swapped into a running tier.
-            Self::Small => vec!["-Copt-level=s".to_owned(), "-Cstrip=debuginfo".to_owned()],
+            // Distribution: the optimising flags plus a symbol strip, which is
+            // the lever that actually shrinks the wasm (`-Copt-level=s` alone
+            // was larger than opt-level 2 in the M2 matrix). Never swapped
+            // into a running tier.
+            Self::Small => vec![
+                "-Copt-level=2".to_owned(),
+                "-Zmir-inline-wasm".to_owned(),
+                "-Cstrip=symbols".to_owned(),
+            ],
+        }
+    }
+}
+
+impl std::str::FromStr for Tier {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "fast" => Ok(Self::Fast),
+            "opt" => Ok(Self::Opt),
+            "small" => Ok(Self::Small),
+            other => Err(format!(
+                "unknown tier {other:?} (expected fast, opt or small)"
+            )),
         }
     }
 }

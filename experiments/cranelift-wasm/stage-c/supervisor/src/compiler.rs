@@ -30,6 +30,28 @@ impl fmt::Display for CompileError {
 
 impl std::error::Error for CompileError {}
 
+/// Bytes and timings produced by one build.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompileOutput {
+    pub bytes: Vec<u8>,
+    /// Wall time of the build, when the backend can measure it.
+    pub compile_ms: Option<u64>,
+    /// Link time, when the backend reports it separately from compilation.
+    pub link_ms: Option<u64>,
+}
+
+impl CompileOutput {
+    /// Output without timings, for backends that do not measure them.
+    #[must_use]
+    pub fn new(bytes: Vec<u8>) -> Self {
+        Self {
+            bytes,
+            compile_ms: None,
+            link_ms: None,
+        }
+    }
+}
+
 /// Turns a job into artifact bytes.
 ///
 /// Implementations must be safe to call from more than one thread; the
@@ -43,7 +65,7 @@ pub trait Compiler: Send + Sync {
     /// # Errors
     ///
     /// Returns [`CompileError`] when the build fails or cannot start.
-    fn compile(&self, job: &JobSpec, key: &str) -> Result<Vec<u8>, CompileError>;
+    fn compile(&self, job: &JobSpec, key: &str) -> Result<CompileOutput, CompileError>;
 }
 
 /// Lets a test hold a build open so it can submit a competing request.
@@ -139,7 +161,7 @@ impl Compiler for FakeCompiler {
         &self.id
     }
 
-    fn compile(&self, job: &JobSpec, key: &str) -> Result<Vec<u8>, CompileError> {
+    fn compile(&self, job: &JobSpec, key: &str) -> Result<CompileOutput, CompileError> {
         self.invocations.fetch_add(1, Ordering::SeqCst);
         if let Some(gate) = &self.gate {
             gate.wait();
@@ -150,11 +172,13 @@ impl Compiler for FakeCompiler {
                 job.tier.as_str()
             )));
         }
-        Ok(format!(
-            "fake artifact\nkey: {key}\ntier: {}\nsource: {}\n",
-            job.tier.as_str(),
-            job.source.path.display()
-        )
-        .into_bytes())
+        Ok(CompileOutput::new(
+            format!(
+                "fake artifact\nkey: {key}\ntier: {}\nsource: {}\n",
+                job.tier.as_str(),
+                job.source.path.display()
+            )
+            .into_bytes(),
+        ))
     }
 }

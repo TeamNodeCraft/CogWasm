@@ -1,6 +1,6 @@
 # Tier 2 supervisor: plan
 
-Status: **plan, not started**. This is the host-side scheduler for Goal 1's
+Status: **M1 and M2 done**. This is the host-side scheduler for Goal 1's
 tier 2 and Goal 2's resident compiler service. It keeps the compiler a pure
 function of (source, options) and puts tiering, caching and swapping in the
 host, where they can be tested.
@@ -80,9 +80,12 @@ Components:
 
 | tier | flags | purpose |
 | --- | --- | --- |
-| T0 fast | `-C incremental` (opt-level 2) | edit loop; measured ~124 ms |
-| T1 optimised | opt-level 2 + `-Zmir-inline-wasm` | background build; measured ~383 ms, `strings` −41.8% |
-| T2 small | opt-level `s` + strip, size-oriented link | distribution only; not a runtime tier |
+| T0 fast | opt-level 2 + `-Cincremental=<dir>` | edit loop; 1.3–2.2× faster than T1 after a one-line edit |
+| T1 optimised | opt-level 2 + `-Zmir-inline-wasm` | background build; `strings` −41.8% |
+| T2 small | opt-level 2 + `-Zmir-inline-wasm` + `-Cstrip=symbols` | distribution only; never a runtime tier |
+
+`-Copt-level=s` alone was *larger* than opt-level 2 in the M2 matrix, so T2
+uses the optimising flags plus a symbol strip instead.
 
 Exact flags are set from the job spec; only the supervisor knows the tier
 names.
@@ -137,6 +140,43 @@ Rules:
 | M4 | state ABI + swap of a stateful plugin | state survives the swap; ABI version mismatch rejects |
 | M5 | crate-level cache and multi-crate workspace; remote cache | unchanged crates never rebuild; CI cache hit rate published |
 | M6 | research: per-CGU artifact boundary in rustc | gated on a compiler change; evidence: 92.7% of object bytes are reusable |
+
+## M2 matrix
+
+Built with the reference supervisor against the real pipeline (`stage-c-host
+raw`, precompiled `rustc.wasm`), four programs at three tiers. Times are the
+`compile_ms` recorded by the supervisor (host start, module load from the
+precompiled artifact, compile and link), after a cold run and after a
+one-line edit.
+
+| program | tier | cold ms | edit ms | bytes |
+| --- | --- | ---: | ---: | ---: |
+| `generated_stress` | fast | 500 | **199** | 163,038 |
+| `generated_stress` | opt | 435 | 429 | 153,513 |
+| `generated_stress` | small | 425 | 428 | 89,753 |
+| `strings` | fast | 156 | **114** | 57,459 |
+| `strings` | opt | 141 | 142 | 49,503 |
+| `strings` | small | 145 | 143 | 41,487 |
+| `collections` | fast | 349 | **160** | 251,964 |
+| `collections` | opt | 309 | 310 | 217,343 |
+| `collections` | small | 298 | 304 | 161,146 |
+| `nbody` | fast | 149 | **105** | 44,583 |
+| `nbody` | opt | 139 | 140 | 41,734 |
+| `nbody` | small | 137 | 144 | 34,988 |
+
+Reading:
+
+- **T0 wins on edits, not on cold builds.** A cold incremental build is
+  slightly slower and about 6–16% larger, but after a one-line edit it is
+  1.3–2.2× faster than the optimising rebuild because rustc reuses its dep
+  graph.
+- **T2 is the size tier.** Stripping symbols shrinks `generated_stress` by
+  42% and `collections` by 26% over T1 at the same compile time.
+- **All three tiers return identical `run(seed)` values and output lengths**
+  for every program (checked with `bench-host run` on the stored artifacts).
+
+M1 and M2 are accepted: the eight golden tests pass in CI and the matrix above
+is the M2 evidence. M3 (the cold-restart swap demo) is next.
 
 ## Test matrix (M1)
 

@@ -19,13 +19,15 @@
 
 pub mod compiler;
 pub mod job;
+pub mod real;
 pub mod runtime;
 pub mod store;
 pub mod supervisor;
 pub mod swap;
 
-pub use compiler::{CompileError, Compiler, FakeCompiler};
+pub use compiler::{CompileError, CompileOutput, Compiler, FakeCompiler};
 pub use job::{Budgets, Emit, JobSpec, SCHEMA, SourceSpec, Tier};
+pub use real::{RealCompiler, RealCompilerConfig};
 pub use runtime::{FakeRuntime, Instance, Runtime};
 pub use store::{Artifact, ArtifactMeta, ArtifactStore};
 pub use supervisor::{Begin, BuildOutcome, BuildTicket, Supervisor};
