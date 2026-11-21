@@ -105,7 +105,7 @@ jobs:
                 ( cd /tmp/rust-clone && \
                   GIT_COMMITTER_NAME=cogwasm-ci \
                   GIT_COMMITTER_EMAIL=cogwasm-ci@users.noreply.github.com \
-                  git am "${{ github.workspace }}"/rust_wasm/patches/rust-1.99.1/*.patch )
+                  git am "${{ github.workspace }}"/rust_wasm/legacy/llvm/patches/rust-1.99.1/*.patch )
                 cp -r /tmp/rust-clone/library src/rust/
                 cp -r /tmp/rust-clone/src src/rust/
                 cp -r /tmp/rust-clone/compiler src/rust/

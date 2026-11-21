@@ -176,9 +176,13 @@ AlexMitchellMus, all rights reserved; see that file for permitted use.
 The original approach compiles rustc **with LLVM and LLD** to WebAssembly. It
 is no longer built on push; its workflow can still be run by hand.
 
+The LLVM path lives in [`legacy/llvm/`](legacy/llvm/README.md) and is kept for
+manual builds. The A/B baselines in `difftest` and `bench` use the native LLVM
+rustc from rustup, not this path.
+
 ### Upstream Sources
 - **rustc_llvm**: [rust-lang/rust](https://github.com/rust-lang/rust) `1.99.1` plus the
-  compiler patches in [`patches/rust-1.99.1/`](patches/rust-1.99.1/). There is no
+  compiler patches in [`legacy/llvm/patches/rust-1.99.1/`](legacy/llvm/patches/rust-1.99.1/). There is no
   separate `rust` fork: CI checks out the upstream tag, applies the patch series
   with `git am`, then initializes submodules.
 - **clang, wasm-ld, etc**: [YoWASP/clang](https://github.com/YoWASP/clang)
@@ -267,9 +271,14 @@ files, and documentation in this repository are licensed under either of
 
 at your option.
 
-The build scripts (`build-netbsd-toolchain.sh`, `build-solaris-toolchain.sh`,
-`crosstool-ng-build.sh`, `musl-toolchain.sh`, and `musl.sh`) and the
-`*.defconfig` files include code copied or adapted from the
+The build scripts
+(`legacy/llvm/toolchain-scripts/build-netbsd-toolchain.sh`,
+`legacy/llvm/toolchain-scripts/build-solaris-toolchain.sh`,
+`legacy/llvm/toolchain-scripts/crosstool-ng-build.sh`,
+`legacy/llvm/toolchain-scripts/musl-toolchain.sh`, and
+`legacy/llvm/toolchain-scripts/musl.sh`) and the
+`legacy/llvm/toolchain-scripts/*.defconfig` files include code copied or adapted
+from the
 [Rust project's CI build infrastructure](https://github.com/rust-lang/rust/tree/46e8d20301cb4abe91ab0a4bea43bb085e1d4e4a/src/ci/docker).
 Upstream copyrights are retained by the Rust contributors. Those portions remain
 subject to Rust's [license terms and copyright notices](https://github.com/rust-lang/rust/blob/46e8d20301cb4abe91ab0a4bea43bb085e1d4e4a/COPYRIGHT).
@@ -286,7 +295,7 @@ those components. They include:
 | [rust-playground-inbrowser](https://github.com/ryancbuckley/rust-playground-inbrowser) rustc-to-wasm patch series | Apache-2.0 |
 | [Wild](https://github.com/wild-linker/wild) | MIT OR Apache-2.0 |
 | [wasi-libc](https://github.com/WebAssembly/wasi-libc) (linked into wasm builds of `std`) | Apache-2.0 WITH LLVM-exception, MIT and others (see its LICENSE files) |
-| [LLVM](https://github.com/llvm/llvm-project), Clang and LLD (the LLVM-based build under `patches/`; build-time only for `experiments/cranelift-wasm/`) | Apache-2.0 WITH LLVM-exception |
+| [LLVM](https://github.com/llvm/llvm-project), Clang and LLD (the LLVM-based build under `legacy/llvm/patches/`; build-time only for `experiments/cranelift-wasm/`) | Apache-2.0 WITH LLVM-exception |
 
 The logo, icon and artwork in [`artwork/cog-logo/`](artwork/cog-logo/ARTWORK.md)
 (the images, their generator script and their notes) are **not** covered by the
@@ -298,10 +307,10 @@ reserved, and may only be used as described in
 
 Patch files modify the project they apply to, and each one is licensed under
 that project's license, not under this repository's MIT OR Apache-2.0 option.
-This applies to `patches/**` and `experiments/**/patches/**`:
+This applies to `legacy/llvm/patches/**` and `experiments/**/patches/**`:
 
-- `patches/rust-*/` and patches against `rustc_codegen_cranelift`: MIT OR Apache-2.0 (Rust).
-- `patches/llvm-*/`: Apache-2.0 WITH LLVM-exception (LLVM).
+- `legacy/llvm/patches/rust-*/` and patches against `rustc_codegen_cranelift`: MIT OR Apache-2.0 (Rust).
+- `legacy/llvm/patches/llvm-*/`: Apache-2.0 WITH LLVM-exception (LLVM).
 - Patches against clif-to-wasm or Cranelift: Apache-2.0 WITH LLVM-exception.
 - Patches against Wild: MIT OR Apache-2.0.
 

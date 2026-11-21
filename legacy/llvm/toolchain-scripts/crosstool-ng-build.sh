@@ -2,6 +2,10 @@
 
 set -ex
 
+# The toolchain scripts and their defconfigs live together in this directory;
+# resolve the config from the script, not from whatever directory invokes it.
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 if [ $UID -eq 0 ]; then
     exec su rustbuild -c "$0"
 fi
@@ -20,7 +24,7 @@ hide_output() {
 
 mkdir build
 cd build
-cp ../crosstool.defconfig .config
+cp "$script_dir"/crosstool.defconfig .config
 ct-ng olddefconfig
 hide_output ct-ng build
 cd ..

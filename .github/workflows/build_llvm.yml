@@ -113,7 +113,7 @@ jobs:
             tar --force-local -h -I "gzip -9" -cvf ${{ github.workspace }}/rust_wasm/llvm-artifacts/dist/llvm_raw.wasm.tar.gz "$WASM_FILE"
             
             # optimize wasm
-            cp -r ${{ github.workspace }}/rust_wasm/config_rewriter /tmp/config_rewriter
+            cp -r ${{ github.workspace }}/rust_wasm/legacy/llvm/config_rewriter /tmp/config_rewriter
             cd /tmp/config_rewriter
             cargo run --bin wasm_optimizer -- "${{ github.workspace }}/clang/$WASM_FILE"
             mv opt.wasm ${{ github.workspace }}/rust_wasm/llvm-artifacts/llvm_opt.wasm

@@ -44,7 +44,7 @@ skip() { printf '   skipped: %s\n' "$*"; }
 # and licences), the legacy LLVM series and the rule fixtures.
 own_files() {
   git ls-files -- "$@" \
-    | grep -v -E '^(patches/|.*/upstream/|.*/vendor/|.*/toolchain/|agents/scripts/rule-fixtures/)' || true
+    | grep -v -E '^(legacy/llvm/patches/|.*/upstream/|.*/vendor/|.*/toolchain/|agents/scripts/rule-fixtures/)' || true
 }
 if [[ $changed -eq 1 ]]; then
   base="$(git merge-base HEAD origin/main 2>/dev/null || echo HEAD)"
@@ -152,7 +152,7 @@ for m in $(own_files '*Cargo.toml' | sort -u); do
   # The root manifest is a virtual workspace, not a crate: lint its members
   # through the per-member loop below.
   if ! grep -q '^\[package\]' "$m"; then continue; fi
-  if grep -q -E '^\s*wasmtime\s*=|^\s*clap\s*=' "$m" || [[ "$m" == config_rewriter/Cargo.toml ]]; then
+  if grep -q -E '^\s*wasmtime\s*=|^\s*clap\s*=' "$m" || [[ "$m" == legacy/llvm/config_rewriter/Cargo.toml ]]; then
     dir="$(dirname "$m")"
     if [[ $changed -eq 1 ]] && ! dir_changed "$dir"; then continue; fi
     host_crates+=("$m")

@@ -15,7 +15,8 @@ taking shape. Every fix we need is made here, on the copies we build:
   [`experiments/cranelift-wasm/README.md`](experiments/cranelift-wasm/README.md)).
 - **Our changes are patch files** applied on top of those revisions, kept in
   this repository next to the build that uses them (for example
-  `experiments/cranelift-wasm/stage-c/patches/`). Each patch is small, does one
+  `experiments/cranelift-wasm/stage-c/patches/`, or the manual-only LLVM series
+  in `legacy/llvm/patches/`). Each patch is small, does one
   thing, has a test, and says in its header that it was changed here.
 - **CI builds and tests the patched stack** on every relevant push, so a patch
   that stops applying or breaks something is caught here, not upstream.

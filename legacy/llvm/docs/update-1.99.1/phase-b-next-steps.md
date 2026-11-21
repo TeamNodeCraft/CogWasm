@@ -72,7 +72,7 @@ Expected: `rustc 1.99.1`. Then repeat the spike's plugin compile / diagnostics
 
 - Keep `wasm32-wasip1-threads` for v4.0.0. The single-threaded host
   (`wasm32-wasip1` + latest wasmtime) is a separate spike; see
-  `notes/threads-assessment.md`.
+  `threads-assessment.md`.
 - Consider making the compiler branch's `config.llvm.toml` authoritative and
   dropping the toolchain generator's config overwrite.
 - Add the `wasi-sdk`/LLVM versions to the release notes and README.

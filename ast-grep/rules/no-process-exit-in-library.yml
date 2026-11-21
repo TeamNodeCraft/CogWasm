@@ -14,5 +14,5 @@ ignores:
   - "**/build.rs"
   - "**/target/**"
   - "**/toolchain/**"
-  - "patches/**"
+  - "legacy/llvm/patches/**"
   - "**/upstream/**"

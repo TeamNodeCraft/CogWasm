@@ -2,7 +2,7 @@
 # Apply the rustc.wasm compiler patch series to a rust-lang/rust checkout and
 # only then initialize the submodules.
 #
-# Usage: ci/apply-rust-patches.sh <rust-checkout> <patch-dir>
+# Usage: legacy/llvm/ci/apply-rust-patches.sh <rust-checkout> <patch-dir>
 #
 # The ordering is intentional: patch 0002 rewrites .gitmodules and the
 # src/llvm-project gitlink to YoWASP/llvm-project llvmorg-22.1.0+wasm, so the
@@ -12,12 +12,17 @@ set -euo pipefail
 rust_dir=${1:?usage: apply-rust-patches.sh <rust-checkout> <patch-dir>}
 patch_dir=${2:?usage: apply-rust-patches.sh <rust-checkout> <patch-dir>}
 
-cd "$rust_dir"
-
 if [ ! -d "$patch_dir" ]; then
   echo "ERROR: patch directory not found: $patch_dir" >&2
   exit 1
 fi
+
+# Resolve the patch directory before changing into the rust checkout, so a
+# relative argument is relative to the caller (the legacy patch directory is
+# next to this script) rather than to the checkout.
+patch_dir="$(cd "$patch_dir" && pwd)"
+
+cd "$rust_dir"
 
 patches=$(find "$patch_dir" -maxdepth 1 -type f -name '*.patch' | sort)
 if [ -z "$patches" ]; then

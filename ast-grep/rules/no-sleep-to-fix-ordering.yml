@@ -15,5 +15,5 @@ files:
 ignores:
   - "**/target/**"
   - "**/toolchain/**"
-  - "patches/**"
+  - "legacy/llvm/patches/**"
   - "**/upstream/**"

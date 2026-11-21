@@ -16,7 +16,7 @@ The workflow checks out `rust-lang/rust` at tag `1.99.1` **without**
 submodules, runs
 
 ```sh
-git am patches/rust-1.99.1/*.patch
+git am legacy/llvm/patches/rust-1.99.1/*.patch
 ```
 
 with a throwaway committer identity, and only then initializes submodules
@@ -25,7 +25,7 @@ The ordering matters: patch 2 rewrites `.gitmodules` and the
 `src/llvm-project` gitlink to the YoWASP LLVM fork, so initializing submodules
 before the patches would fetch the wrong LLVM.
 
-The script `ci/apply-rust-patches.sh` (in the recipe repo root) performs all of
+The script `legacy/llvm/ci/apply-rust-patches.sh` performs all of
 this and exits non-zero if a patch does not apply or if the series does not have
 exactly 7 files.
 
@@ -65,9 +65,9 @@ recipe and fixes the `cc` clang target that broke the wasm host build.
 From a `rust` clone containing the rebased branch:
 
 ```sh
-git format-patch --no-signature --numbered -o ../rust_wasm/patches/rust-1.99.1 \
+git format-patch --no-signature --numbered -o ../rust_wasm/legacy/llvm/patches/rust-1.99.1 \
   1.99.1..compile_rustc_for_wasm-1.99.1
 ```
 
-Keep the file numbering; `ci/apply-rust-patches.sh` applies them sorted and
+Keep the file numbering; `legacy/llvm/ci/apply-rust-patches.sh` applies them sorted and
 fails if the count is not 7.

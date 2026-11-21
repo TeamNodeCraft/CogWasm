@@ -54,9 +54,9 @@ jobs:
       - name: apply rustc.wasm compiler patches
         shell: bash
         run: |
-          bash "${GITHUB_WORKSPACE}/rust_wasm/ci/apply-rust-patches.sh" \
+          bash "${GITHUB_WORKSPACE}/rust_wasm/legacy/llvm/ci/apply-rust-patches.sh" \
             "${GITHUB_WORKSPACE}/rust" \
-            "${GITHUB_WORKSPACE}/rust_wasm/patches/rust-1.99.1"
+            "${GITHUB_WORKSPACE}/rust_wasm/legacy/llvm/patches/rust-1.99.1"
 
       - name: install-wasi-sdk
         working-directory: '${{ github.workspace }}/rust'
@@ -122,7 +122,7 @@ jobs:
 
       # - name: rewrite
       #   run: |
-      #     cd rust_wasm/config_rewriter
+      #     cd rust_wasm/legacy/llvm/config_rewriter
       #     cargo run -- ../../rust/config.llvm.toml all false
       #     cargo clean
       #     echo "rewrite done"
@@ -211,9 +211,9 @@ jobs:
       - name: apply rustc.wasm compiler patches
         shell: bash
         run: |
-          bash "${GITHUB_WORKSPACE}/rust_wasm/ci/apply-rust-patches.sh" \
+          bash "${GITHUB_WORKSPACE}/rust_wasm/legacy/llvm/ci/apply-rust-patches.sh" \
             "${GITHUB_WORKSPACE}/rust" \
-            "${GITHUB_WORKSPACE}/rust_wasm/patches/rust-1.99.1"
+            "${GITHUB_WORKSPACE}/rust_wasm/legacy/llvm/patches/rust-1.99.1"
 
       - name: install-wasi-sdk
         working-directory: '${{ github.workspace }}/rust'
@@ -388,7 +388,7 @@ jobs:
             dist/bin/rustc.wasm
           rm -rf dist
 
-          cp -r config_rewriter /tmp/config_rewriter
+          cp -r legacy/llvm/config_rewriter /tmp/config_rewriter
           cd /tmp/config_rewriter
           cargo run --bin wasm_optimizer -- $DIST_ABORT/bin/rustc.wasm
           mv opt.wasm ${{ github.workspace }}/rust_wasm/bin-artifacts/rustc_opt.wasm
@@ -462,9 +462,9 @@ jobs:
       - name: apply rustc.wasm compiler patches
         shell: bash
         run: |
-          bash "${GITHUB_WORKSPACE}/rust_wasm/ci/apply-rust-patches.sh" \
+          bash "${GITHUB_WORKSPACE}/rust_wasm/legacy/llvm/ci/apply-rust-patches.sh" \
             "${GITHUB_WORKSPACE}/rust" \
-            "${GITHUB_WORKSPACE}/rust_wasm/patches/rust-1.99.1"
+            "${GITHUB_WORKSPACE}/rust_wasm/legacy/llvm/patches/rust-1.99.1"
 
       - name: rustbuild setup
         run: |
@@ -620,7 +620,7 @@ jobs:
 
       # - name: rewrite
       #   run: |
-      #     cd rust_wasm/config_rewriter
+      #     cd rust_wasm/legacy/llvm/config_rewriter
       #     cargo run -- ../../rust/config.llvm.toml all linux
       #     cargo clean
       #     echo "rewrite done"
@@ -751,9 +751,9 @@ jobs:
       - name: apply rustc.wasm compiler patches
         shell: bash
         run: |
-          bash "${GITHUB_WORKSPACE}/rust_wasm/ci/apply-rust-patches.sh" \
+          bash "${GITHUB_WORKSPACE}/rust_wasm/legacy/llvm/ci/apply-rust-patches.sh" \
             "${GITHUB_WORKSPACE}/rust" \
-            "${GITHUB_WORKSPACE}/rust_wasm/patches/rust-1.99.1"
+            "${GITHUB_WORKSPACE}/rust_wasm/legacy/llvm/patches/rust-1.99.1"
 
       - name: free space
         uses: jlumbroso/free-disk-space@main
@@ -908,9 +908,9 @@ jobs:
       - name: apply rustc.wasm compiler patches
         shell: bash
         run: |
-          bash "${GITHUB_WORKSPACE}/rust_wasm/ci/apply-rust-patches.sh" \
+          bash "${GITHUB_WORKSPACE}/rust_wasm/legacy/llvm/ci/apply-rust-patches.sh" \
             "${GITHUB_WORKSPACE}/rust" \
-            "${GITHUB_WORKSPACE}/rust_wasm/patches/rust-1.99.1"
+            "${GITHUB_WORKSPACE}/rust_wasm/legacy/llvm/patches/rust-1.99.1"
 
       - name: free space
         uses: jlumbroso/free-disk-space@main
