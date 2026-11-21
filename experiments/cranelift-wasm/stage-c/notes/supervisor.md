@@ -1,6 +1,6 @@
 # Compile-level supervisor: plan
 
-Status: **M1–M4 done**. This is the host-side scheduler for Goal 1's
+Status: **M1–M5b done**. This is the host-side scheduler for Goal 1's
 tier 2 and Goal 2's resident compiler service. It keeps the compiler a pure
 function of (source, options) and puts the option policy, caching and swapping
 in the host, where they can be tested.
@@ -203,11 +203,11 @@ Reading:
 - **All three tiers return identical `run(seed)` values and output lengths**
   for every program (checked with `bench-host run` on the stored artifacts).
 
-M1, M2, M3 and M4 are accepted: sixteen golden tests pass in CI, the matrix
-above is the M2 evidence, the swap table above is the M3 evidence, and the
-state tests above are the M4 evidence. The composable-spec refactor has landed
-(M5b's first half). Next is the empirical selector, then the crate-level cache
-(M5).
+M1–M4 and M5b are accepted: twenty-three tests pass in CI (sixteen golden,
+seven selector), the matrix above is the M2 evidence, the swap table is the
+M3 evidence, the state tests are the M4 evidence, and the selection table
+above is the M5b evidence. Next is the crate-level cache and multi-crate
+workspace (M5).
 
 ## M3: the swap
 
@@ -269,6 +269,30 @@ Not covered yet: in-flight host calls (a swap is still quiescent by
 construction), threads inside plugins, host imports, and allocator internals
 beyond what the plugin puts in its own snapshot. Those belong to the service,
 not the supervisor.
+
+## Empirical selection (M5b)
+
+`matrix --exec --samples N --record profiles.json` runs each built artifact and
+records `{spec, compile_ms, exec_ms, size_bytes}` per program. `select
+--profiles profiles.json --program P --objective exec|size|balanced
+[--min-samples N] [--current SPEC] [--margin M]` returns the best known spec.
+
+The policy is conservative: median per spec, a minimum number of measurements
+before a spec is eligible, and a fractional margin (default 5%) before
+switching away from `--current`, so timing noise cannot make a running service
+oscillate. Repeated matrix runs append to the same scoreboard.
+
+One matrix run on the four programs (five execution samples each):
+
+| program | exec objective | size objective | balanced |
+| --- | --- | --- | --- |
+| `strings` | opt (0.888 ms) | release (41,487 B) | release |
+| `nbody` | release (70.06 ms) | release (34,988 B) | release |
+| `generated_stress` | opt (0.015 ms) | release (89,753 B) | release |
+
+The opt/release choice on exec is inside noise (`nbody` 70.06 vs 70.29 ms);
+compile times are equal, so release is the safe default when execution is a
+tie. That is exactly the case the margin exists for.
 
 ## Test matrix (M1)
 

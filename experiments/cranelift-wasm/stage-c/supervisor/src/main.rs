@@ -12,8 +12,9 @@ use std::time::Instant;
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand};
 use cogwasm_supervisor::{
-    Artifact, ArtifactStore, CompileOptions, FakeCompiler, JobSpec, Preset, RealCompiler,
-    RealCompilerConfig, SourceSpec, Supervisor, Swapper, WasmtimeRuntime,
+    Artifact, ArtifactStore, CompileOptions, FakeCompiler, JobSpec, Measurement, Objective, Preset,
+    RealCompiler, RealCompilerConfig, Runtime, Scoreboard, SourceSpec, Supervisor, Swapper,
+    WasmtimeRuntime,
 };
 use serde::Serialize;
 
@@ -77,9 +78,37 @@ enum Command {
         /// Prepared program sources (each includes the benchmark prelude).
         #[arg(long, required = true, num_args = 1..)]
         programs: Vec<PathBuf>,
+        /// Run each built artifact and record execution time.
+        #[arg(long)]
+        exec: bool,
+        /// Execution samples per artifact (the first is a warm-up).
+        #[arg(long, default_value_t = 5)]
+        samples: usize,
+        #[arg(long, default_value_t = 42)]
+        seed: u64,
+        /// Append measurements to this scoreboard JSON.
+        #[arg(long)]
+        record: Option<PathBuf>,
         /// Write the rows as JSON here.
         #[arg(long)]
         json: Option<PathBuf>,
+    },
+    /// Print the best measured spec for a program.
+    Select {
+        #[arg(long)]
+        profiles: PathBuf,
+        #[arg(long)]
+        program: String,
+        /// exec, size or balanced.
+        #[arg(long, default_value = "exec")]
+        objective: String,
+        #[arg(long, default_value_t = 3)]
+        min_samples: usize,
+        /// Fractional improvement required to switch away from --current.
+        #[arg(long, default_value_t = 0.05)]
+        margin: f64,
+        #[arg(long)]
+        current: Option<String>,
     },
     /// Swap demo (M3): serve T0, build T1 in the background, install it, verify.
     Demo {
@@ -123,7 +152,14 @@ struct MatrixRow {
     key: String,
     bytes: u64,
     compile_ms: Option<u64>,
+    exec_ms: Option<f64>,
     hit: bool,
+}
+
+#[derive(Clone, Copy)]
+struct ExecConfig {
+    samples: usize,
+    seed: u64,
 }
 
 #[derive(Serialize)]
@@ -154,6 +190,10 @@ fn main() -> Result<()> {
             compiler_id,
             specs,
             programs,
+            exec,
+            samples,
+            seed,
+            record,
             json,
         } => {
             let config = RealCompilerConfig {
@@ -166,12 +206,37 @@ fn main() -> Result<()> {
                 work_root: work,
                 compiler_id,
             };
-            let report = matrix(&config, &store, &specs, &programs)?;
+            let exec = exec.then_some(ExecConfig { samples, seed });
+            let report = matrix(&config, &store, &specs, &programs, exec, record.as_deref())?;
             if let Some(path) = json {
                 let encoded =
                     serde_json::to_vec_pretty(&report).context("serialising the matrix")?;
                 std::fs::write(&path, encoded)
                     .with_context(|| format!("writing {}", path.display()))?;
+            }
+        }
+        Command::Select {
+            profiles,
+            program,
+            objective,
+            min_samples,
+            margin,
+            current,
+        } => {
+            let objective = match objective.as_str() {
+                "exec" => Objective::Exec,
+                "size" => Objective::Size,
+                "balanced" => Objective::Balanced,
+                other => bail!("unknown objective {other:?} (exec, size or balanced)"),
+            };
+            let current = match current {
+                Some(text) => Some(CompileOptions::from_spec(&text).map_err(anyhow::Error::msg)?),
+                None => None,
+            };
+            let board = Scoreboard::load(&profiles)?;
+            match board.choose(&program, objective, min_samples, current.as_ref(), margin) {
+                Some(spec) => println!("{}", spec.to_spec()),
+                None => println!("no spec has {min_samples} samples for {program}"),
             }
         }
         Command::Demo {
@@ -228,6 +293,8 @@ fn matrix(
     store: &Path,
     specs: &[String],
     programs: &[PathBuf],
+    exec: Option<ExecConfig>,
+    record: Option<&Path>,
 ) -> Result<MatrixReport> {
     if programs.is_empty() {
         bail!("matrix needs at least one --programs entry");
@@ -246,10 +313,15 @@ fn matrix(
         })
         .collect::<Result<Vec<_>>>()?;
     let supervisor = Supervisor::new(ArtifactStore::new(store), RealCompiler::new(config.clone()));
+    let runtime = exec.map(|_| WasmtimeRuntime::new());
+    let mut board = match record {
+        Some(path) if path.exists() => Scoreboard::load(path)?,
+        Some(_) | None => Scoreboard::new(),
+    };
     let mut rows = Vec::new();
     println!(
-        "{:<22} {:<24} {:<7} {:>9} {:>10}",
-        "program", "spec", "state", "bytes", "compile_ms"
+        "{:<22} {:<24} {:<7} {:>9} {:>10} {:>10}",
+        "program", "spec", "state", "bytes", "compile_ms", "exec_ms"
     );
     for program in programs {
         let source = SourceSpec::new(program, crate_name(program)?);
@@ -261,8 +333,31 @@ fn matrix(
             }
             let outcome = supervisor.build(&job)?;
             let artifact = outcome.artifact();
+            let exec_ms = match (exec, runtime.as_ref()) {
+                (Some(settings), Some(runtime)) => {
+                    match measure_exec(runtime, artifact, settings.seed, settings.samples) {
+                        Ok(ms) => Some(ms),
+                        Err(error) => {
+                            eprintln!("exec {} {text} failed: {error}", source.crate_name);
+                            None
+                        }
+                    }
+                }
+                _ => None,
+            };
+            if record.is_some() {
+                board.record(
+                    &source.crate_name,
+                    Measurement {
+                        spec: options.clone(),
+                        compile_ms: artifact.meta.compile_ms,
+                        exec_ms,
+                        size_bytes: artifact.meta.bytes,
+                    },
+                );
+            }
             println!(
-                "{:<22} {:<24} {:<7} {:>9} {:>10}",
+                "{:<22} {:<24} {:<7} {:>9} {:>10} {:>10}",
                 source.crate_name,
                 text,
                 if outcome.was_hit() { "hit" } else { "built" },
@@ -270,7 +365,8 @@ fn matrix(
                 artifact
                     .meta
                     .compile_ms
-                    .map_or_else(|| "-".to_owned(), |ms| ms.to_string())
+                    .map_or_else(|| "-".to_owned(), |ms| ms.to_string()),
+                exec_ms.map_or_else(|| "-".to_owned(), |ms| format!("{ms:.3}"))
             );
             rows.push(MatrixRow {
                 program: source.crate_name.clone(),
@@ -279,11 +375,36 @@ fn matrix(
                 key: artifact.key.clone(),
                 bytes: artifact.meta.bytes,
                 compile_ms: artifact.meta.compile_ms,
+                exec_ms,
                 hit: outcome.was_hit(),
             });
         }
     }
+    if let Some(path) = record {
+        board.save(path)?;
+        println!("recorded measurements in {}", path.display());
+    }
     Ok(MatrixReport { rows })
+}
+
+fn measure_exec(
+    runtime: &WasmtimeRuntime,
+    artifact: &Artifact,
+    seed: u64,
+    samples: usize,
+) -> Result<f64> {
+    let mut instance = runtime.instantiate(artifact, 0)?;
+    let samples = samples.max(2);
+    let mut times = Vec::with_capacity(samples - 1);
+    for index in 0..samples {
+        let started = Instant::now();
+        instance.call(seed)?;
+        if index > 0 {
+            times.push(started.elapsed().as_secs_f64() * 1000.0);
+        }
+    }
+    times.sort_by(f64::total_cmp);
+    Ok(times[times.len() / 2])
 }
 
 fn demo(

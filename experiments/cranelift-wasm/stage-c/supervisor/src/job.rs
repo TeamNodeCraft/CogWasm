@@ -69,6 +69,16 @@ pub enum Strip {
 }
 
 impl Strip {
+    /// The option name used in a spec.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Debuginfo => "debuginfo",
+            Self::Symbols => "symbols",
+        }
+    }
+
     /// The value rustc expects after `-Cstrip=`, or `None` for no flag.
     #[must_use]
     pub fn as_str(self) -> Option<&'static str> {
@@ -146,7 +156,7 @@ impl CompileOptions {
         if self.debug && self.strip != Strip::None {
             bail!(
                 "debug info cannot be combined with strip={}",
-                strip_name(self.strip)
+                self.strip.name()
             );
         }
         if self.inline_threshold.is_some() && !self.inline_wasm {
@@ -183,6 +193,26 @@ impl CompileOptions {
             flags.push("-Cdebuginfo=2".to_owned());
         }
         flags
+    }
+
+    /// The canonical spec string: the inverse of [`CompileOptions::from_spec`].
+    #[must_use]
+    pub fn to_spec(&self) -> String {
+        let mut parts = vec![
+            format!("opt-level={}", self.opt_level.as_str()),
+            format!("mir-opt-level={}", self.mir_opt_level),
+            format!("inline={}", yes_no(self.inline_wasm)),
+        ];
+        if let Some(threshold) = self.inline_threshold {
+            parts.push(format!("inline-threshold={threshold}"));
+        }
+        parts.push(format!("incremental={}", yes_no(self.incremental)));
+        parts.push(format!("strip={}", self.strip.name()));
+        if let Some(units) = self.codegen_units {
+            parts.push(format!("codegen-units={units}"));
+        }
+        parts.push(format!("debug={}", yes_no(self.debug)));
+        parts.join(",")
     }
 
     /// Parse `"fast"`, `"opt"`, `"release"` or a comma-separated option list
@@ -234,19 +264,15 @@ impl CompileOptions {
     }
 }
 
+fn yes_no(value: bool) -> &'static str {
+    if value { "yes" } else { "no" }
+}
+
 fn parse_bool(value: &str) -> Result<bool, String> {
     match value {
         "yes" | "true" | "1" => Ok(true),
         "no" | "false" | "0" => Ok(false),
         other => Err(format!("expected yes/no, got {other:?}")),
-    }
-}
-
-fn strip_name(strip: Strip) -> &'static str {
-    match strip {
-        Strip::None => "none",
-        Strip::Debuginfo => "debuginfo",
-        Strip::Symbols => "symbols",
     }
 }
 

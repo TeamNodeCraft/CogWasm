@@ -21,6 +21,7 @@ pub mod compiler;
 pub mod job;
 pub mod real;
 pub mod runtime;
+pub mod select;
 pub mod store;
 pub mod supervisor;
 pub mod swap;
@@ -32,6 +33,7 @@ pub use job::{
 };
 pub use real::{RealCompiler, RealCompilerConfig};
 pub use runtime::{FakeRuntime, Instance, Runtime};
+pub use select::{Measurement, Objective, Scoreboard};
 pub use store::{Artifact, ArtifactMeta, ArtifactStore};
 pub use supervisor::{Begin, BuildOutcome, BuildTicket, Supervisor};
 pub use swap::Swapper;
