@@ -6,7 +6,7 @@
 #   ./run.sh check      compile + link + eval plugin (c) against the pure sysroot
 #   ./run.sh plugins    build (a),(b),(c),(e),(f) with rustc.wasm (strict)
 #   ./run.sh a2check    A.2 (e)/(f) correctness assertions (no timing checks)
-#   ./run.sh bench      stage-B table on latest Wasmtime (median of 5)
+#   ./run.sh bench      stage-B comparison table (history) on latest Wasmtime
 #   ./run.sh a2         A.2 runtime/load measurements for (e),(f)
 #   ./run.sh incremental  cold vs -C incremental, one-line edits, (c) and (e)
 #   ./run.sh precompiled-check  .cwasm load + mismatch/truncation fallback
@@ -67,7 +67,7 @@ case "${1:-check}" in
     a2check)
         need "$PURE"
         H="$TOOL/target/a2/harness/release/a2-harness"
-        ( cd "$ROOT/stage-b/a2/harness" && \
+        ( cd "$ROOT/stage-c/programs/a2_harness" && \
             CARGO_TARGET_DIR="$TOOL/target/a2/harness" cargo build --release )
         P="$CARGO_TARGET_DIR/wasm32-unknown-unknown/release"
         need "$P/e_math.wasm"; need "$P/f_geometry.wasm"
@@ -179,7 +179,7 @@ PYEOF
     a2)
         need "$PURE"
         H="$TOOL/target/a2/harness/release/a2-harness"
-        ( cd "$ROOT/stage-b/a2/harness" && \
+        ( cd "$ROOT/stage-c/programs/a2_harness" && \
             CARGO_TARGET_DIR="$TOOL/target/a2/harness" cargo build --release )
         P="$CARGO_TARGET_DIR/wasm32-unknown-unknown/release"
         for p in e_math f_geometry; do

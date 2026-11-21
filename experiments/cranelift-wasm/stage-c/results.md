@@ -42,7 +42,8 @@ Raw inspection: [`results/rustc-inspect.json`](results/rustc-inspect.json).
 ## Stage B table, latest Wasmtime (median of 5)
 
 Plugin (c) source, pure sysroot, total edit-to-result. The stage-B column is
-the Wasmtime 46.0.3 + wasi-threads result from `../stage-b/results/stage-b.json`.
+the Wasmtime 46.0.3 + wasi-threads result from
+`notes/history/stage-b/results/stage-b.json`.
 
 | Phase | Stage B (Wasmtime 46, threads) | **Stage C (Wasmtime 50.0.2, p1)** | C / B |
 |---|---:|---:|---:|

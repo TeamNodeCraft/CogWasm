@@ -98,7 +98,7 @@ jobs:
           path: |
             experiments/cranelift-wasm/toolchain/cargo/registry
             experiments/cranelift-wasm/toolchain/cargo/git
-          key: cranelift-wasm-cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'experiments/cranelift-wasm/stage-c/programs/*/Cargo.lock', 'experiments/cranelift-wasm/stage-b/a2/harness/Cargo.lock') }}-v1
+          key: cranelift-wasm-cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'experiments/cranelift-wasm/stage-c/programs/*/Cargo.lock') }}-v1
           restore-keys: |
             cranelift-wasm-cargo-${{ runner.os }}-
 
@@ -143,7 +143,7 @@ jobs:
             experiments/cranelift-wasm/toolchain/stage-c/sysroot-pure
             experiments/cranelift-wasm/toolchain/stage-b/rust/build/host/stage1
             experiments/cranelift-wasm/toolchain/target/wild/release/wild
-          key: cranelift-wasm-compiler-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('experiments/cranelift-wasm/stage-c/patches/**', 'experiments/cranelift-wasm/stage-c/scripts/build-rustc-wasm.sh', 'experiments/cranelift-wasm/stage-c/scripts/build-pure-sysroot.sh', 'experiments/cranelift-wasm/stage-c/scripts/rustc-wasm-wrapper.sh', 'experiments/cranelift-wasm/stage-c/programs/c_plugin/Cargo.*', 'experiments/cranelift-wasm/stage-b/scripts/**', 'experiments/cranelift-wasm/ci/setup-toolchain.sh') }}-v1
+          key: cranelift-wasm-compiler-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('experiments/cranelift-wasm/stage-c/patches/**', 'experiments/cranelift-wasm/stage-c/scripts/build-rustc-wasm.sh', 'experiments/cranelift-wasm/stage-c/scripts/build-pure-sysroot.sh', 'experiments/cranelift-wasm/stage-c/scripts/rustc-wasm-wrapper.sh', 'experiments/cranelift-wasm/stage-c/programs/c_plugin/Cargo.*', 'experiments/cranelift-wasm/stage-c/scripts/setup-sources.sh', 'experiments/cranelift-wasm/ci/setup-toolchain.sh') }}-v1
 
       - name: build and test
         env:
@@ -168,7 +168,7 @@ jobs:
             experiments/cranelift-wasm/toolchain/stage-c/sysroot-pure
             experiments/cranelift-wasm/toolchain/stage-b/rust/build/host/stage1
             experiments/cranelift-wasm/toolchain/target/wild/release/wild
-          key: cranelift-wasm-compiler-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('experiments/cranelift-wasm/stage-c/patches/**', 'experiments/cranelift-wasm/stage-c/scripts/build-rustc-wasm.sh', 'experiments/cranelift-wasm/stage-c/scripts/build-pure-sysroot.sh', 'experiments/cranelift-wasm/stage-c/scripts/rustc-wasm-wrapper.sh', 'experiments/cranelift-wasm/stage-c/programs/c_plugin/Cargo.*', 'experiments/cranelift-wasm/stage-b/scripts/**', 'experiments/cranelift-wasm/ci/setup-toolchain.sh') }}-v1
+          key: cranelift-wasm-compiler-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('experiments/cranelift-wasm/stage-c/patches/**', 'experiments/cranelift-wasm/stage-c/scripts/build-rustc-wasm.sh', 'experiments/cranelift-wasm/stage-c/scripts/build-pure-sysroot.sh', 'experiments/cranelift-wasm/stage-c/scripts/rustc-wasm-wrapper.sh', 'experiments/cranelift-wasm/stage-c/programs/c_plugin/Cargo.*', 'experiments/cranelift-wasm/stage-c/scripts/setup-sources.sh', 'experiments/cranelift-wasm/ci/setup-toolchain.sh') }}-v1
 
       # A CI-sized subset of the product benchmark suite. It reuses the
       # rustc.wasm, sysroot, Wild and Cargo target directory this job just
@@ -292,7 +292,7 @@ jobs:
           path: |
             experiments/cranelift-wasm/toolchain/cargo/registry
             experiments/cranelift-wasm/toolchain/cargo/git
-          key: cranelift-wasm-cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'experiments/cranelift-wasm/stage-c/programs/*/Cargo.lock', 'experiments/cranelift-wasm/stage-b/a2/harness/Cargo.lock') }}-v1
+          key: cranelift-wasm-cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'experiments/cranelift-wasm/stage-c/programs/*/Cargo.lock') }}-v1
 
       - name: save pinned source checkouts
         if: success() && steps.cache-src.outputs.cache-hit != 'true'

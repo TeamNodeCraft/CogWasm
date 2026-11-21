@@ -73,7 +73,7 @@ Rust's MIR inliner cannot remove these: it runs **before monomorphization**, so
 a call to `<F::Int as Shl<u32>>::shl` inside `sqrt_round<F>` is still
 polymorphic when the pass runs. `-Zinline-mir -Zmir-opt-level=4` leaves the
 call count unchanged (241 calls in the whole module) and measured slightly
-slower (74–80 ns/point), confirming the stage-B/a2 result from a different
+slower (74–80 ns/point), confirming the earlier A.2 result from a different
 angle. Cranelift has no inliner of its own, and clif-to-wasm cannot add one
 while compiling one function at a time.
 
@@ -120,8 +120,9 @@ slower to compile but not slower to run. The hot path is `reduce`, `transform`,
 ### (f) is not affected
 
 `f_geometry` spends its time in imported host calls; the backend emits almost
-nothing between them. It is at parity (2.85 vs 3.11 ns/call in the stage-B
-table) and this patch does not touch the call ABI, so no change is expected.
+nothing between them. It is at parity (2.85 vs 3.11 ns/call in the earlier
+stage-B table) and this patch does not touch the call ABI, so no change is
+expected.
 
 ## Patch: inline tiny leaf functions
 

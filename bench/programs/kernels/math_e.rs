@@ -1,7 +1,7 @@
 //! A.2 (e) maths node, in the benchmark ABI: 100k f64 points transformed with
 //! `y = sin(x)*0.5 + cos(x*0.25) + sqrt(|x|)` and reduced to mean/min/max.
 //! Uses the `libm` crate (vendored under bench/vendor) exactly like
-//! `stage-b/a2/e_math`, so both compilers build the same arithmetic.
+//! `stage-c/programs/e_math`, so both compilers build the same arithmetic.
 #![no_std]
 
 extern crate libm;

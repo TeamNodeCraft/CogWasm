@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
-# Build rustc.wasm for wasm32-wasip1-threads with cg_clif + clif-to-wasm as the
-# only codegen backend, using the prior-art patch series from
-# ryancbuckley/rust-playground-inbrowser.
+# Set up the stage-C rustc source tree: fetch/verify the pinned rust-lang/rust
+# checkout, apply the prior-art rust-to-wasm patch series once, fetch/select
+# wasi-sdk, point bootstrap.toml at it, and stop.
 #
-# The native stage1 compiler is still built with LLVM (stage0's LLVM backend,
-# plus a CI LLVM download for the native compiler). That is the one build-time
-# LLVM use; rustc.wasm itself contains only cg_clif. See ../README.md.
+# This is the source setup stage C needs. It is idempotent and never builds
+# rustc.wasm; stage-c/scripts/build-rustc-wasm.sh does that afterwards. The
+# native stage1 compiler is still built with LLVM (stage0's LLVM backend, plus
+# a CI LLVM download for the native compiler). That is the one build-time LLVM
+# use; rustc.wasm itself contains only cg_clif. See ../README.md.
 #
-# Everything downloaded/built lives under toolchain/ (gitignored).
+# Everything downloaded/built lives under toolchain/ (gitignored). The ignored
+# toolchain directory names still say stage-b; renaming that layout is a
+# separate migration phase.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)   # experiments/cranelift-wasm
@@ -38,21 +42,11 @@ esac
 WASI_SDK_URL="https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-34/$WASI_SDK.tar.gz"
 
 log() { printf '\n== %s\n' "$*" >&2; }
-jobs() {
-    if [ -n "${BUILD_JOBS:-}" ]; then
-        printf '%s' "$BUILD_JOBS"
-    elif command -v nproc >/dev/null 2>&1; then
-        nproc
-    else
-        sysctl -n hw.ncpu
-    fi
-}
-JOBS=$(jobs)
 
 mkdir -p "$WORK"
 
-# The 23-patch series lives in the prior-art checkout; fetch it if Stage A's
-# toolchain/playground is not present.
+# The 23-patch series lives in the prior-art checkout; fetch it if the
+# toolchain's playground checkout is not present.
 if [ ! -d "$PLAYGROUND/.git" ]; then
     log "fetching prior art @ $PLAYGROUND_REV"
     git init -q "$PLAYGROUND"
@@ -106,35 +100,4 @@ PY
 grep -q "$WASI_SDK_PATH/share/wasi-sysroot" "$SRC/bootstrap.toml" || {
     echo "failed to rewrite bootstrap.toml wasi-sdk paths" >&2; exit 1; }
 
-# setup-toolchain.sh uses this to fetch and patch the pinned sources without
-# paying for the stage-B rustc.wasm build; stage C then builds wasm32-wasip1.
-if [ "${SETUP_ONLY:-0}" = 1 ]; then
-    log "setup only: rust source, prior-art patches and wasi-sdk are ready"
-    exit 0
-fi
-
-host=$(rustc +"$RUSTUP_TOOLCHAIN" -vV | sed -n 's/^host: //p')
-# Keep paths out of the shipped artifacts. The two x.py runs must agree, or the
-# second builds a second stage1 compiler.
-flags='["-Ztranslate-remapped-path-to-local-path=no"]'
-NO_LOCAL_PATHS=(--set rust.remap-debuginfo=true
-    --set "rust.rustflags=$flags"
-    --set "target.$host.rustflags=$flags"
-    --set target.wasm32-wasip1-threads.rustflags="$flags"
-    --set target.wasm32-wasip1.rustflags="$flags")
-
-log "rustc.wasm build (host=$host; stage0 LLVM compiles rustc; cg_clif for the wasm target)"
-cd "$SRC"
-# --ci=false: on GitHub Actions bootstrap treats HEAD^1 as an upstream commit
-# and download-ci-llvm 404s on our `git am` commits. See the stage-C build
-# script for the same explanation.
-./x.py install --ci=false "${NO_LOCAL_PATHS[@]}" --set build.jobs="$JOBS"
-
-test -f "$SRC/build/wasm32-wasip1-threads/stage2/bin/rustc.wasm"
-log "building the stage1 library for the host + wasm32-wasip1 (wasm proc macros)"
-./x.py build library --ci=false --stage 1 --host "$host" \
-    --target "$host,wasm32-wasip1,wasm32-wasip1-threads" "${NO_LOCAL_PATHS[@]}" \
-    --set build.jobs="$JOBS"
-
-log "artifacts"
-ls -lh "$SRC/build/wasm32-wasip1-threads/stage2/bin/rustc.wasm"
+log "source setup: rust source, prior-art patches and wasi-sdk are ready"

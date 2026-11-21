@@ -19,22 +19,23 @@ Stage C closes the remaining non-Rust pieces of the stage-A/B plugin pipeline:
    turns into real wasm instructions. Plugin (c) uses a bump/free-list over
    `memory.grow` instead of a fixed 1 MiB `.bss` heap; Wild and rust-lld now
    produce the same 35 KB artifact, down from 1.08 MB with Wild.
-4. **Re-measured on the latest Wasmtime**, median of 5, against the stage-B
-   and A.2 tables. After the 2026-11-19 speed batch the headline is: plugin
-   compile inside rustc.wasm **79.4 ms**, link **6.5 ms**, edit-to-result
-   **96.2 ms**, `eval(1,2,3,4) == 2.25`. A per-host precompiled `.cwasm` loads
-   in **18.7 ms** (vs 37.6 s cold, 461 ms from Wasmtime's cache), and a
-   one-line edit with `--incremental` takes **97.7 ms** steady-state
-   (14.1% less than a cold compile). See the speed-batch section of
-   [`../results.md`](../results.md).
+4. **Re-measured on the latest Wasmtime**, median of 5, against the earlier
+   stage-B (Wasmtime 46) and A.2 tables. After the 2026-11-19 speed batch the
+   headline is: plugin compile inside rustc.wasm **79.4 ms**, link **6.5 ms**,
+   edit-to-result **96.2 ms**, `eval(1,2,3,4) == 2.25`. A per-host precompiled
+   `.cwasm` loads in **18.7 ms** (vs 37.6 s cold, 461 ms from Wasmtime's
+   cache), and a one-line edit with `--incremental` takes **97.7 ms**
+   steady-state (14.1% less than a cold compile). See the speed-batch section
+   of [`notes/history/stage-a-results.md`](notes/history/stage-a-results.md).
 
 Full numbers and comparisons: [`results.md`](results.md) and the appended
-[`../results.md`](../results.md) stage-C section.
+[`notes/history/stage-a-results.md`](notes/history/stage-a-results.md) stage-C
+section.
 
 ## Pins
 
-The stage-B toolchain/downloads are reused under `../toolchain/` (gitignored).
-New or changed pins:
+The existing pinned toolchain/downloads under `../toolchain/` (gitignored) are
+reused. New or changed pins:
 
 | Component | Source | Revision / version |
 |---|---|---|
@@ -62,24 +63,29 @@ stage-c/
 ├── run.sh                          # plugins/check/bench/a2
 ├── host/                           # Wasmtime 50.0.2 p1 host (no wasi-threads)
 ├── scripts/
-│   ├── build-host.sh               # Wasmtime 50.0.2 p1 host
+│   ├── setup-sources.sh            # rust checkout, prior-art patches, wasi-sdk
 │   ├── build-rustc-wasm.sh         # apply stage-C patches + x.py install
+│   ├── build-host.sh               # Wasmtime 50.0.2 p1 host
 │   ├── build-pure-sysroot.sh       # core/alloc/compiler_builtins via rustc.wasm
 │   ├── rustc-wasm-wrapper.sh       # Cargo RUSTC wrapper
 │   └── run-item3.sh                # memory.grow regression suite
 ├── programs/
 │   ├── a_add, b_alloc, c_plugin    # stage-A programs, (c) with a growable heap
 │   ├── e_math, f_geometry          # A.2 programs, growable heap
-│   ├── mem_grow, *_harness          # item-3 end-to-end tests
+│   ├── a2_harness                  # A.2 load/bench harness (standalone crate)
+│   ├── mem_grow, *_harness         # item-3 end-to-end tests
 ├── patches/                        # rust, cg_clif, clif-to-wasm patches
 ├── notes/item3-memory-grow.md
+├── notes/history/                  # retired stage-A/B notes and raw results
 └── results/                        # measurements + logs
 ```
 
 ## Reproduce
 
 ```sh
-# 0. stage-B toolchain/tree already present (../toolchain/stage-b).
+# 0. Fetch the pinned rust source, prior-art patches and wasi-sdk (idempotent).
+stage-c/scripts/setup-sources.sh
+
 # 1. Apply the stage-C patches and build rustc.wasm (~3.5 min incremental).
 stage-c/scripts/build-rustc-wasm.sh
 
@@ -96,7 +102,7 @@ stage-c/run.sh plugins
 stage-c/run.sh check
 stage-c/run.sh a2check   # A.2 (e)/(f) correctness, no timing assertions
 
-# 5. Stage-B table on Wasmtime 50.0.2 (median of 5).
+# 5. Stage-B comparison table (history) on Wasmtime 50.0.2 (median of 5).
 stage-c/run.sh bench
 
 # 6. A.2 load/run measurements.
@@ -106,9 +112,10 @@ stage-c/run.sh a2
 stage-c/scripts/run-item3.sh all
 ```
 
-`build-rustc-wasm.sh` reuses the stage-B source/build tree and applies every
-patch under `patches/rust/`, `patches/cg_clif/` and `patches/clif-to-wasm/` in
-sorted order, idempotently. `x.py install` must succeed: the former
+`build-rustc-wasm.sh` reuses the pinned source/build tree under
+`toolchain/stage-b` and applies every patch under `patches/rust/`,
+`patches/cg_clif/` and `patches/clif-to-wasm/` in sorted order, idempotently.
+`x.py install` must succeed: the former
 `generate-copyright` failure for the out-of-tree clif-to-wasm path dependency
 is fixed by `patches/rust/0002-generate-copyright-path-deps.patch`. On any
 non-zero exit the script prints the tail of the log and stops; it only copies
@@ -135,7 +142,8 @@ jobserver helper and codegen worker threads are only reached with
 `parallel-compiler` feature, so they are not called. Linking still goes
 through the existing `playground.spawn` host import.
 
-The host is [`host/`](host/), a port of the stage-B host to Wasmtime 50.0.2:
+The host is [`host/`](host/), a port of the earlier Wasmtime 46 host to
+Wasmtime 50.0.2:
 plain `wasmtime_wasi::p1`, guest memory is a normal `Memory`, no
 `wasmtime-wasi-threads`. `check` still returns **2.25**.
 

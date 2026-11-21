@@ -84,5 +84,5 @@ licence, not under the parent repository's MIT OR Apache-2.0 option.
   The upstream-rebased commits do apply cleanly to `a4af0a9`.
 * The rust patch was `x.py check`ed and formatted, but the end-to-end
   rustc.wasm/Wasmtime run was not repeated in this submission; it is recorded
-  in `../stage-c/README.md` and `../results.md` for the same source changes on
-  `b6eeb93`.
+  in `../stage-c/README.md` and `../stage-c/results.md` for the same source
+  changes on `b6eeb93`.

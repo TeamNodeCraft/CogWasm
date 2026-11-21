@@ -1,6 +1,0 @@
-# Ad-hoc host runs may create these; run.sh uses ../toolchain/ instead.
-/work/
-/work-*/
-/*.wasm
-/host/target/
-/a2/**/target/

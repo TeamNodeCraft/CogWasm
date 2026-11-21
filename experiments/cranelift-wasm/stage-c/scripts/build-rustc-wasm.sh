@@ -2,9 +2,10 @@
 # Build stage-c rustc.wasm: wasm32-wasip1 (non-threads), cg_clif only, with
 # every patch under stage-c/patches/{rust,cg_clif,clif-to-wasm}/ applied.
 #
-# Reuses the stage-B source tree under toolchain/stage-b (incremental when the
-# tree was already built). Every patch under stage-c/patches/{rust,cg_clif,
-# clif-to-wasm}/ is applied idempotently before the build, in sorted order.
+# Reuses the pinned source tree under toolchain/stage-b (incremental when the
+# tree was already built). Run stage-c/scripts/setup-sources.sh first if it is
+# missing. Every patch under stage-c/patches/{rust,cg_clif,clif-to-wasm}/ is
+# applied idempotently before the build, in sorted order.
 #
 # `x.py install` must succeed: the generate-copyright failure caused by the
 # out-of-tree clif-to-wasm path dependency is fixed by
@@ -32,7 +33,7 @@ LOG="$ROOT/stage-c/results/build-rustc-wasm.log"
 # checkout has no state file and applies the whole series.
 #
 # The state must live with the checkout it describes: CI caches the patched
-# clif-to-wasm checkout but not the stage-B work tree, so keeping its hashes in
+# clif-to-wasm checkout but not the rust work tree, so keeping its hashes in
 # $WORK made a restored checkout look unpatched, and re-applying 0001 failed
 # on context that 0002-0004 had already moved.
 PATCH_STATE="$WORK/.stage-c-applied-patches"
@@ -58,7 +59,7 @@ jobs() {
 }
 JOBS=$(jobs)
 
-[ -d "$SRC/.git" ] || { echo "missing stage-B rust tree; run stage-b/scripts/build-rustc-wasm.sh once" >&2; exit 1; }
+[ -d "$SRC/.git" ] || { echo "missing rust source tree; run stage-c/scripts/setup-sources.sh once" >&2; exit 1; }
 [ -d "$WASI_SDK" ] || { echo "missing $WASI_SDK" >&2; exit 1; }
 [ -d "$CLIF/.git" ] || { echo "missing $CLIF; run ci/setup-toolchain.sh first" >&2; exit 1; }
 mkdir -p "$(dirname "$LOG")" "$(dirname "$OUT")"

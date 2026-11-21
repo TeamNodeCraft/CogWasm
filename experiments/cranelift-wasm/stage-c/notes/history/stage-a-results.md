@@ -382,9 +382,9 @@ is 3–4.7× LLVM's.
 
 # Stage C results (latest Wasmtime, no wasi-threads, pure sysroot, growable heap)
 
-Date: 2026-11-18/19. Stage C is in [`stage-c/`](stage-c/); details are in
-[`stage-c/README.md`](stage-c/README.md) and
-[`stage-c/results.md`](stage-c/results.md). Summary:
+Date: 2026-11-18/19. Stage C is in [`stage-c/`](../../); details are in
+[`stage-c/README.md`](../../README.md) and
+[`stage-c/results.md`](../../results.md). Summary:
 
 * **rustc.wasm** is now `wasm32-wasip1` (non-threads), 143,849,756 B, SHA-256
   `3c7ca043…c0302f`. The compiler and the codegen coordinator run on the

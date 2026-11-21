@@ -183,7 +183,8 @@ compiles both backends for every program. It needs the stage-C artifacts:
 `toolchain/stage-c/sysroot-pure`,
 `toolchain/target/stage-c-host/release/stage-c-host`,
 `toolchain/target/wild/release/wild`, and the isolated nightly rustup. Missing
-artifacts produce a clear error; run `stage-c/scripts/build-*.sh` first.
+artifacts produce a clear error; run `stage-c/scripts/setup-sources.sh` and
+`stage-c/scripts/build-*.sh` first.
 
 ### Incremental-compilation check
 

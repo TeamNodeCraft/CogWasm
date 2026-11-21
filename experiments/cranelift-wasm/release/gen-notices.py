@@ -34,8 +34,8 @@ IMPORTANT_FILE = re.compile(r"(copyright|licen[cs]e|author|notice)", re.IGNORECA
 MANIFESTS = [
     "stage-c/host/Cargo.toml",
     "difftest/host/Cargo.toml",
-    "stage-b/a2/harness/Cargo.toml",
 ]
+# Includes the standalone A.2 harness at stage-c/programs/a2_harness.
 PROGRAM_GLOB = "stage-c/programs/*/Cargo.toml"
 
 SPDX_TEXT_DIRS = ["toolchain/stage-b/rust/LICENSES", "toolchain/playground/licenses/spdx"]

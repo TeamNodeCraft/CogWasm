@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Fetch the pinned stage-A/B/C toolchain inputs on macOS or Linux.
+# Fetch the pinned cranelift-wasm toolchain inputs on macOS or Linux.
 #
 # Everything lives under toolchain/ (gitignored). This script is idempotent and
 # keeps the network downloads out of build-and-test.sh; the workflow caches
 # toolchain/rustup, toolchain/cargo and the pinned checkouts between runs.
 #
-# It also applies the prior-art rust patch series (through the stage-B setup
-# path) and downloads wasi-sdk, but does NOT build the stage-B rustc.wasm:
-# stage C builds wasm32-wasip1 directly from this tree.
+# It also applies the prior-art rust patch series (through
+# stage-c/scripts/setup-sources.sh) and downloads wasi-sdk, but does NOT build
+# rustc.wasm: stage C builds wasm32-wasip1 directly from this tree.
 set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)   # experiments/cranelift-wasm
 TOOL="$ROOT/toolchain"
@@ -129,10 +129,10 @@ if [ "$wild_patch_applied" = true ] || [ ! -x "$TOOL/target/wild/release/wild" ]
 fi
 "$TOOL/target/wild/release/wild" --version >/dev/null
 
-# Reuse the stage-B setup path (rust checkout + 23-patch series + wasi-sdk +
-# bootstrap.toml rewrite) but stop before it builds wasm32-wasip1-threads.
+# Reuse the stage-C source setup (rust checkout + 23-patch series + wasi-sdk +
+# bootstrap.toml rewrite); it does not build rustc.wasm.
 log "preparing rust source, prior-art patches and wasi-sdk"
-SETUP_ONLY=1 BUILD_JOBS="$JOBS" "$ROOT/stage-b/scripts/build-rustc-wasm.sh"
+"$ROOT/stage-c/scripts/setup-sources.sh"
 
 log "toolchain inputs ready"
 du -sh "$TOOL/rustup" "$TOOL/cargo" "$TOOL/clif-to-wasm" "$TOOL/wild" 2>/dev/null || true

@@ -155,7 +155,8 @@ not inside `rustc.wasm`.
 
 ## Results
 
-Full tables are appended to [`../results.md`](../results.md); raw data is in
+Full tables are appended to
+[`../stage-a-results.md`](../stage-a-results.md); raw data is in
 [`results/stage-b.json`](results/stage-b.json) and
 [`results/a2.json`](results/a2.json).
 

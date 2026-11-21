@@ -18,15 +18,17 @@ Every speed claim needs a number. This is how to get one that means something.
 
 | Question | Tool | Where |
 | --- | --- | --- |
-| How fast is generated code? | The product suite runs kernels plus the A.2 maths (e) and host-call (f) programs against LLVM `-O0` / `-O2` | `bench/run.sh`, `experiments/cranelift-wasm/stage-b/a2/` |
+| How fast is generated code? | The product suite runs kernels plus the A.2 maths (e) and host-call (f) programs against LLVM `-O0` / `-O2` | `bench/run.sh`, `experiments/cranelift-wasm/stage-c/programs/{e_math,f_geometry}` |
 | How fast is the compiler? | The product suite: module load (cold, cached, precompiled), instantiate, compile inside `rustc.wasm` (warm and incremental, with phases), link, edit → result | `bench/run.sh --quick` / `--full` ([README](../../bench/README.md)) |
 | How big is the output? | Total/code/data bytes from the benchmark host | `bench/run.sh` |
 | Is it still correct? | Differential tests | `experiments/cranelift-wasm/difftest/` |
 
 ## Reporting
 
-Put results in `experiments/cranelift-wasm/results.md` (or the stage's own
-`results.md`) as a table: what changed, before, after, ratio, machine, commit.
+Put results in `experiments/cranelift-wasm/stage-c/results.md` (or the stage's
+own `results.md`) as a table: what changed, before, after, ratio, machine,
+commit. Retired stage-A/B measurements live under
+`experiments/cranelift-wasm/stage-c/notes/history/`.
 If the README's Status numbers change, update them in the same commit.
 
 For product-level numbers use the suite and keep the JSON:

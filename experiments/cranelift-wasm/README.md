@@ -1,17 +1,25 @@
-# Stage A: a pure-Rust wasm backend for rustc (cg_clif + clif-to-wasm)
+# Cranelift-wasm: a pure-Rust wasm backend for rustc (cg_clif + clif-to-wasm)
 
-This is the kept stage-A spike for the NodeCraft plugin compiler: compile Rust to a
-wasm core module **without LLVM**, using `rustc_codegen_cranelift` (cg_clif) for
-Rust → CLIF and [`clif-to-wasm`](https://github.com/ryancbuckley/clif-to-wasm) for
-CLIF → relocatable wasm objects. Objects are linked with either
+This is the cranelift-wasm experiment for the NodeCraft plugin compiler: compile
+Rust to a wasm core module **without LLVM**, using
+`rustc_codegen_cranelift` (cg_clif) for Rust → CLIF and
+[`clif-to-wasm`](https://github.com/ryancbuckley/clif-to-wasm) for CLIF →
+relocatable wasm objects. Objects are linked with either
 [Wild](https://github.com/wild-linker/wild) or `rust-lld`, validated with
 `wasmparser`, and run in Wasmtime.
+
+The live pipeline is **stage C** under [`stage-c/`](stage-c/). The stage-A and
+stage-B trees have been retired; their notes and raw results are kept under
+[`stage-c/notes/history/`](stage-c/notes/history/), and the combined measurement
+history is [`stage-a-results.md`](stage-c/notes/history/stage-a-results.md).
 
 **Verdict: (a), (b) and (c) build, link, validate and run.** Program (c) is a
 NodeCraft-style `no_std` + `alloc` plugin with a custom `wasm_import_module`,
 an f64 parameter list, allocation, and a result returned through linear memory.
-(d) is the `std`/wasip1 comparison built by LLVM. Details and numbers are in
-[`results.md`](results.md).
+(d) was the `std`/wasip1 comparison built by LLVM. Stage C now builds the plugin
+sysroot with rustc.wasm itself and runs the compiler on plain WASI p1; details
+are in [`stage-c/README.md`](stage-c/README.md) and
+[`stage-c/results.md`](stage-c/results.md).
 
 ## Pins
 
@@ -27,8 +35,11 @@ isolated `RUSTUP_HOME`/`CARGO_HOME` so no other toolchain is touched.
 | wasmtime (host) | crates.io | `=50.0.2` | pinned once in the root `Cargo.toml` / `Cargo.lock` |
 | wasmparser (host) | crates.io | `0.263` | validation |
 
-The cg_clif patch is [`patches/0001-cg_clif-wasm-backend.patch`](patches/0001-cg_clif-wasm-backend.patch).
-It is derived from the wasm backport in
+The retained stage-A cg_clif patch is
+[`patches/0001-cg_clif-wasm-backend.patch`](patches/0001-cg_clif-wasm-backend.patch);
+the live patch series is under
+[`stage-c/patches/{rust,cg_clif,clif-to-wasm}/`](stage-c/patches/).
+The stage-A patch is derived from the wasm backport in
 [`ryancbuckley/rust-playground-inbrowser`](https://github.com/ryancbuckley/rust-playground-inbrowser)
 at `f5298630dda0f2dc2b44f6ae1b54add7a77d8316` (`patches/cg_clif/0001…0003`),
 adapted to the pinned revisions, with the `clif-to-wasm` path dependency and
@@ -40,38 +51,49 @@ included; it needs a `__stack_limit` global that our programs do not define.
 
 ```
 experiments/cranelift-wasm/
-├── README.md, results.md
-├── run.sh                     # setup/tools/programs/measure/all
-├── scripts/measure.py         # cold/warm timing, size, validation, benches
-├── patches/0001-...patch      # the only cg_clif change
-├── programs/
-│   ├── a_add/                 # no_std add(i32,i32)
-│   ├── b_alloc/               # no_std+alloc: Vec, String, closures, traits, f64/libm
-│   ├── c_plugin/              # NodeCraft-style plugin with a host import
-│   ├── d_hello_std/           # std hello, wasm32-wasip1 (LLVM comparison)
-│   └── host/                  # Wasmtime 50 + wasmparser harness
-├── results/                   # measurements.json, summary.md (committed)
-└── toolchain/                 # rustup, sources, build outputs (gitignored)
+├── README.md
+├── stage-c/                   # the live pipeline
+│   ├── README.md, results.md
+│   ├── run.sh                 # plugins/check/a2check/bench/a2/incremental
+│   ├── host/, supervisor/
+│   ├── scripts/               # setup-sources + rustc.wasm/host/sysroot builds
+│   ├── programs/              # guest programs + the A.2 harness
+│   ├── patches/               # rust, cg_clif and clif-to-wasm patches
+│   └── notes/                 # design notes; history/{stage-a,stage-b}
+├── difftest/                  # LLVM vs cranelift-wasm differential tests
+├── ci/                        # setup-toolchain.sh, build-and-test.sh, audit
+├── release/                   # THIRD_PARTY_NOTICES generator
+├── upstream/                  # upstream PR drafts
+├── results/                   # stage-A measurement data (kept for history)
+├── patches/                   # the stage-A cg_clif patch (retained)
+└── toolchain/                 # downloads/build outputs (gitignored)
 ```
+
+The ignored `toolchain/` directory still uses the old `stage-b/` and `stage-c/`
+names for its contents; renaming that layout is a separate migration step. The
+tracked code does not depend on those path names beyond the toolchain lookups.
 
 ## Reproduce
 
 ```sh
-./run.sh all       # setup + build tools + programs + full measurement matrix
-./run.sh tools     # isolated rustup, three pinned checkouts, cg_clif, wild, host
-./run.sh programs  # build (a)-(d), strict check, smoke tests
-./run.sh measure   # cold/warm timings + sizes + wasmtime benches
+# Fetch the pinned rust source, prior-art patch series and wasi-sdk (idempotent).
+stage-c/scripts/setup-sources.sh
+
+# Build rustc.wasm, the Wasmtime host and the pure sysroot.
+stage-c/scripts/build-rustc-wasm.sh
+stage-c/scripts/build-host.sh
+CG_CLIF_WASM_STRICT=1 stage-c/scripts/build-pure-sysroot.sh
+
+# Build the plugins, then run the correctness checks.
+stage-c/run.sh plugins
+stage-c/run.sh check      # eval(1,2,3,4) == 2.25
+stage-c/run.sh a2check    # A.2 (e)/(f) correctness
 ```
 
-`run.sh` downloads rustup from `static.rust-lang.org` and the three projects from
-their official repositories; everything else comes from crates.io. The script is
-written for macOS arm64 (the host of this spike); adjust the `rustup-init` URL and
-the `.dylib` suffix for other hosts.
-
-Note that "cold" differs by config: with `-Zbuild-std`, a fresh target directory
-also builds `core`, `alloc` and `compiler_builtins` **with cg_clif** (~6.2–6.6 s).
-A plugin build against a prebuilt pure-Rust sysroot is 0.15–0.78 s cold and
-0.08–0.14 s warm; see `results.md`. The sysroot is built once and shipped.
+`ci/setup-toolchain.sh` does the same setup plus the isolated rustup and the
+pinned clif-to-wasm/Wild checkouts. The scripts pick wasi-sdk and rustup by
+OS/arch rather than assuming macOS arm64. See [`stage-c/README.md`](stage-c/README.md)
+for the full build and measurement commands.
 
 ## CI
 
@@ -201,6 +223,8 @@ as a comparison and is not the plugin target.
 
 ## Stage B and C
 
-See the assessment at the end of [`results.md`](results.md). In short: stage B is
-feasible and already demonstrated by the playground that supplied the patch;
-stage C should consume the raw ABI above first and add WIT components later.
+Stage B proved that rustc.wasm is feasible with the playground's patch series;
+stage C is the kept pipeline. See the history at the end of
+[`stage-a-results.md`](stage-c/notes/history/stage-a-results.md), the stage-C
+notes in [`stage-c/results.md`](stage-c/results.md), and
+[`stage-c/README.md`](stage-c/README.md).

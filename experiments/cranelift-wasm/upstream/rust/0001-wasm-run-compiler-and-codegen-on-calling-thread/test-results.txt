@@ -112,7 +112,8 @@ applies to the pinned tree by construction.
 ## What was not run, and why
 
 - **End-to-end wasm-host rustc run**: not rerun in this submission. The
-  existing stage-C results (`../results.md`, `stage-c/README.md`) record a
+  existing stage-C results (`../../../stage-c/results.md`,
+  `../../../stage-c/README.md`) record a
   rustc.wasm built from `b6eeb93` + the patch series, run under Wasmtime
   50.0.2 with plain WASI p1, importing no `wasi:thread-spawn` and evaluating
   the plugin correctly. That run needs the full rustc.wasm build and a

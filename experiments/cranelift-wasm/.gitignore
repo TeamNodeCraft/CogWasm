@@ -2,7 +2,7 @@
 /toolchain/
 
 # Per-program Cargo outputs (we build with a central CARGO_TARGET_DIR).
-/programs/**/target/
+/stage-c/programs/**/target/
 
 # Build artifacts; keep results/*.md and results/*.json.
 *.wasm

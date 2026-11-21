@@ -127,14 +127,14 @@ The workflow carries this as a comment where a `windows-latest` job would go.
 ## 3. THIRD_PARTY_NOTICES generator
 
 `release/gen-notices.py` reads `cargo metadata` for `stage-c/host`,
-`difftest/host`, `stage-b/a2/harness` and every `stage-c/programs/*`, skips
-this repository's own crates, and includes every third-party package with its
-declared licence expression and the text of its `LICENSE*`, `COPYRIGHT`,
-`NOTICE` and `AUTHOR*` files. It prefers `--offline` and retries with the
-network only when a graph was never resolved locally. A package with no
-licence file falls back to the canonical SPDX text from rust's `LICENSES/` or
-the playground's `licenses/spdx/`; if that is not available either, it exits
-with the package name. It never writes a placeholder.
+`difftest/host` and every `stage-c/programs/*` (including
+`stage-c/programs/a2_harness`), skips this repository's own crates, and includes
+every third-party package with its declared licence expression and the text of
+its `LICENSE*`, `COPYRIGHT`, `NOTICE` and `AUTHOR*` files. It prefers `--offline`
+and retries with the network only when a graph was never resolved locally. A
+package with no licence file falls back to the canonical SPDX text from rust's
+`LICENSES/` or the playground's `licenses/spdx/`; if that is not available
+either, it exits with the package name. It never writes a placeholder.
 
 Explicit sections cover all six named components: Rust/rustc,
 Cranelift/Wasmtime, clif-to-wasm, the rust-playground-inbrowser patch series,
