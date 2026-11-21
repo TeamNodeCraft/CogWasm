@@ -8,7 +8,7 @@ set -euo pipefail
 GAP=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 BENCH=$(cd "$GAP/.." && pwd)
 ROOT=$(cd "$BENCH/.." && pwd)
-TOOLCHAIN=${BENCH_TOOLCHAIN:-$ROOT/experiments/cranelift-wasm/toolchain}
+TOOLCHAIN=${BENCH_TOOLCHAIN:-$ROOT/toolchain}
 HOST=$TOOLCHAIN/target/stage-c-host/release/bench-host
 OUT=$GAP/results/gc.json
 mkdir -p "$GAP/work/gc" "$GAP/results"

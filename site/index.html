@@ -110,7 +110,7 @@
       <li><strong>Wild</strong> links the objects into a module. It is written in Rust and runs on the host. Upstream: <a href="https://github.com/wild-linker/wild">wild-linker/wild</a>.</li>
       <li><strong>Wasmtime</strong> runs the compiler and the programs it produces. Upstream: <a href="https://github.com/bytecodealliance/wasmtime">bytecodealliance/wasmtime</a>.</li>
     </ul>
-    <p class="note">Every patch is kept small and written so it can go upstream. The pinned revisions are in the <a href="https://github.com/TeamNodeCraft/CogWasm/blob/main/experiments/cranelift-wasm/README.md">experiment README</a>.</p>
+    <p class="note">Every patch is kept small and written so it can go upstream. The pinned revisions are in the <a href="https://github.com/TeamNodeCraft/CogWasm/blob/main/docs/pipeline.md">experiment README</a>.</p>
   </section>
 
   <section class="container section" id="status" aria-labelledby="status-title">
@@ -236,10 +236,10 @@
   <section class="container section" id="contribute" aria-labelledby="contribute-title">
     <h2 id="contribute-title">Contribute</h2>
     <p>Build and test the whole pipeline with the script CI runs:</p>
-    <pre><code>experiments/cranelift-wasm/ci/build-and-test.sh</code></pre>
+    <pre><code>ci/build-and-test.sh</code></pre>
     <p>Once that toolchain exists, the CI-sized benchmark subset is:</p>
     <pre><code>bench/run.sh --quick</code></pre>
-    <p>The build requirements and the full-suite commands are in the <a href="https://github.com/TeamNodeCraft/CogWasm/blob/main/experiments/cranelift-wasm/README.md">experiment README</a> and the <a href="https://github.com/TeamNodeCraft/CogWasm/blob/main/bench/README.md">benchmark README</a>.</p>
+    <p>The build requirements and the full-suite commands are in the <a href="https://github.com/TeamNodeCraft/CogWasm/blob/main/docs/pipeline.md">experiment README</a> and the <a href="https://github.com/TeamNodeCraft/CogWasm/blob/main/bench/README.md">benchmark README</a>.</p>
     <ul class="links">
       <li><a href="https://github.com/TeamNodeCraft/CogWasm/blob/main/CONTRIBUTING.md">Contributing</a>: how work happens here, and how we work with upstream projects.</li>
       <li><a href="https://github.com/TeamNodeCraft/CogWasm/blob/main/AGENTS.md">AGENTS.md</a>: orientation for people and AI agents.</li>

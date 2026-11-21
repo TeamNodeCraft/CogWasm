@@ -1,4 +1,4 @@
-//! Small program mirroring `experiments/cranelift-wasm/stage-c/programs/c_plugin`:
+//! Small program mirroring `guests/c_plugin`:
 //! a NodeCraft-style plugin with an explicit `nodecraft::host_bias` import, an
 //! f64 parameter list and a result written through linear memory. The difftest
 //! prelude provides the growable heap and output buffer.

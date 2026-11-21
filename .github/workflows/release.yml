@@ -72,8 +72,8 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            experiments/cranelift-wasm/toolchain/rustup
-            experiments/cranelift-wasm/toolchain/cargo/bin
+            toolchain/rustup
+            toolchain/cargo/bin
           key: cranelift-wasm-rustup-${{ runner.os }}-${{ runner.arch }}-nightly-2026-10-19-1.99.1-v1
 
       - name: restore cargo registry and git
@@ -81,9 +81,9 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            experiments/cranelift-wasm/toolchain/cargo/registry
-            experiments/cranelift-wasm/toolchain/cargo/git
-          key: cranelift-wasm-cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'experiments/cranelift-wasm/stage-c/programs/*/Cargo.lock') }}-v1
+            toolchain/cargo/registry
+            toolchain/cargo/git
+          key: cranelift-wasm-cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'guests/*/Cargo.lock') }}-v1
           restore-keys: |
             cranelift-wasm-cargo-${{ runner.os }}-
 
@@ -92,52 +92,51 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            experiments/cranelift-wasm/toolchain/playground
-            experiments/cranelift-wasm/toolchain/clif-to-wasm
-            experiments/cranelift-wasm/toolchain/wild
-          key: cranelift-wasm-src-${{ runner.os }}-${{ hashFiles('experiments/cranelift-wasm/stage-c/patches/**') }}-f5298630-0e4e0458-fd79578-v1
+            toolchain/playground
+            toolchain/clif-to-wasm
+            toolchain/wild
+          key: cranelift-wasm-src-${{ runner.os }}-${{ hashFiles('compiler/patches/**') }}-f5298630-0e4e0458-fd79578-v1
 
       - name: restore wasi-sdk
         id: cache-wasi-sdk
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            experiments/cranelift-wasm/toolchain/stage-b/wasi-sdk-34.0-x86_64-linux
-            experiments/cranelift-wasm/toolchain/stage-b/wasi-sdk
+            toolchain/stage-b/wasi-sdk-34.0-x86_64-linux
+            toolchain/stage-b/wasi-sdk
           key: cranelift-wasm-wasi-sdk-${{ runner.os }}-${{ runner.arch }}-34.0-v1
 
       - name: setup pinned toolchain and sources
-        run: bash experiments/cranelift-wasm/ci/setup-toolchain.sh
+        run: bash ci/setup-toolchain.sh
 
       - name: build stage-C rustc.wasm
-        run: bash experiments/cranelift-wasm/stage-c/scripts/build-rustc-wasm.sh
+        run: bash compiler/scripts/build-rustc-wasm.sh
 
       - name: build reference host
-        run: bash experiments/cranelift-wasm/stage-c/scripts/build-host.sh
+        run: bash compiler/scripts/build-host.sh
 
       - name: build pure sysroot with rustc.wasm (strict)
         env:
           CG_CLIF_WASM_STRICT: '1'
-        run: bash experiments/cranelift-wasm/stage-c/scripts/build-pure-sysroot.sh
+        run: bash compiler/scripts/build-pure-sysroot.sh
 
       - name: write version metadata
         env:
           TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          ROOT=experiments/cranelift-wasm
-          RUSTC="$ROOT/toolchain/stage-c/artifacts/rustc.wasm"
-          STAGE1="$ROOT/toolchain/stage-b/rust/build/host/stage1/bin/rustc"
-          export RUSTUP_HOME="$PWD/$ROOT/toolchain/rustup"
-          export CARGO_HOME="$PWD/$ROOT/toolchain/cargo"
+          RUSTC="toolchain/stage-c/artifacts/rustc.wasm"
+          STAGE1="toolchain/stage-b/rust/build/host/stage1/bin/rustc"
+          export RUSTUP_HOME="$PWD/toolchain/rustup"
+          export CARGO_HOME="$PWD/toolchain/cargo"
           RUSTC_BYTES=$(wc -c < "$RUSTC" | tr -d ' ')
           RUSTC_SHA=$(sha256sum "$RUSTC" | cut -d' ' -f1)
-          SYS_BYTES=$(du -sb "$ROOT/toolchain/stage-c/sysroot-pure" | cut -f1)
+          SYS_BYTES=$(du -sb "toolchain/stage-c/sysroot-pure" | cut -f1)
           RUSTC_VERSION=$("$STAGE1" -vV | head -1)
           python3 - "$TAG" "$RUSTC_BYTES" "$RUSTC_SHA" "$SYS_BYTES" "$RUSTC_VERSION" <<'PY'
           import json, os, subprocess, sys
           tag, rustc_bytes, rustc_sha, sys_bytes, rustc_version = sys.argv[1:]
-          root = "experiments/cranelift-wasm"
+          root = "."
           def rev(path):
               try:
                   return subprocess.check_output(["git", "-C", f"{root}/{path}", "rev-parse", "HEAD"], text=True).strip()
@@ -159,9 +158,8 @@ jobs:
               "rustc_source": rev("toolchain/stage-b/rust"),
               "clif_to_wasm": rev("toolchain/clif-to-wasm"),
               "wild": rev("toolchain/wild"),
-              # `root` is experiments/cranelift-wasm; the workspace lock is at
-              # the repository root.
-              "wasmtime": lock_version("../Cargo.lock", "wasmtime"),
+              # `root` is the repository root; the workspace lock is there too.
+              "wasmtime": lock_version("Cargo.lock", "wasmtime"),
           }
           json.dump(metadata, open("release-metadata.json", "w"), indent=2)
           open("release-metadata.json", "a").write("\n")
@@ -171,18 +169,18 @@ jobs:
       - name: generate third-party notices
         run: |
           set -euo pipefail
-          export RUSTUP_HOME="$PWD/experiments/cranelift-wasm/toolchain/rustup"
-          export CARGO_HOME="$PWD/experiments/cranelift-wasm/toolchain/cargo"
+          export RUSTUP_HOME="$PWD/toolchain/rustup"
+          export CARGO_HOME="$PWD/toolchain/cargo"
           export PATH="$CARGO_HOME/bin:$PATH"
-          python3 experiments/cranelift-wasm/release/gen-notices.py --out THIRD_PARTY_NOTICES
+          python3 release/gen-notices.py --out THIRD_PARTY_NOTICES
 
       - name: upload compiler bundle
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: compiler-bundle
           path: |
-            experiments/cranelift-wasm/toolchain/stage-c/artifacts/rustc.wasm
-            experiments/cranelift-wasm/toolchain/stage-c/sysroot-pure
+            toolchain/stage-c/artifacts/rustc.wasm
+            toolchain/stage-c/sysroot-pure
             release-metadata.json
             THIRD_PARTY_NOTICES
           if-no-files-found: error
@@ -194,8 +192,8 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            experiments/cranelift-wasm/toolchain/rustup
-            experiments/cranelift-wasm/toolchain/cargo/bin
+            toolchain/rustup
+            toolchain/cargo/bin
           key: cranelift-wasm-rustup-${{ runner.os }}-${{ runner.arch }}-nightly-2026-10-19-1.99.1-v1
 
       - name: save cargo registry and git
@@ -203,19 +201,19 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            experiments/cranelift-wasm/toolchain/cargo/registry
-            experiments/cranelift-wasm/toolchain/cargo/git
-          key: cranelift-wasm-cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'experiments/cranelift-wasm/stage-c/programs/*/Cargo.lock') }}-v1
+            toolchain/cargo/registry
+            toolchain/cargo/git
+          key: cranelift-wasm-cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'guests/*/Cargo.lock') }}-v1
 
       - name: save pinned source checkouts
         if: success() && steps.cache-src.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            experiments/cranelift-wasm/toolchain/playground
-            experiments/cranelift-wasm/toolchain/clif-to-wasm
-            experiments/cranelift-wasm/toolchain/wild
-          key: cranelift-wasm-src-${{ runner.os }}-${{ hashFiles('experiments/cranelift-wasm/stage-c/patches/**') }}-f5298630-0e4e0458-fd79578-v1
+            toolchain/playground
+            toolchain/clif-to-wasm
+            toolchain/wild
+          key: cranelift-wasm-src-${{ runner.os }}-${{ hashFiles('compiler/patches/**') }}-f5298630-0e4e0458-fd79578-v1
 
   # One job per host. Each downloads the one rustc.wasm, builds the host and
   # Wild with the pinned stable 1.99.1, precompiles the .cwasm with the host's
@@ -262,8 +260,8 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            experiments/cranelift-wasm/toolchain/rustup
-            experiments/cranelift-wasm/toolchain/cargo/bin
+            toolchain/rustup
+            toolchain/cargo/bin
           key: cranelift-wasm-rustup-${{ runner.os }}-${{ runner.arch }}-nightly-2026-10-19-1.99.1-v1
 
       - name: restore cargo registry and git
@@ -271,9 +269,9 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            experiments/cranelift-wasm/toolchain/cargo/registry
-            experiments/cranelift-wasm/toolchain/cargo/git
-          key: cranelift-wasm-cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'experiments/cranelift-wasm/stage-c/programs/*/Cargo.lock') }}-v1
+            toolchain/cargo/registry
+            toolchain/cargo/git
+          key: cranelift-wasm-cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'guests/*/Cargo.lock') }}-v1
           restore-keys: |
             cranelift-wasm-cargo-${{ runner.os }}-
 
@@ -282,18 +280,18 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            experiments/cranelift-wasm/toolchain/playground
-            experiments/cranelift-wasm/toolchain/clif-to-wasm
-            experiments/cranelift-wasm/toolchain/wild
-          key: cranelift-wasm-src-${{ runner.os }}-${{ hashFiles('experiments/cranelift-wasm/stage-c/patches/**') }}-f5298630-0e4e0458-fd79578-v1
+            toolchain/playground
+            toolchain/clif-to-wasm
+            toolchain/wild
+          key: cranelift-wasm-src-${{ runner.os }}-${{ hashFiles('compiler/patches/**') }}-f5298630-0e4e0458-fd79578-v1
 
       - name: restore wasi-sdk
         id: cache-wasi-sdk
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            experiments/cranelift-wasm/toolchain/stage-b/wasi-sdk-34.0-x86_64-linux
-            experiments/cranelift-wasm/toolchain/stage-b/wasi-sdk
+            toolchain/stage-b/wasi-sdk-34.0-x86_64-linux
+            toolchain/stage-b/wasi-sdk
           key: cranelift-wasm-wasi-sdk-${{ runner.os }}-${{ runner.arch }}-34.0-v1
 
       - name: download rustc.wasm and sysroot
@@ -303,18 +301,18 @@ jobs:
           path: bundle/compiler
 
       - name: setup pinned toolchain and sources
-        run: bash experiments/cranelift-wasm/ci/setup-toolchain.sh
+        run: bash ci/setup-toolchain.sh
 
       - name: build host, build Wild, precompile and package
         env:
           TAG: ${{ inputs.tag }}
           HOST_TRIPLE: ${{ matrix.triple }}
         run: |
-          bash experiments/cranelift-wasm/stage-c/precompile/package.sh \
+          bash release/package.sh \
             --tag "$TAG" \
             --host-triple "$HOST_TRIPLE" \
-            --rustc-wasm bundle/compiler/experiments/cranelift-wasm/toolchain/stage-c/artifacts/rustc.wasm \
-            --sysroot bundle/compiler/experiments/cranelift-wasm/toolchain/stage-c/sysroot-pure \
+            --rustc-wasm bundle/compiler/toolchain/stage-c/artifacts/rustc.wasm \
+            --sysroot bundle/compiler/toolchain/stage-c/sysroot-pure \
             --notices bundle/compiler/THIRD_PARTY_NOTICES \
             --out bundle/host
 

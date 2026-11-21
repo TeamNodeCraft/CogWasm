@@ -48,7 +48,7 @@ def main() -> int:
     run = load_run()
     toolchain = (args.toolchain or Path(os.environ.get(
         "BENCH_TOOLCHAIN",
-        ROOT / "experiments" / "cranelift-wasm" / "toolchain",
+        ROOT / "toolchain",
     ))).resolve()
     llvm_rustc = args.llvm_rustc
     if llvm_rustc is None:

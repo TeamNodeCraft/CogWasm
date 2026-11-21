@@ -12,17 +12,17 @@ taking shape. Every fix we need is made here, on the copies we build:
 - **Pinned upstreams.** rustc, `rustc_codegen_cranelift`, clif-to-wasm, Wild
   and the rustc-to-wasm patch series are checked out at exact revisions by the
   build scripts (see
-  [`experiments/cranelift-wasm/README.md`](experiments/cranelift-wasm/README.md)).
+  [`docs/pipeline.md`](docs/pipeline.md)).
 - **Our changes are patch files** applied on top of those revisions, kept in
   this repository next to the build that uses them (for example
-  `experiments/cranelift-wasm/stage-c/patches/`, or the manual-only LLVM series
+  `compiler/patches/`, or the manual-only LLVM series
   in `legacy/llvm/patches/`). Each patch is small, does one
   thing, has a test, and says in its header that it was changed here.
 - **CI builds and tests the patched stack** on every relevant push, so a patch
   that stops applying or breaks something is caught here, not upstream.
 - **Upstream-ready drafts** (a patch rebased on the project's current branch,
   its tests, and notes for a pull request) may be kept under
-  `experiments/cranelift-wasm/upstream/`. They are drafts only. Nobody opens a
+  `compiler/upstream/`. They are drafts only. Nobody opens a
   pull request, issue or discussion upstream without a decision to do so.
 
 The aim is that once the whole pipeline works well, the upstream projects can

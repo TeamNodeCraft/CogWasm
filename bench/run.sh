@@ -10,7 +10,7 @@
 #   bench/run.sh --fuel                   # also count compiler work with Wasmtime fuel
 #
 # Toolchain overrides (used by the baseline run in bench/README.md):
-#   BENCH_TOOLCHAIN      experiments/cranelift-wasm/toolchain to measure
+#   BENCH_TOOLCHAIN      toolchain directory to measure (default: toolchain/)
 #   BENCH_LLVM_RUSTC     LLVM rustc used for the reference builds
 #   BENCH_HOST_TRIPLE    host triple for the isolated stage1 compiler
 #   BENCH_NIGHTLY        pinned nightly (default nightly-2026-10-19)
@@ -20,7 +20,7 @@ set -euo pipefail
 
 BENCH=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT=$(cd "$BENCH/.." && pwd)
-TOOLCHAIN=${BENCH_TOOLCHAIN:-$ROOT/experiments/cranelift-wasm/toolchain}
+TOOLCHAIN=${BENCH_TOOLCHAIN:-$ROOT/toolchain}
 NIGHTLY=${BENCH_NIGHTLY:-nightly-2026-10-19}
 HOST_TOOLCHAIN=${BENCH_HOST_TOOLCHAIN:-1.99.1}
 MODE=full
@@ -68,7 +68,7 @@ need() { [ -e "$1" ] || { printf 'error: missing %s\n' "$1" >&2; exit 1; }; }
 
 if [ ! -d "$TOOLCHAIN" ]; then
     printf 'error: toolchain directory %s does not exist\n' "$TOOLCHAIN" >&2
-    printf 'build it first: experiments/cranelift-wasm/ci/build-and-test.sh\n' >&2
+    printf 'build it first: ci/build-and-test.sh\n' >&2
     exit 1
 fi
 

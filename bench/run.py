@@ -210,7 +210,7 @@ def clif_env(toolchain: Path) -> dict:
     )
     env["STAGE_C_CACHE"] = str(toolchain / "stage-c" / "cache")
     env["RUSTC"] = str(
-        ROOT / "experiments" / "cranelift-wasm" / "stage-c" / "scripts" / "rustc-wasm-wrapper.sh"
+        ROOT / "compiler" / "scripts" / "rustc-wasm-wrapper.sh"
     )
     env["RUSTUP_TOOLCHAIN"] = os.environ.get("BENCH_HOST_TOOLCHAIN", "1.99.1")
     objcopy = sorted((toolchain / "rustup" / "toolchains").glob("nightly-*/lib/rustlib/*/bin"))

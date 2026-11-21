@@ -19,3 +19,19 @@ __pycache__/
 # deploy_pages.yml builds it in CI; local builds should use a temp directory or
 # this ignored one.
 /public/
+
+# The ignored toolchain root: downloads, upstream checkouts and build outputs.
+/toolchain/
+
+# Build artifacts; keep tracked results/*.md and results/*.json.
+*.wasm
+*.o
+*.cwasm
+*.cwasm.json
+
+# Local/CI compiler build log (the workflow publishes its own full log).
+/docs/results/build-rustc-wasm.log
+
+# Release bundle outputs (local dry runs and the packaging script).
+/release/out/
+/release/dist/

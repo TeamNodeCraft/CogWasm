@@ -13,7 +13,7 @@ set -euo pipefail
 
 GAP=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT=$(cd "$GAP/../.." && pwd)
-TOOLCHAIN=${BENCH_TOOLCHAIN:-"$ROOT/experiments/cranelift-wasm/toolchain"}
+TOOLCHAIN=${BENCH_TOOLCHAIN:-"$ROOT/toolchain"}
 # Reuse the Wasmtime units bench/run.sh already built in CI.
 export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-"$TOOLCHAIN/target/stage-c-host"}
 

@@ -23,4 +23,4 @@ sha2 = { workspace = true }
 wasmtime = { workspace = true, features = ["cranelift", "runtime", "std", "cache", "anyhow", "threads"] }
 wasmtime-wasi = { workspace = true, features = ["p1"] }
 wasmparser = "0.263"
-stage-c-host = { path = "../../experiments/cranelift-wasm/stage-c/host" }
+stage-c-host = { path = "../../crates/cogwasm-host" }

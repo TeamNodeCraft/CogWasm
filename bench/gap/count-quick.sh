@@ -15,7 +15,7 @@ set -euo pipefail
 GAP=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 BENCH=$(cd "$GAP/.." && pwd)
 ROOT=$(cd "$BENCH/.." && pwd)
-TOOLCHAIN=${BENCH_TOOLCHAIN:-$ROOT/experiments/cranelift-wasm/toolchain}
+TOOLCHAIN=${BENCH_TOOLCHAIN:-$ROOT/toolchain}
 CARGO_HOME=${CARGO_HOME:-$TOOLCHAIN/cargo}
 RUSTUP_HOME=${RUSTUP_HOME:-$TOOLCHAIN/rustup}
 export CARGO_HOME RUSTUP_HOME

@@ -61,7 +61,7 @@ def main() -> int:
     run = load_run()
     toolchain = Path(
         os.environ.get(
-            "BENCH_TOOLCHAIN", ROOT / "experiments" / "cranelift-wasm" / "toolchain"
+            "BENCH_TOOLCHAIN", ROOT / "toolchain"
         )
     ).resolve()
     nightly = os.environ.get("BENCH_NIGHTLY", "nightly-2026-10-19")

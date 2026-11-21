@@ -72,7 +72,7 @@ project's** style and lints instead (see [CONTRIBUTING.md](../CONTRIBUTING.md)).
   **passes after** it. Say in the commit how you checked that it failed.
 - Every new feature has tests for the normal case and the edge cases.
 - Programs that exercise code generation go into the
-  [difftest corpus](../experiments/cranelift-wasm/difftest/), so LLVM and our
+  [difftest corpus](../difftest/), so LLVM and our
   pipeline are compared on them.
 - Never delete, weaken, `#[ignore]` or `cfg`-skip a test to make CI pass.
 - Tests are deterministic: no clocks, no unseeded randomness, no network.

@@ -34,9 +34,9 @@ sandbox** with nothing but what the host chooses to provide.
 ## Status
 
 Working end to end, still experimental. The build lives in
-[`experiments/cranelift-wasm/`](experiments/cranelift-wasm/) and is built and
+[`compiler/`](compiler/) and is built and
 tested on every push by [CI](#ci). Differential tests also compare the pipeline
-with LLVM rustc on every run: [`difftest`](experiments/cranelift-wasm/difftest/README.md).
+with LLVM rustc on every run: [`difftest`](difftest/README.md).
 The permanent compile-time and execution suite lives in [`bench/`](bench/README.md):
 it reports compiler start, compile phases, execution against LLVM `-O0`/`-O2`
 and output size, and checks every result bit-for-bit before reporting a timing.
@@ -94,7 +94,7 @@ Known limits:
 
 Every patch is kept small and written so it can go upstream. Revisions are
 pinned in
-[`experiments/cranelift-wasm/README.md`](experiments/cranelift-wasm/README.md).
+[`docs/pipeline.md`](docs/pipeline.md).
 
 ## Future directions: threads
 
@@ -152,9 +152,9 @@ AlexMitchellMus, all rights reserved; see that file for permitted use.
 ## CI
 
 - [`cranelift_wasm.yml`](.github/workflows/cranelift_wasm.yml) is the primary
-  path. It runs on pushes to `main` that touch
-  `experiments/cranelift-wasm/**` or the workflow itself, plus
-  `workflow_dispatch`. It builds the pure-Rust `rustc.wasm`
+  path. It runs on pushes to `main` that touch `compiler/**`, `crates/**`,
+  `guests/**`, `difftest/**`, `ci/**`, `release/**`, `bench/**`, `Cargo.toml`,
+  `Cargo.lock` or the workflow itself, plus `workflow_dispatch`. It builds the pure-Rust `rustc.wasm`
   (`wasm32-wasip1`, Cranelift/cg_clif only), builds the plugin sysroot with
   `rustc.wasm` itself, runs plugin (c) end to end on Wasmtime 50.0.2 and
   asserts `eval(1,2,3,4) == 2.25`, checks A.2 (e)/(f) correctness, and audits
@@ -162,10 +162,10 @@ AlexMitchellMus, all rights reserved; see that file for permitted use.
   [`ci-logs` release](https://github.com/TeamNodeCraft/CogWasm/releases/tag/ci-logs);
   `rustc.wasm` and the pure sysroot are workflow artifacts kept for 7 days.
   The same logic runs locally:
-  `experiments/cranelift-wasm/ci/build-and-test.sh`. The first green run
+  `ci/build-and-test.sh`. The first green run
   (2026-11-18) took 45m21s on a 4-core `ubuntu-latest`; sizes, disk/cache use
   and the macOS/Linux differences are recorded in
-  [`experiments/cranelift-wasm/README.md`](experiments/cranelift-wasm/README.md#ci).
+  [`docs/pipeline.md`](docs/pipeline.md#ci).
 - [`rustc_llvm_with_lld.yml`](.github/workflows/rustc_llvm_with_lld.yml) builds
   the LLVM/LLD-based compiler and dist jobs. It is **manual only**
   (`workflow_dispatch`) and no longer runs on push.
@@ -295,7 +295,7 @@ those components. They include:
 | [rust-playground-inbrowser](https://github.com/ryancbuckley/rust-playground-inbrowser) rustc-to-wasm patch series | Apache-2.0 |
 | [Wild](https://github.com/wild-linker/wild) | MIT OR Apache-2.0 |
 | [wasi-libc](https://github.com/WebAssembly/wasi-libc) (linked into wasm builds of `std`) | Apache-2.0 WITH LLVM-exception, MIT and others (see its LICENSE files) |
-| [LLVM](https://github.com/llvm/llvm-project), Clang and LLD (the LLVM-based build under `legacy/llvm/patches/`; build-time only for `experiments/cranelift-wasm/`) | Apache-2.0 WITH LLVM-exception |
+| [LLVM](https://github.com/llvm/llvm-project), Clang and LLD (the LLVM-based build under `legacy/llvm/patches/`; build-time only for `compiler/`) | Apache-2.0 WITH LLVM-exception |
 
 The logo, icon and artwork in [`artwork/cog-logo/`](artwork/cog-logo/ARTWORK.md)
 (the images, their generator script and their notes) are **not** covered by the
@@ -307,7 +307,7 @@ reserved, and may only be used as described in
 
 Patch files modify the project they apply to, and each one is licensed under
 that project's license, not under this repository's MIT OR Apache-2.0 option.
-This applies to `legacy/llvm/patches/**` and `experiments/**/patches/**`:
+This applies to `legacy/llvm/patches/**` and `compiler/patches/**`:
 
 - `legacy/llvm/patches/rust-*/` and patches against `rustc_codegen_cranelift`: MIT OR Apache-2.0 (Rust).
 - `legacy/llvm/patches/llvm-*/`: Apache-2.0 WITH LLVM-exception (LLVM).

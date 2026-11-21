@@ -1,4 +1,4 @@
-//! Small program mirroring `experiments/cranelift-wasm/stage-c/programs/a_add`:
+//! Small program mirroring `guests/a_add`:
 //! no_std, no allocator, one exported arithmetic function. It adds the
 //! difftest ABI (`run(seed)` plus the output buffer) so the benchmark compares
 //! this program's result with the LLVM build.

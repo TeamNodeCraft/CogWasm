@@ -3,7 +3,7 @@ name: rustc_llvm_with_lld
 # gh act --job build -s GITHUB_TOKEN="$(gh auth token)" --reuse
 
 # Manual-only. The pure-Rust path is built and tested by cranelift_wasm.yml on
-# every push that touches experiments/cranelift-wasm; this LLVM/LLD workflow
+# every push that touches the product directories; this LLVM/LLD workflow
 # stays runnable with workflow_dispatch (install, dist-*, release jobs).
 on:
   workflow_dispatch:

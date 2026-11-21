@@ -1,4 +1,4 @@
-//! Small program mirroring `experiments/cranelift-wasm/stage-c/programs/b_alloc`:
+//! Small program mirroring `guests/b_alloc`:
 //! no_std + alloc with `Vec`, `String`, `format!`, closures and trait objects.
 //! The difftest prelude supplies the growable bump allocator and the output
 //! buffer, so LLVM and the Cranelift pipeline build the same source.

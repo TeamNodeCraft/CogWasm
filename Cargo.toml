@@ -9,9 +9,9 @@
 resolver = "2"
 members = [
     "crates/cogwasm-runtime",
-    "experiments/cranelift-wasm/stage-c/host",
-    "experiments/cranelift-wasm/stage-c/supervisor",
-    "experiments/cranelift-wasm/difftest/host",
+    "crates/cogwasm-host",
+    "crates/cogwasm-supervisor",
+    "crates/difftest-host",
     "bench/host",
     "bench/gap",
 ]

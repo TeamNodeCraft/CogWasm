@@ -86,9 +86,9 @@ the CI quick job uses. `--programs` accepts a name or `class/name`. Other
 switches: `--runs N`, `--out FILE`, `--no-precompiled`.
 
 Requirements: the stage-C artifacts must already exist under
-`experiments/cranelift-wasm/toolchain/` (`rustc.wasm`, `sysroot-pure`, Wild,
+`toolchain/` (`rustc.wasm`, `sysroot-pure`, Wild,
 the isolated rustup). Build them with
-`experiments/cranelift-wasm/ci/build-and-test.sh`. The script builds
+`ci/build-and-test.sh`. The script builds
 `bench/host` into the same Cargo target directory as the stage-C host, so CI
 reuses the compiled Wasmtime units. The behaviour-identical helpers it shares
 with the product host (the Wasmtime error adapter and the `playground.spawn`
@@ -100,7 +100,7 @@ Baseline runs against a different checkout (for example a detached worktree at
 an older commit) use the same suite with overridden paths:
 
 ```sh
-BENCH_TOOLCHAIN=/path/to/old/experiments/cranelift-wasm/toolchain \
+BENCH_TOOLCHAIN=/path/to/old/toolchain \
 BENCH_LLVM_RUSTC=/path/to/old/.../rustup/toolchains/nightly-2026-10-19-.../bin/rustc \
 bench/run.sh --full --out bench/history/<machine>-<commit>.json
 ```
@@ -111,7 +111,7 @@ Before a timing is recorded, the suite runs the Cranelift module and both LLVM
 modules over the fixed seed list and compares `run(seed)` and the output bytes
 bit-for-bit. A mismatch aborts the whole run with the differing outcomes; it
 does not publish a JSON file. This is the same ABI and comparison rule as
-[`experiments/cranelift-wasm/difftest`](../experiments/cranelift-wasm/difftest/).
+[`difftest`](../difftest/).
 
 The incremental metric edits a constant added by the harness from `0u64` to
 `0x0_u64` (both zero) between runs, so it measures a real source edit and a

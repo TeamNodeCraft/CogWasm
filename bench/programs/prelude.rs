@@ -30,7 +30,7 @@ const PAGE_SIZE: usize = 65536;
 //
 // It starts at `memory.size() * 64 KiB`, i.e. after every static and the
 // linker-provided shadow stack, and calls `memory.grow` by whole pages. This is
-// the same design as stage-c/programs/c_plugin: both backends support it (the
+// the same design as guests/c_plugin: both backends support it (the
 // stage-C patch lowers the wasm memory intrinsics), and the heap never lives in
 // static data, so no allocation-layout differences leak from `.bss` sizing.
 // `dealloc` is a no-op; every corpus program is a short-lived instance.
