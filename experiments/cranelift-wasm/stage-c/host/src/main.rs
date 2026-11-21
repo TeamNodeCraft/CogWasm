@@ -14,6 +14,7 @@
 //!   inspect      validate a wasm and scan its name/data sections for LLVM symbols
 
 use anyhow::{anyhow, bail, Context, Result};
+use cogwasm_runtime::{SpawnSummary, Wt};
 use serde::Serialize;
 use stage_c_host::precompiled::load_rustc_module;
 use std::collections::BTreeMap;
@@ -24,17 +25,6 @@ use std::time::Instant;
 use wasmtime::{Caller, Engine, Extern, Linker, Memory, Module, Store};
 use wasmtime_wasi::p1::{self, WasiP1Ctx};
 use wasmtime_wasi::{FsPerms, I32Exit, WasiCtxBuilder};
-
-/// Convert wasmtime errors (which do not implement anyhow's `Context`)
-/// into anyhow errors with a message.
-trait Wt<T> {
-    fn wt(self, ctx: &'static str) -> Result<T>;
-}
-impl<T> Wt<T> for wasmtime::Result<T> {
-    fn wt(self, ctx: &'static str) -> Result<T> {
-        self.map_err(|e| anyhow!("{ctx}: {e}"))
-    }
-}
 
 // ---------------------------------------------------------------------------
 // CLI
@@ -504,14 +494,6 @@ struct RunResult {
     rc: i32,
     result: f64,
     spawns: Vec<SpawnSummary>,
-}
-
-#[derive(Serialize, Clone, Debug)]
-struct SpawnSummary {
-    program: String,
-    args: usize,
-    ms: f64,
-    status: i32,
 }
 
 fn run_rustc_with(

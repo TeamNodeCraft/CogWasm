@@ -1,0 +1,12 @@
+[package]
+name = "cogwasm-runtime"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+# Only `wasmtime::Result` is used here; the engine configuration and the
+# precompiled loader stay in `stage-c-host`.
+wasmtime = { workspace = true, features = ["std"] }

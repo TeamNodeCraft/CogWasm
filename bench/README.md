@@ -90,7 +90,11 @@ Requirements: the stage-C artifacts must already exist under
 the isolated rustup). Build them with
 `experiments/cranelift-wasm/ci/build-and-test.sh`. The script builds
 `bench/host` into the same Cargo target directory as the stage-C host, so CI
-reuses the compiled Wasmtime units.
+reuses the compiled Wasmtime units. The behaviour-identical helpers it shares
+with the product host (the Wasmtime error adapter and the `playground.spawn`
+summary type) come from [`crates/cogwasm-runtime`](../crates/cogwasm-runtime);
+engine setup, stderr capture, fuel and resource-limit tracking stay in
+`bench/host` because they differ from the product host.
 
 Baseline runs against a different checkout (for example a detached worktree at
 an older commit) use the same suite with overridden paths:

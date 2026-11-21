@@ -17,6 +17,7 @@
 
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Parser, Subcommand};
+use cogwasm_runtime::{SpawnSummary, Wt};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use stage_c_host::precompiled::load_rustc_module;
@@ -221,28 +222,8 @@ struct HostState {
 
 type HostStore = Store<HostState>;
 
-/// Convert a `wasmtime::Result` (its own error type) into `anyhow::Result`
-/// with a readable context, like the stage-C host does.
-trait Wt<T> {
-    fn wt(self, context: &'static str) -> Result<T>;
-}
-
-impl<T> Wt<T> for wasmtime::Result<T> {
-    fn wt(self, context: &'static str) -> Result<T> {
-        self.map_err(|error| anyhow!("{context}: {error}"))
-    }
-}
-
 #[derive(Clone)]
 struct SpawnRecord {
-    program: String,
-    args: usize,
-    ms: f64,
-    status: i32,
-}
-
-#[derive(Serialize, Clone, Debug)]
-struct SpawnSummary {
     program: String,
     args: usize,
     ms: f64,

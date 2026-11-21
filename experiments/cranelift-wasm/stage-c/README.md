@@ -147,6 +147,12 @@ Wasmtime 50.0.2:
 plain `wasmtime_wasi::p1`, guest memory is a normal `Memory`, no
 `wasmtime-wasi-threads`. `check` still returns **2.25**.
 
+The host code that is identical to the benchmark host's copy — the Wasmtime
+error adapter and the `playground.spawn` summary type — lives in
+[`crates/cogwasm-runtime`](../../../crates/cogwasm-runtime). Engine setup, the
+WASI store, spawn recording and startup reporting stay here because those
+differ between the two hosts in observable ways.
+
 ## Item 2: a sysroot built by rustc.wasm
 
 `stage-c/programs/c_plugin` is built with `-Zbuild-std=core,alloc,compiler_builtins`

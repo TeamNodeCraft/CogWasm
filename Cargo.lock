@@ -102,6 +102,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "cogwasm-runtime",
  "serde",
  "serde_json",
  "sha2",
@@ -230,6 +231,15 @@ dependencies = [
  "wasm-encoder 0.263.0",
  "wasmparser 0.263.0",
  "wasmprinter 0.263.0",
+ "wasmtime",
+]
+
+[[package]]
+name = "cogwasm-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
  "wasmtime",
 ]
 
@@ -1277,6 +1287,7 @@ name = "stage-c-host"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "cogwasm-runtime",
  "serde",
  "serde_json",
  "sha2",

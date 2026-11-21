@@ -10,6 +10,8 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
+# The small parts of the host that are identical to the product host's copy.
+cogwasm-runtime = { path = "../../crates/cogwasm-runtime" }
 clap = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -8,6 +8,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/cogwasm-runtime",
     "experiments/cranelift-wasm/stage-c/host",
     "experiments/cranelift-wasm/stage-c/supervisor",
     "experiments/cranelift-wasm/difftest/host",
