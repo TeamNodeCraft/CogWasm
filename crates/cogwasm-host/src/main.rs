@@ -14,6 +14,7 @@
 //!   inspect      validate a wasm and scan its name/data sections for LLVM symbols
 
 use anyhow::{anyhow, bail, Context, Result};
+use cogwasm_host::compile::{self, CompileRequest, Compiler};
 use cogwasm_host::precompiled::load_rustc_module;
 use cogwasm_runtime::{
     env_var_compat, median, prepare_instance, ArgvRecorder, SpawnSummary, StoreOptions, Wt,
@@ -259,36 +260,17 @@ fn engine(cache_dir: Option<&Path>) -> Result<Engine> {
 // rustc.wasm
 // ---------------------------------------------------------------------------
 
-fn rustc_args(o: &Opts) -> Vec<String> {
-    let mut args = vec![
-        "rustc".into(),
-        o.src.display().to_string(),
-        "--crate-name".into(),
-        o.crate_name.clone(),
-        "--crate-type=cdylib".into(),
-        "--edition=2021".into(),
-        "--target=wasm32-unknown-unknown".into(),
-        "--sysroot".into(),
-        o.sysroot.display().to_string(),
-        "-Copt-level=2".into(),
-        "-Cpanic=abort".into(),
-        "-Zcodegen-backend=cranelift".into(),
-        "-Clinker=wild".into(),
-        "-Clinker-flavor=wasm-ld".into(),
-        "-o".into(),
-        o.out.display().to_string(),
-    ];
-    if let Some(dir) = &o.incremental {
-        args.push(format!("-Cincremental={}", dir.display()));
+fn request(o: &Opts) -> CompileRequest {
+    CompileRequest {
+        src: o.src.clone(),
+        out: o.out.clone(),
+        sysroot: o.sysroot.clone(),
+        linker: o.linker.clone(),
+        crate_name: o.crate_name.clone(),
+        incremental: o.incremental.clone(),
+        codegen_units: o.codegen_units,
+        externs: o.externs.clone(),
     }
-    if let Some(units) = o.codegen_units {
-        args.push(format!("-Ccodegen-units={units}"));
-    }
-    for external in &o.externs {
-        args.push("--extern".into());
-        args.push(external.clone());
-    }
-    args
 }
 
 #[derive(Serialize, Clone)]
@@ -312,48 +294,7 @@ fn run_rustc_with(
     module: &Module,
     measure_plugin: bool,
 ) -> Result<RunResult> {
-    let args = rustc_args(o);
-    let t = Instant::now();
-    let prepared = prepare_instance(
-        engine,
-        module,
-        &args,
-        &o.linker,
-        "[cogwasm-host]",
-        StoreOptions::default(),
-        ArgvRecorder::default(),
-    )?;
-    let mut store = prepared.store;
-    let instance = prepared.instance;
-    let instantiate_ms = t.elapsed().as_secs_f64() * 1e3;
-    let start = instance
-        .get_typed_func::<(), ()>(&mut store, "_start")
-        .wt("rustc.wasm _start")?;
-
-    let t = Instant::now();
-    let call = start.call(&mut store, ());
-    let rustc_total_ms = t.elapsed().as_secs_f64() * 1e3;
-    match call {
-        Ok(()) => {}
-        Err(e) if e.downcast_ref::<I32Exit>().is_some_and(|x| x.0 == 0) => {}
-        Err(e) => return Err(anyhow!("rustc.wasm exited with an error: {e}")),
-    }
-    let spawns = store
-        .data()
-        .recorder()
-        .records()
-        .iter()
-        .map(|record| SpawnSummary {
-            program: record.argv.first().cloned().unwrap_or_default(),
-            args: record.argv.len().saturating_sub(1),
-            ms: record.ms,
-            status: record.status,
-        })
-        .collect::<Vec<_>>();
-    let link_ms: f64 = spawns.iter().map(|s| s.ms).sum();
-    if spawns.iter().any(|s| s.status != 0) {
-        bail!("linker failed: {:?}", spawns);
-    }
+    let outcome = compile::compile(engine, module, &request(o))?;
 
     let (plugin_load_ms, eval_ms, rc, result) = if measure_plugin {
         eval_output(o)?
@@ -361,48 +302,44 @@ fn run_rustc_with(
         (0.0, 0.0, 0, f64::NAN)
     };
 
-    // A 137 MiB compiled module + 1 GiB shared memory can take seconds to
-    // tear down. A hot-reload host would keep one engine/module alive, so the
-    // measured edit-to-result path deliberately excludes teardown.
-    std::mem::forget(store);
-
     Ok(RunResult {
         module_load_ms: 0.0,
-        instantiate_ms,
-        rustc_total_ms,
-        link_ms,
-        compile_ms: (rustc_total_ms - link_ms).max(0.0),
+        instantiate_ms: outcome.instantiate_ms,
+        rustc_total_ms: outcome.rustc_total_ms,
+        link_ms: outcome.link_ms,
+        compile_ms: outcome.compile_ms,
         plugin_load_ms,
         eval_ms,
-        end_to_end_ms: instantiate_ms + rustc_total_ms + plugin_load_ms + eval_ms,
+        end_to_end_ms: outcome.instantiate_ms + outcome.rustc_total_ms + plugin_load_ms + eval_ms,
         rc,
         result,
-        spawns,
+        spawns: outcome.spawns,
     })
 }
 
 fn run_rustc(o: &Opts, expect: f64, measure_plugin: bool) -> Result<(RunResult, f64)> {
-    let engine = engine(o.cache_dir.as_deref())?;
-    let t = Instant::now();
-    let loaded = load_rustc_module(
-        &engine,
+    let compiler = Compiler::load(
         &o.rustc,
         o.precompiled.as_deref(),
         o.verify_precompiled,
+        o.cache_dir.as_deref(),
     )?;
-    let module_load_ms = t.elapsed().as_secs_f64() * 1e3;
-    if let Some(reason) = &loaded.fallback_reason {
+    if let Some(reason) = &compiler.fallback_reason {
         eprintln!("[cogwasm-host] precompiled artifact rejected: {reason}");
     }
+    let module_load_ms = compiler.module_load_ms;
     eprintln!(
         "[cogwasm-host] rustc.wasm loaded from {} in {module_load_ms:.1} ms",
-        loaded.source.as_str()
+        compiler.source.as_str()
     );
-    let mut r = run_rustc_with(o, &engine, &loaded.module, measure_plugin)?;
+    let mut r = run_rustc_with(o, compiler.engine(), compiler.module(), measure_plugin)?;
     r.module_load_ms = module_load_ms;
     let _ = expect;
-    std::mem::forget(loaded.module);
-    std::mem::forget(engine);
+    // Keep the historical leak-until-exit behaviour: dropping a 137 MiB
+    // compiled module takes seconds. This forgets the engine and module along
+    // with the rest of the loader state; the resident service (G2.1 step 2)
+    // will own them and tear them down explicitly instead.
+    std::mem::forget(compiler);
     Ok((r, module_load_ms))
 }
 
@@ -763,7 +700,7 @@ fn startup_once(o: &Opts, cached: bool) -> Result<()> {
         .with_context(|| format!("reading size of {}", o.rustc.display()))?
         .len();
     let t = Instant::now();
-    let args = rustc_args(o);
+    let args = compile::rustc_args(&request(o));
     let prepared = prepare_instance(
         &e,
         &loaded.module,

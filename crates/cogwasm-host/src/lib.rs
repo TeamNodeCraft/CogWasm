@@ -2,11 +2,14 @@
 //!
 //! The `cogwasm-host` binary and the `cogwasm-precompile` binary both use
 //! [`config`] for the Wasmtime engine and [`precompiled`] for loading and
-//! validating a precompiled `rustc.wasm`.
+//! validating a precompiled `rustc.wasm`. [`compile`] owns the rustc.wasm
+//! compile path so the CLI and future resident hosts share one implementation.
 
+pub mod compile;
 pub mod config;
 pub mod precompiled;
 
+pub use compile::{compile, rustc_args, CompileOutcome, CompileRequest, Compiler};
 pub use config::{engine, engine_config, engine_config_with, ConfigSummary};
 pub use precompiled::{
     compatibility_hash_hex, load_rustc_module, metadata_sidecar, sha256_file, sha256_hex,

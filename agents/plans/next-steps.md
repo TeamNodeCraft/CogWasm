@@ -114,9 +114,10 @@ shells out to `cogwasm-host raw` per job (`crates/cogwasm-supervisor/src/real.rs
 paying the module load each time; the in-process path
 (`wasmtime_runtime.rs`) only runs demo modules.
 
-1. [ ] Extract the compile path from `crates/cogwasm-host/src/main.rs`
+1. [x] Extract the compile path from `crates/cogwasm-host/src/main.rs`
        (`run_rustc_with`, `Opts`, spawn handling) into the `cogwasm-host`
        library, with the CLI as a thin wrapper. Depends on M1.
+       Lives in `crates/cogwasm-host/src/compile.rs`, re-exported as `cogwasm_host::compile` (`CompileRequest`, `rustc_args`, `CompileOutcome`, `compile`, `Compiler`).
 2. [ ] A `Resident` backend in the supervisor that owns one `Engine`, the
        loaded (precompiled) `rustc.wasm` `Module` and the incremental cache,
        and instantiates per job.
