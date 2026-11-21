@@ -157,6 +157,21 @@ step "incremental compilation in resident rustc.wasm"
 step "precompiled rustc.wasm (.cwasm) load and fallback"
 "$REPO/compiler/run.sh" precompiled-check
 
+# The supervisor's resident backend keeps one rustc.wasm loaded across jobs
+# (G2.1). Its test needs the real toolchain, so quality.yml always skips it;
+# run it here, after precompiled-check has left a .cwasm to load, and make a
+# missing toolchain a failure rather than a skip.
+step "resident compiler backend (supervisor)"
+(
+    export RUSTUP_HOME="$TOOL/rustup" CARGO_HOME="$TOOL/cargo"
+    export CARGO_TARGET_DIR="$TOOL/target/cogwasm-host"
+    # Same stable toolchain build-host.sh uses, so the host crates are reused.
+    export RUSTUP_TOOLCHAIN="$(python3 "$UPSTREAM" get rust-stable version)"
+    COGWASM_REQUIRE_TOOLCHAIN=1 "$TOOL/cargo/bin/cargo" test --release \
+        --manifest-path "$REPO/crates/cogwasm-supervisor/Cargo.toml" \
+        --test resident -- --nocapture
+)
+
 # Differential test: the same 48 no_std+alloc corpus programs plus 24 seeded
 # random programs are compiled by LLVM rustc and by rustc.wasm+cg_clif, run in
 # Wasmtime, and compared bit-for-bit (u64 return + output buffer). A trap in

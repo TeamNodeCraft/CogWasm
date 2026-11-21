@@ -5,7 +5,7 @@
 //! host owns instantiation, the WASI sandbox and the Wild link.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
@@ -76,30 +76,7 @@ impl Compiler for RealCompiler {
         }
         command
             .arg("--")
-            .arg("--target")
-            .arg(&job.target)
-            .arg("--sysroot")
-            .arg(&self.config.sysroot)
-            .arg("--edition")
-            .arg(&job.source.edition)
-            .arg("--crate-name")
-            .arg(&job.source.crate_name)
-            .arg("--crate-type")
-            .arg(job.kind.as_str())
-            .arg("-C")
-            .arg("panic=abort")
-            .arg("-Zcodegen-backend=cranelift")
-            .arg(format!("-Clinker={}", self.config.linker.display()))
-            .arg("-Clinker-flavor=wasm-ld")
-            .args(job.compiler_flags());
-        for extern_spec in &job.externs {
-            command.arg("--extern").arg(format!(
-                "{}={}",
-                extern_spec.name,
-                extern_spec.path.display()
-            ));
-        }
-        command.arg(&job.source.path).arg("-o").arg(&out);
+            .args(raw_rustc_args(&self.config, job, &out));
 
         let started = Instant::now();
         let result = command.output().map_err(|error| {
@@ -120,6 +97,44 @@ impl Compiler for RealCompiler {
             link_ms: None,
         })
     }
+}
+
+/// The rustc arguments after the host's own flags and the `--` separator.
+///
+/// Both the subprocess backend and the resident library backend build their
+/// argv from this, so the two can never drift.
+#[must_use]
+pub fn raw_rustc_args(config: &RealCompilerConfig, job: &JobSpec, out: &Path) -> Vec<String> {
+    let mut args = vec![
+        "--target".to_owned(),
+        job.target.clone(),
+        "--sysroot".to_owned(),
+        config.sysroot.display().to_string(),
+        "--edition".to_owned(),
+        job.source.edition.clone(),
+        "--crate-name".to_owned(),
+        job.source.crate_name.clone(),
+        "--crate-type".to_owned(),
+        job.kind.as_str().to_owned(),
+        "-C".to_owned(),
+        "panic=abort".to_owned(),
+        "-Zcodegen-backend=cranelift".to_owned(),
+        format!("-Clinker={}", config.linker.display()),
+        "-Clinker-flavor=wasm-ld".to_owned(),
+    ];
+    args.extend(job.compiler_flags());
+    for extern_spec in &job.externs {
+        args.push("--extern".to_owned());
+        args.push(format!(
+            "{}={}",
+            extern_spec.name,
+            extern_spec.path.display()
+        ));
+    }
+    args.push(job.source.path.display().to_string());
+    args.push("-o".to_owned());
+    args.push(out.display().to_string());
+    args
 }
 
 /// The last few lines of a compiler's stderr, for the error message.

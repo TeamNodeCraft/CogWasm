@@ -1,8 +1,9 @@
 //! CLI for the reference supervisor.
 //!
 //! `build` uses the deterministic fake compiler (M1). `matrix` drives the real
-//! pipeline through `cogwasm-host raw` and prints compile time, artifact size
-//! and cache state per tier (M2).
+//! pipeline through `cogwasm-host raw` (the default `--backend host`) or the
+//! in-process `--backend resident` and prints compile time, artifact size and
+//! cache state per tier (M2).
 
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -10,11 +11,11 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, Result, anyhow, bail};
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use cogwasm_supervisor::{
-    Artifact, ArtifactStore, CompileOptions, FakeCompiler, JobSpec, Measurement, Objective, Preset,
-    RealCompiler, RealCompilerConfig, Runtime, Scoreboard, SourceSpec, Supervisor, Swapper,
-    WasmtimeRuntime, Workspace,
+    Artifact, ArtifactStore, CompileOptions, Compiler, FakeCompiler, JobSpec, Measurement,
+    Objective, Preset, RealCompiler, RealCompilerConfig, ResidentCompiler, Runtime, Scoreboard,
+    SourceSpec, Supervisor, Swapper, WasmtimeRuntime, Workspace,
 };
 use serde::Serialize;
 
@@ -26,6 +27,15 @@ use serde::Serialize;
 struct Cli {
     #[command(subcommand)]
     command: Command,
+}
+
+/// Which real compiler backend the subcommand drives.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+enum Backend {
+    /// Spawn `cogwasm-host raw` for each job (the historical behaviour).
+    Host,
+    /// Keep one loaded rustc.wasm in this process and instantiate per job.
+    Resident,
 }
 
 #[derive(Subcommand)]
@@ -50,6 +60,9 @@ enum Command {
     },
     /// Compile programs at every tier through the real pipeline.
     Matrix {
+        /// Which compiler backend to use.
+        #[arg(long, value_enum, default_value = "host")]
+        backend: Backend,
         #[arg(long)]
         host: PathBuf,
         #[arg(long)]
@@ -112,6 +125,9 @@ enum Command {
     },
     /// Swap demo (M3): serve T0, build T1 in the background, install it, verify.
     Demo {
+        /// Which compiler backend to use.
+        #[arg(long, value_enum, default_value = "host")]
+        backend: Backend,
         #[arg(long)]
         host: PathBuf,
         #[arg(long)]
@@ -146,6 +162,9 @@ enum Command {
     Workspace {
         #[arg(long)]
         manifest: PathBuf,
+        /// Which compiler backend to use.
+        #[arg(long, value_enum, default_value = "host")]
+        backend: Backend,
         #[arg(long)]
         host: PathBuf,
         #[arg(long)]
@@ -211,6 +230,7 @@ fn main() -> Result<()> {
             compiler,
         } => build_fake(&load_job(&job)?, &store, &compiler)?,
         Command::Matrix {
+            backend,
             host,
             rustc,
             sysroot,
@@ -238,8 +258,17 @@ fn main() -> Result<()> {
                 work_root: work,
                 compiler_id,
             };
+            let compiler = backend_compiler(&config, backend)?;
             let exec = exec.then_some(ExecConfig { samples, seed });
-            let report = matrix(&config, &store, &specs, &programs, exec, record.as_deref())?;
+            let report = matrix(
+                &config,
+                compiler,
+                &store,
+                &specs,
+                &programs,
+                exec,
+                record.as_deref(),
+            )?;
             if let Some(path) = json {
                 let encoded =
                     serde_json::to_vec_pretty(&report).context("serialising the matrix")?;
@@ -272,6 +301,7 @@ fn main() -> Result<()> {
             }
         }
         Command::Demo {
+            backend,
             host,
             rustc,
             precompiled,
@@ -296,10 +326,12 @@ fn main() -> Result<()> {
                 work_root: work,
                 compiler_id,
             };
-            demo(&config, &store, &source, seed, serve_calls, probe)?;
+            let compiler = backend_compiler(&config, backend)?;
+            demo(&config, compiler, &store, &source, seed, serve_calls, probe)?;
         }
         Command::Workspace {
             manifest,
+            backend,
             host,
             rustc,
             precompiled,
@@ -322,7 +354,8 @@ fn main() -> Result<()> {
                 work_root: work.clone(),
                 compiler_id,
             };
-            build_workspace(&manifest, &spec, &config, &store, &work, json.as_deref())?;
+            let compiler = backend_compiler(&config, backend)?;
+            build_workspace(&manifest, &spec, compiler, &store, &work, json.as_deref())?;
         }
     }
     Ok(())
@@ -331,6 +364,22 @@ fn main() -> Result<()> {
 fn load_job(path: &Path) -> Result<JobSpec> {
     let file = File::open(path).with_context(|| format!("opening {}", path.display()))?;
     serde_json::from_reader(file).with_context(|| format!("parsing {}", path.display()))
+}
+
+/// Build the selected backend once, so a resident module load is reused by
+/// every job (and every worker) in the subcommand.
+fn backend_compiler(config: &RealCompilerConfig, backend: Backend) -> Result<Arc<dyn Compiler>> {
+    match backend {
+        Backend::Host => Ok(Arc::new(RealCompiler::new(config.clone()))),
+        Backend::Resident => {
+            let resident = ResidentCompiler::new(config.clone())?;
+            eprintln!(
+                "[cogwasm-supervisor] resident backend: rustc.wasm loaded in {:.1} ms",
+                resident.module_load_ms()
+            );
+            Ok(Arc::new(resident))
+        }
+    }
 }
 
 fn build_fake(job: &JobSpec, store: &Path, compiler: &str) -> Result<()> {
@@ -348,6 +397,7 @@ fn build_fake(job: &JobSpec, store: &Path, compiler: &str) -> Result<()> {
 
 fn matrix(
     config: &RealCompilerConfig,
+    compiler: Arc<dyn Compiler>,
     store: &Path,
     specs: &[String],
     programs: &[PathBuf],
@@ -370,7 +420,7 @@ fn matrix(
                 .map_err(anyhow::Error::msg)
         })
         .collect::<Result<Vec<_>>>()?;
-    let supervisor = Supervisor::new(ArtifactStore::new(store), RealCompiler::new(config.clone()));
+    let supervisor = Supervisor::new(ArtifactStore::new(store), compiler);
     let runtime = exec.map(|_| WasmtimeRuntime::new());
     let mut board = match record {
         Some(path) if path.exists() => Scoreboard::load(path)?,
@@ -467,13 +517,14 @@ fn measure_exec(
 
 fn demo(
     config: &RealCompilerConfig,
+    compiler: Arc<dyn Compiler>,
     store: &Path,
     source: &Path,
     seed: u64,
     serve_calls: usize,
     probe: bool,
 ) -> Result<()> {
-    let supervisor = Supervisor::new(ArtifactStore::new(store), RealCompiler::new(config.clone()));
+    let supervisor = Supervisor::new(ArtifactStore::new(store), compiler.clone());
     let name = crate_name(source)?;
     let make_job = |options: CompileOptions| -> Result<JobSpec> {
         let mut job = JobSpec::new(SourceSpec::new(source.to_path_buf(), name.clone()), options);
@@ -506,7 +557,7 @@ fn demo(
     let swap_t0 = swap.elapsed();
     let after_t0 = swapper.call(seed)?;
 
-    let background = spawn_opt(config, store, source, &name);
+    let background = spawn_opt(compiler, store, source, &name);
     let mut served = 0;
     while served < serve_calls && !background.is_finished() {
         swapper.call(seed)?;
@@ -543,17 +594,16 @@ fn demo(
 }
 
 fn spawn_opt(
-    config: &RealCompilerConfig,
+    compiler: Arc<dyn Compiler>,
     store: &Path,
     source: &Path,
     name: &str,
 ) -> std::thread::JoinHandle<Result<Artifact>> {
-    let config = config.clone();
     let store = store.to_path_buf();
     let source = source.to_path_buf();
     let name = name.to_owned();
     std::thread::spawn(move || {
-        let supervisor = Supervisor::new(ArtifactStore::new(store), RealCompiler::new(config));
+        let supervisor = Supervisor::new(ArtifactStore::new(store), compiler);
         let mut job = JobSpec::preset(SourceSpec::new(source, name), Preset::Opt);
         job.request_id = Some("background-opt".to_owned());
         Ok(supervisor.build(&job)?.artifact().clone())
@@ -582,14 +632,14 @@ fn print_workspace(builds: &[cogwasm_supervisor::CrateBuild]) {
 fn build_workspace(
     manifest: &Path,
     spec: &str,
-    config: &RealCompilerConfig,
+    compiler: Arc<dyn Compiler>,
     store: &Path,
     work_root: &Path,
     json: Option<&Path>,
 ) -> Result<()> {
     let workspace = Workspace::from_json(manifest)?;
     let options = CompileOptions::from_spec(spec).map_err(anyhow::Error::msg)?;
-    let supervisor = Supervisor::new(ArtifactStore::new(store), RealCompiler::new(config.clone()));
+    let supervisor = Supervisor::new(ArtifactStore::new(store), compiler);
     let builds = workspace.build(&supervisor, &options, work_root)?;
     print_workspace(&builds);
     if let Some(path) = json {

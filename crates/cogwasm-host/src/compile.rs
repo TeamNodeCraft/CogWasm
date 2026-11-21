@@ -86,18 +86,37 @@ pub struct CompileOutcome {
     pub spawns: Vec<SpawnSummary>,
 }
 
-/// Run one rustc.wasm job on an already-loaded module.
+/// What to do with a guest store after a successful job.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Teardown {
+    /// Skip the multi-second store teardown. Only correct for a one-shot CLI
+    /// process that is about to exit anyway.
+    Leak,
+    /// Drop the store. Resident hosts must use this so they do not leak one
+    /// store (and its linear memory) per job.
+    Drop,
+}
+
+/// Run one rustc.wasm job on an already-loaded module, given the full argv.
 ///
 /// A zero `_start` exit is success, matching rustc's WASI convention. A
 /// non-zero linker status fails the job before any plugin is evaluated.
-pub fn compile(engine: &Engine, module: &Module, req: &CompileRequest) -> Result<CompileOutcome> {
-    let args = rustc_args(req);
+///
+/// The caller owns the store lifetime choice: [`Teardown::Leak`] for a
+/// one-shot CLI, [`Teardown::Drop`] for a resident service.
+pub fn compile_args(
+    engine: &Engine,
+    module: &Module,
+    args: &[String],
+    linker: &Path,
+    teardown: Teardown,
+) -> Result<CompileOutcome> {
     let t = Instant::now();
     let prepared = prepare_instance(
         engine,
         module,
-        &args,
-        &req.linker,
+        args,
+        linker,
         "[cogwasm-host]",
         StoreOptions::default(),
         ArgvRecorder::default(),
@@ -134,14 +153,13 @@ pub fn compile(engine: &Engine, module: &Module, req: &CompileRequest) -> Result
         bail!("linker failed: {:?}", spawns);
     }
 
-    // A 137 MiB compiled module + 1 GiB shared memory can take seconds to
-    // tear down. A hot-reload host would keep one engine/module alive, so the
-    // measured edit-to-result path deliberately excludes teardown.
-    //
-    // G2.1 step 2: the resident service must decide teardown explicitly
-    // instead of leaking one store per job. Leaking is only acceptable for
-    // this one-shot CLI path.
-    std::mem::forget(store);
+    // A 137 MiB compiled module + 1 GiB shared memory can take seconds to tear
+    // down. Leaking is only acceptable for the one-shot CLI, which exits right
+    // after; a resident host drops the store so it does not leak one per job.
+    match teardown {
+        Teardown::Leak => std::mem::forget(store),
+        Teardown::Drop => drop(store),
+    }
 
     Ok(CompileOutcome {
         instantiate_ms,
@@ -150,6 +168,21 @@ pub fn compile(engine: &Engine, module: &Module, req: &CompileRequest) -> Result
         compile_ms: (rustc_total_ms - link_ms).max(0.0),
         spawns,
     })
+}
+
+/// Run one rustc.wasm job on an already-loaded module.
+///
+/// A zero `_start` exit is success, matching rustc's WASI convention. A
+/// non-zero linker status fails the job before any plugin is evaluated. This is
+/// the one-shot CLI path, so it deliberately leaks the store.
+pub fn compile(engine: &Engine, module: &Module, req: &CompileRequest) -> Result<CompileOutcome> {
+    compile_args(
+        engine,
+        module,
+        &rustc_args(req),
+        &req.linker,
+        Teardown::Leak,
+    )
 }
 
 /// A resident Wasmtime engine plus one loaded rustc.wasm module.
@@ -198,6 +231,16 @@ impl Compiler {
     /// Run one job on the resident module.
     pub fn compile(&self, req: &CompileRequest) -> Result<CompileOutcome> {
         compile(&self.engine, &self.module, req)
+    }
+
+    /// Run one job from an explicit argv, choosing the store lifetime.
+    pub fn compile_args(
+        &self,
+        args: &[String],
+        linker: &Path,
+        teardown: Teardown,
+    ) -> Result<CompileOutcome> {
+        compile_args(&self.engine, &self.module, args, linker, teardown)
     }
 
     /// The resident Wasmtime engine.

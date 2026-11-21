@@ -118,10 +118,14 @@ paying the module load each time; the in-process path
        (`run_rustc_with`, `Opts`, spawn handling) into the `cogwasm-host`
        library, with the CLI as a thin wrapper. Depends on M1.
        Lives in `crates/cogwasm-host/src/compile.rs`, re-exported as `cogwasm_host::compile` (`CompileRequest`, `rustc_args`, `CompileOutcome`, `compile`, `Compiler`).
-2. [ ] A `Resident` backend in the supervisor that owns one `Engine`, the
+2. [x] A `Resident` backend in the supervisor that owns one `Engine`, the
        loaded (precompiled) `rustc.wasm` `Module` and the incremental cache,
        and instantiates per job.
-3. [ ] Golden test: two jobs in one process load the module once.
+       Lives in `crates/cogwasm-supervisor/src/resident.rs` (`ResidentCompiler`,
+       selected with `--backend resident`).
+3. [x] Golden test: two jobs in one process load the module once.
+       Lives in `crates/cogwasm-supervisor/tests/resident.rs`
+       (`two_jobs_share_one_loaded_module_and_survive_a_rejection`).
 4. [ ] Measure edit → result on the CI runner (`bench` gains a resident
        mode); record against the 100 ms target.
 5. [ ] If instantiation dominates, this hands over to G2.2.

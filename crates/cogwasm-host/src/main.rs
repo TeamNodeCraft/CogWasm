@@ -1279,6 +1279,12 @@ fn main() -> Result<()> {
             }
         }
         "raw" => {
+            // Deliberately not routed through `compile::compile_args`: this arm
+            // must print TIMING even when `_start` fails, exit with the guest's
+            // exact code (including a trap message), and leak the store. Those
+            // outcomes are not expressible through `compile_args`'s
+            // `Result<CompileOutcome>` without changing its byte-identical
+            // stdout/stderr and exit behaviour.
             let engine = engine(o.cache_dir.as_deref())?;
             let module = load_rustc_module(
                 &engine,

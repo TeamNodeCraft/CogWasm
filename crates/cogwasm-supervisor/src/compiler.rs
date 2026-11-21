@@ -68,6 +68,18 @@ pub trait Compiler: Send + Sync {
     fn compile(&self, job: &JobSpec, key: &str) -> Result<CompileOutput, CompileError>;
 }
 
+/// A shared compiler is itself a compiler, so a resident backend can serve
+/// several workers (and a background tier) from one loaded module.
+impl<T: Compiler + ?Sized> Compiler for Arc<T> {
+    fn id(&self) -> &str {
+        (**self).id()
+    }
+
+    fn compile(&self, job: &JobSpec, key: &str) -> Result<CompileOutput, CompileError> {
+        (**self).compile(job, key)
+    }
+}
+
 /// Lets a test hold a build open so it can submit a competing request.
 #[derive(Debug, Default)]
 pub struct Gate {
