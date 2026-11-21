@@ -105,6 +105,8 @@ Step 1 is done: [bench/gap/REPORT.md](../bench/gap/REPORT.md) attributes every p
 
 Step 5b has started: patch `0005-hoist-loop-invariant-field-reads.patch` adds the conservative loop-invariant field-read hoist (the SROA half of 5a, with the destination and raw-pointer/`Freeze` fixes). It is opt-in behind `-Zmir-hoist-loop-field-reads` because it is not yet sound enough for a default-on pass. An opt-in suite run measured `nbody` 6,204,745,840 → 5,550,101,348 executed instructions (−10.55%, −1.0% module size), `b_alloc` −1.73%, and the quick-suite instruction geomean 1.84366 → 1.80274 (−2.2% relative); `expr` regressed 0.01%. A loop-nest profitability gate now removes that regression locally (`expr` 0.000%, `nbody` −10.551%, `b_alloc` −1.731%). Patch `0006-wasm-cost-model-inliner.patch` then adds the cost-model inliner (`-Zmir-inline-wasm`): calls in a cyclic block get a 300 cost threshold, calls outside loops stay with rustc's inliner, loop-free bodies are skipped, and inlining stops at four times the caller's original block count. At the MIR level `strings::body` grows 1,676 → 5,072 lines, `json` and `scene` about twofold, and `expr` and `collections` are unchanged. Through the rebuilt compiler, on the full suite, it measures `strings` 1.42 → 0.83 ms (−41.8%, 8.40× → 4.74× of LLVM `-O2`), `json` −8.7%, `collections` −8.6%, `sort` −6.0% and `scene` −4.5% (execution geomean −4.4%, warm compile +0.45%, module size −0.2%, outputs identical); twelve of the twenty-one modules are byte-identical to the baseline. The threshold was lowered from 300 to 200 to get there: at 300 the extra inlining cost +3.3% warm compile and shifted `int_loops`' hot-loop layout. The full difftest corpus is green. An escape/alias analysis and the SROA/mem2reg half remain; see [step-5b.md](../experiments/cranelift-wasm/stage-c/notes/step-5b.md).
 
+Tier 2's host side is planned in [supervisor.md](../experiments/cranelift-wasm/stage-c/notes/supervisor.md): the compiler stays a pure function and a host-side supervisor owns the tier policy, the artifact cache and the swap. The swap is instance-level at a quiescent point, because WebAssembly cannot replace a function in a live instance and the engine call stack cannot be migrated. The first milestone needs no toolchain; per-codegen-unit reuse is left as a research item gated on a compiler boundary, with the generated-stress experiment as its evidence.
+
 ## Goal 2 — Near-instant compiler start
 
 Today: the first load compiles the 137 MB `rustc.wasm` to native code (about
@@ -118,6 +120,8 @@ Today: the first load compiles the 137 MB `rustc.wasm` to native code (about
 | **open** | Snapshot an already-initialised compiler, so starting skips set-up; copy-on-write memory instantiation | Instantiation in about 10 ms |
 | **open** | A smaller `rustc.wasm` (drop Clippy, rustfmt and unused targets from the build) | Size and load time measured before/after |
 | **open** | A resident compiler service in the host (keep `rustc.wasm` loaded, reuse its caches) | Edit → result under 100 ms on a CI runner |
+
+The resident service and tier 2 share the supervisor planned in [supervisor.md](../experiments/cranelift-wasm/stage-c/notes/supervisor.md).
 
 ## Goal 3 — The whole language and ecosystem
 
