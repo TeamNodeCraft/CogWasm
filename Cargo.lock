@@ -256,6 +256,7 @@ dependencies = [
  "anyhow",
  "serde",
  "wasmtime",
+ "wasmtime-wasi",
 ]
 
 [[package]]

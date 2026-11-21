@@ -1,14 +1,26 @@
 //! Shared host-side runtime helpers for the `CogWasm` Wasmtime hosts.
 //!
-//! The CogWasm product host and the benchmark host deliberately keep separate
-//! engine setup, WASI store construction, spawn recording and startup
-//! reporting: those have drifted in ways that are observable (stderr capture,
-//! deterministic randomness, resource limits, log prefixes and error text).
-//! This crate holds only the items that are identical in both binaries, so
-//! moving one here cannot change either host's behaviour.
+//! The product host and the benchmark host keep separate CLIs and startup
+//! reporting, but the pieces that must not drift live here: guest-memory
+//! reads, the timing median, store/instance construction, and
+//! `playground.spawn`. Per-host policy (stderr capture, randomness, fuel,
+//! limits, what a spawn records) is an explicit option or recorder, so the
+//! differences stay visible instead of becoming two copies.
 
+mod env;
 mod error;
+mod mem;
 mod spawn;
+mod stats;
+mod store;
 
+pub use env::env_var_compat;
 pub use error::Wt;
-pub use spawn::SpawnSummary;
+pub use mem::{GuestMem, MAX_CSTR_BYTES, guest_memory};
+pub use spawn::{
+    ArgvRecord, ArgvRecorder, SpawnRecorder, SpawnSummary, SummaryRecorder, add_playground_spawn,
+};
+pub use stats::median;
+pub use store::{
+    HostState, Limits, PAGE_SIZE, PreparedInstance, STDERR_CAPACITY, StoreOptions, prepare_instance,
+};

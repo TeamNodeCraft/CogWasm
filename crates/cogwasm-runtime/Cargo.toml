@@ -7,6 +7,12 @@ publish = false
 [dependencies]
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
-# Only `wasmtime::Result` is used here; the engine configuration and the
-# precompiled loader stay in `cogwasm-host`.
-wasmtime = { workspace = true, features = ["std"] }
+# The store builder needs the runtime API and WASI; the engine configuration
+# and the precompiled loader stay in `cogwasm-host`.
+wasmtime = { workspace = true, features = ["std", "runtime"] }
+wasmtime-wasi = { workspace = true, features = ["p1"] }
+
+[dev-dependencies]
+# The guest-memory tests compile a tiny module; production users of this crate
+# are handed an already-compiled `Module` by `cogwasm-host`.
+wasmtime = { workspace = true, features = ["std", "runtime", "cranelift"] }

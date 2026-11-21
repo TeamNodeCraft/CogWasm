@@ -18,22 +18,18 @@
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Parser, Subcommand};
 use cogwasm_host::precompiled::load_rustc_module;
-use cogwasm_runtime::{SpawnSummary, Wt};
+use cogwasm_runtime::{
+    Limits, PAGE_SIZE, StoreOptions, SummaryRecorder, Wt, median, prepare_instance,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::process::Command;
 use std::time::Instant;
-use wasmtime::{Caller, Engine, Extern, Instance, Linker, Memory, Module, ResourceLimiter, Store};
-use wasmtime_wasi::p1::{self, WasiP1Ctx};
-use wasmtime_wasi::p2::pipe::MemoryOutputPipe;
-use wasmtime_wasi::{FsPerms, I32Exit, WasiCtxBuilder};
+use wasmtime::{Engine, Linker, Memory, Module, Store};
+use wasmtime_wasi::I32Exit;
 
-const PAGE_SIZE: u64 = 65_536;
-const STDERR_CAPACITY: usize = 8 << 20;
-/// Enough fuel for a compile so it never traps; rustc.wasm uses far less.
 const FUEL_LIMIT: u64 = 1_000_000_000_000_000;
 
 // ---------------------------------------------------------------------------
@@ -188,214 +184,8 @@ fn main() -> Result<()> {
 // Shared host state
 // ---------------------------------------------------------------------------
 
-struct Limits {
-    max_pages: u64,
-}
-
-impl ResourceLimiter for Limits {
-    fn memory_growing(
-        &mut self,
-        _current: usize,
-        desired: usize,
-        _maximum: Option<usize>,
-    ) -> wasmtime::Result<bool> {
-        let pages = u64::try_from(desired).unwrap_or(u64::MAX) / PAGE_SIZE;
-        self.max_pages = self.max_pages.max(pages);
-        Ok(true)
-    }
-
-    fn table_growing(
-        &mut self,
-        _current: usize,
-        _desired: usize,
-        _maximum: Option<usize>,
-    ) -> wasmtime::Result<bool> {
-        Ok(true)
-    }
-}
-
-struct HostState {
-    wasi: Option<WasiP1Ctx>,
-    spawns: Arc<Mutex<Vec<SpawnRecord>>>,
-    limits: Limits,
-}
-
-type HostStore = Store<HostState>;
-
-#[derive(Clone)]
-struct SpawnRecord {
-    program: String,
-    args: usize,
-    ms: f64,
-    status: i32,
-}
-
-fn new_store(
-    engine: &Engine,
-    args: &[String],
-    stderr: &MemoryOutputPipe,
-    deterministic_random: bool,
-) -> Result<HostStore> {
-    let mut builder = WasiCtxBuilder::new();
-    builder
-        .inherit_stdout()
-        .stderr(stderr.clone())
-        .args(args)
-        .env("RUST_MIN_STACK", "16777216")
-        .env("RUST_BACKTRACE", "1");
-    if deterministic_random {
-        // rustc's std hash seeds come from WASI `random_get`. A fresh random
-        // seed per compile changes a few hash-table probes (and therefore the
-        // fuel count), so the fuel samples pin the generator. The timed runs
-        // keep the product's real random source.
-        builder
-            .secure_random(wasmtime_wasi::Deterministic::new((0..=255_u8).collect()))
-            .insecure_random(wasmtime_wasi::Deterministic::new(
-                (0..=255_u8).rev().collect(),
-            ))
-            .insecure_random_seed(0);
-    }
-    if let Ok(value) = std::env::var("CG_CLIF_WASM_STRICT") {
-        builder.env("CG_CLIF_WASM_STRICT", value);
-    }
-    // rustc sees the host filesystem at the same absolute paths so the native
-    // Wild process can consume the linker arguments unchanged.
-    builder
-        .preopened_dir(Path::new("/"), "/", FsPerms::ReadWrite)
-        .wt("preopening the host root as WASI /")?;
-    Ok(Store::new(
-        engine,
-        HostState {
-            wasi: Some(builder.build_p1()),
-            spawns: Arc::new(Mutex::new(Vec::new())),
-            limits: Limits { max_pages: 0 },
-        },
-    ))
-}
-
-fn add_playground_spawn(linker: &mut Linker<HostState>, linker_path: &Path) -> Result<()> {
-    let linker_path = linker_path.to_path_buf();
-    linker
-        .func_wrap(
-            "playground",
-            "spawn",
-            move |mut caller: Caller<'_, HostState>, argv: u32, argc: u32| -> i32 {
-                match spawn_impl(&mut caller, argv, argc, &linker_path) {
-                    Ok(code) => code,
-                    Err(error) => {
-                        eprintln!("[bench-host] spawn failed: {error:#}");
-                        -1
-                    }
-                }
-            },
-        )
-        .wt("defining playground::spawn")?;
-    Ok(())
-}
-
-fn guest_memory(caller: &mut Caller<'_, HostState>) -> Result<Memory> {
-    match caller.get_export("memory") {
-        Some(Extern::Memory(memory)) => Ok(memory),
-        Some(_) => bail!("rustc.wasm export `memory` is not a memory"),
-        None => bail!("rustc.wasm does not export memory"),
-    }
-}
-
-fn read_cstr(caller: &Caller<'_, HostState>, memory: &Memory, pointer: u32) -> Result<String> {
-    let mut bytes = Vec::new();
-    let mut offset = usize::try_from(pointer).context("guest string pointer")?;
-    loop {
-        let mut byte = [0u8; 1];
-        memory
-            .read(caller, offset, &mut byte)
-            .with_context(|| format!("reading guest string at {pointer:#x}"))?;
-        if byte[0] == 0 {
-            break;
-        }
-        bytes.push(byte[0]);
-        offset += 1;
-        if bytes.len() > (1 << 20) {
-            bail!("guest string at {pointer:#x} is longer than 1 MiB");
-        }
-    }
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
-}
-
-fn spawn_impl(
-    caller: &mut Caller<'_, HostState>,
-    pointer_array: u32,
-    argument_count: u32,
-    linker: &Path,
-) -> Result<i32> {
-    let memory = guest_memory(&mut *caller)?;
-    let mut raw = vec![0u8; usize::try_from(argument_count).context("spawn argument count")? * 4];
-    memory
-        .read(
-            &*caller,
-            usize::try_from(pointer_array).context("spawn pointer array")?,
-            &mut raw,
-        )
-        .context("reading spawn pointer array")?;
-    let mut linker_args = Vec::with_capacity(raw.len() / 4);
-    for chunk in raw.as_chunks::<4>().0 {
-        let pointer = u32::from_le_bytes(*chunk);
-        linker_args.push(read_cstr(&*caller, &memory, pointer)?);
-    }
-    let started = Instant::now();
-    let status = Command::new(linker)
-        .args(linker_args.iter().skip(1))
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status();
-    let ms = elapsed_ms(started);
-    let code = match status {
-        Ok(status) if status.success() => 0,
-        Ok(status) => status.code().unwrap_or(-1),
-        Err(error) => {
-            eprintln!("[bench-host] cannot run {}: {error}", linker.display());
-            -1
-        }
-    };
-    caller
-        .data()
-        .spawns
-        .lock()
-        .expect("spawn log lock")
-        .push(SpawnRecord {
-            program: linker_args.first().cloned().unwrap_or_default(),
-            args: linker_args.len().saturating_sub(1),
-            ms,
-            status: code,
-        });
-    Ok(code)
-}
-
-fn prepare_instance(
-    engine: &Engine,
-    module: &Module,
-    args: &[String],
-    linker_path: &Path,
-    fuel_limit: Option<u64>,
-    deterministic_random: bool,
-) -> Result<(HostStore, Instance, MemoryOutputPipe)> {
-    let stderr = MemoryOutputPipe::new(STDERR_CAPACITY);
-    let mut linker: Linker<HostState> = Linker::new(engine);
-    p1::add_to_linker_sync(&mut linker, |state: &mut HostState| {
-        state.wasi.as_mut().expect("WASI context present")
-    })
-    .wt("adding WASI p1 imports")?;
-    add_playground_spawn(&mut linker, linker_path)?;
-    let mut store = new_store(engine, args, &stderr, deterministic_random)?;
-    if let Some(fuel) = fuel_limit {
-        store.set_fuel(fuel).wt("setting fuel")?;
-    }
-    store.limiter(|state| &mut state.limits);
-    let instance = linker
-        .instantiate(&mut store, module)
-        .wt("instantiating rustc.wasm")?;
-    Ok((store, instance, stderr))
-}
+// Store construction, `GuestMem` and `playground.spawn` live in
+// `cogwasm_runtime`; this host supplies the benchmark options and recorder.
 
 fn elapsed_ms(started: Instant) -> f64 {
     started.elapsed().as_secs_f64() * 1e3
@@ -409,27 +199,24 @@ fn as_f64(value: u64) -> f64 {
     value as f64
 }
 
-fn median(values: &[f64]) -> f64 {
-    if values.is_empty() {
-        return f64::NAN;
-    }
-    let mut sorted = values.to_vec();
-    sorted.sort_by(|a, b| a.partial_cmp(b).expect("timings are finite"));
-    let middle = sorted.len().midpoint(0);
-    if sorted.len().is_multiple_of(2) {
-        sorted[middle - 1] + (sorted[middle] - sorted[middle - 1]) / 2.0
-    } else {
-        sorted[middle]
+/// The benchmark host's store configuration: capture stderr, track peak
+/// memory, and optionally pin randomness (fuel runs) or set a fuel limit.
+fn store_options(fuel: Option<u64>, deterministic_random: bool) -> StoreOptions {
+    StoreOptions {
+        capture_stderr: true,
+        deterministic_random: deterministic_random.then_some(0),
+        fuel,
+        limits: Some(Limits::default()),
     }
 }
 
-fn stats(values: &[f64]) -> Stats {
-    Stats {
-        median_ms: median(values),
+fn stats(values: &[f64]) -> Result<Stats> {
+    Ok(Stats {
+        median_ms: median(values)?,
         min_ms: values.iter().copied().fold(f64::INFINITY, f64::min),
         max_ms: values.iter().copied().fold(f64::NEG_INFINITY, f64::max),
         runs: values.len(),
-    }
+    })
 }
 
 #[derive(Serialize, Clone)]
@@ -516,14 +303,18 @@ fn startup_once(args: &StartupOnceArgs) -> Result<()> {
         .with_context(|| format!("reading size of {}", rustc.display()))?
         .len();
     let started = Instant::now();
-    let (store, _instance, _stderr) = prepare_instance(
+    let rustc_args = ["rustc".to_owned()];
+    let prepared = prepare_instance(
         &engine,
         &module,
-        &["rustc".to_owned()],
+        &rustc_args,
         Path::new("/bin/false"),
-        None,
-        false,
+        "[bench-host]",
+        store_options(None, false),
+        SummaryRecorder::default(),
     )?;
+    let store = prepared.store;
+    let _instance = prepared.instance;
     let instantiate_ms = elapsed_ms(started);
     println!(
         "{}",
@@ -624,8 +415,8 @@ fn startup(args: &StartupArgs) -> Result<()> {
         results.insert(
             mode.to_owned(),
             ModeResult {
-                module_load: stats(&loads),
-                instantiate: stats(&instantiates),
+                module_load: stats(&loads)?,
+                instantiate: stats(&instantiates)?,
                 source,
                 fallback_reason,
             },
@@ -781,27 +572,27 @@ struct IncrementalResult {
 fn compile_medians(
     runs: &[CompileRun],
     incremental: Option<&IncrementalResult>,
-) -> BTreeMap<String, f64> {
+) -> Result<BTreeMap<String, f64>> {
     let mut medians = BTreeMap::new();
     medians.insert(
         "instantiate_ms".to_owned(),
-        median(&collect(runs, |run| run.instantiate_ms)),
+        median(&collect(runs, |run| run.instantiate_ms))?,
     );
     medians.insert(
         "rustc_total_ms".to_owned(),
-        median(&collect(runs, |run| run.rustc_total_ms)),
+        median(&collect(runs, |run| run.rustc_total_ms))?,
     );
     medians.insert(
         "link_ms".to_owned(),
-        median(&collect(runs, |run| run.link_ms)),
+        median(&collect(runs, |run| run.link_ms))?,
     );
     medians.insert(
         "compile_ms".to_owned(),
-        median(&collect(runs, |run| run.compile_ms)),
+        median(&collect(runs, |run| run.compile_ms))?,
     );
     medians.insert(
         "peak_memory_bytes".to_owned(),
-        median(&collect(runs, |run| as_f64(run.peak_memory_bytes))),
+        median(&collect(runs, |run| as_f64(run.peak_memory_bytes)))?,
     );
     if let Some(value) = incremental {
         for (name, values) in [
@@ -819,10 +610,10 @@ fn compile_medians(
                 collect(&value.runs, |run| as_f64(run.peak_memory_bytes)),
             ),
         ] {
-            medians.insert(name.to_owned(), median(&values));
+            medians.insert(name.to_owned(), median(&values)?);
         }
     }
-    medians
+    Ok(medians)
 }
 
 fn run_phases(
@@ -928,7 +719,7 @@ fn compile_with(
     } else {
         None
     };
-    let medians = compile_medians(&runs, incremental.as_ref());
+    let medians = compile_medians(&runs, incremental.as_ref())?;
     let source_bytes = std::fs::read(crate_source)?;
     let result = CompileResult {
         program: args.crate_name.clone(),
@@ -1231,11 +1022,11 @@ fn run_incremental(
     let mut medians = BTreeMap::new();
     medians.insert(
         "incremental_ms".to_owned(),
-        median(&collect(&measured, |run| run.compile_ms)),
+        median(&collect(&measured, |run| run.compile_ms))?,
     );
     medians.insert(
         "incremental_link_ms".to_owned(),
-        median(&collect(&measured, |run| run.link_ms)),
+        median(&collect(&measured, |run| run.link_ms))?,
     );
     Ok(IncrementalResult {
         directory: directory.display().to_string(),
@@ -1259,14 +1050,20 @@ fn compile_once(
 ) -> Result<CompileRun> {
     let args = options.rustc_args();
     let started = Instant::now();
-    let (mut store, instance, stderr) = prepare_instance(
+    let prepared = prepare_instance(
         engine,
         module,
         &args,
         linker,
-        fuel_limit,
-        deterministic_random,
+        "[bench-host]",
+        store_options(fuel_limit, deterministic_random),
+        SummaryRecorder::default(),
     )?;
+    let mut store = prepared.store;
+    let instance = prepared.instance;
+    let stderr = prepared
+        .stderr
+        .context("the benchmark host must capture stderr")?;
     let instantiate_ms = elapsed_ms(started);
     // Read the counter after instantiation so data-segment setup is not part
     // of the compiler-work number.
@@ -1286,19 +1083,7 @@ fn compile_once(
         }
         None => None,
     };
-    let spawns = store
-        .data()
-        .spawns
-        .lock()
-        .expect("spawn log lock")
-        .iter()
-        .map(|spawn| SpawnSummary {
-            program: spawn.program.clone(),
-            args: spawn.args,
-            ms: spawn.ms,
-            status: spawn.status,
-        })
-        .collect::<Vec<_>>();
+    let spawns = store.data().recorder().summaries();
     let link_ms = spawns.iter().map(|spawn| spawn.ms).sum::<f64>();
     let captured = String::from_utf8_lossy(&stderr.contents()).into_owned();
     let memory_pages = instance
@@ -1539,7 +1324,7 @@ fn run_command(args: &RunArgs) -> Result<()> {
     let mut medians = BTreeMap::new();
     medians.insert(
         "exec_ms".to_owned(),
-        median(&runs.iter().map(|run| run.exec_ms).collect::<Vec<_>>()),
+        median(&runs.iter().map(|run| run.exec_ms).collect::<Vec<_>>())?,
     );
     medians.insert(
         "instantiate_ms".to_owned(),
@@ -1548,7 +1333,7 @@ fn run_command(args: &RunArgs) -> Result<()> {
                 .iter()
                 .map(|run| run.instantiate_ms)
                 .collect::<Vec<_>>(),
-        ),
+        )?,
     );
     let bytes = std::fs::read(&wasm)?;
     let result = RunResult {

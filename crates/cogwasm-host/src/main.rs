@@ -15,23 +15,16 @@
 
 use anyhow::{anyhow, bail, Context, Result};
 use cogwasm_host::precompiled::load_rustc_module;
-use cogwasm_runtime::{SpawnSummary, Wt};
+use cogwasm_runtime::{
+    env_var_compat, median, prepare_instance, ArgvRecorder, SpawnSummary, StoreOptions, Wt,
+};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::process::Command;
 use std::time::Instant;
-use wasmtime::{Caller, Engine, Extern, Linker, Memory, Module, Store};
-use wasmtime_wasi::p1::{self, WasiP1Ctx};
-use wasmtime_wasi::{FsPerms, I32Exit, WasiCtxBuilder};
-
-/// Read a `COGWASM_<name>` environment variable, falling back to the old
-/// `STAGE_C_<name>` spelling for one release.
-fn env_var_compat(name: &str) -> Option<std::ffi::OsString> {
-    std::env::var_os(format!("COGWASM_{name}"))
-        .or_else(|| std::env::var_os(format!("STAGE_C_{name}")))
-}
+use wasmtime::{Engine, Linker, Module, Store};
+use wasmtime_wasi::I32Exit;
 
 // ---------------------------------------------------------------------------
 // CLI
@@ -262,196 +255,6 @@ fn engine(cache_dir: Option<&Path>) -> Result<Engine> {
     cogwasm_host::config::engine(cache_dir)
 }
 
-/// The pieces needed to build a fresh WASI context for an instance.
-#[derive(Clone)]
-struct WasiSpec {
-    args: Vec<String>,
-    env: Vec<(String, String)>,
-    preopens: Vec<(PathBuf, String)>,
-}
-
-impl WasiSpec {
-    fn build(&self) -> Result<WasiP1Ctx> {
-        let mut b = WasiCtxBuilder::new();
-        b.inherit_stdout().inherit_stderr().args(&self.args);
-        for (k, v) in &self.env {
-            b.env(k, v);
-        }
-        for (host, guest) in &self.preopens {
-            b.preopened_dir(host, guest, FsPerms::ReadWrite)
-                .wt("preopening guest directory")?;
-        }
-        Ok(b.build_p1())
-    }
-}
-
-struct SpawnRecord {
-    argv: Vec<String>,
-    ms: f64,
-    status: i32,
-}
-
-/// Per-store host state. The spawn log is shared so the top level can report
-/// all link invocations.
-struct HostState {
-    wasi: Option<WasiP1Ctx>,
-    spawns: Arc<Mutex<Vec<SpawnRecord>>>,
-}
-
-fn new_store(engine: &Engine, args: Vec<String>) -> Result<Store<HostState>> {
-    let spec = Arc::new(WasiSpec {
-        args,
-        env: {
-            let mut env = vec![
-                ("RUST_MIN_STACK".into(), "16777216".into()),
-                ("RUST_BACKTRACE".into(), "1".into()),
-            ];
-            // cg_clif's strict mode is read inside the guest.
-            if let Ok(v) = std::env::var("CG_CLIF_WASM_STRICT") {
-                env.push(("CG_CLIF_WASM_STRICT".into(), v));
-            }
-            env
-        },
-        // rustc sees the host filesystem at the same absolute paths, so the
-        // native Wild process can consume the linker arguments unchanged.
-        preopens: vec![(PathBuf::from("/"), "/".into())],
-    });
-    let wasi = spec.build()?;
-    Ok(Store::new(
-        engine,
-        HostState {
-            wasi: Some(wasi),
-            spawns: Arc::new(Mutex::new(Vec::new())),
-        },
-    ))
-}
-
-#[derive(Clone)]
-struct GuestMem(Memory);
-
-impl GuestMem {
-    fn read(&self, caller: &Caller<'_, HostState>, off: usize, buf: &mut [u8]) -> Result<()> {
-        self.0
-            .read(caller, off, buf)
-            .with_context(|| format!("reading guest memory at {off:#x}"))
-    }
-}
-
-fn guest_memory(caller: &mut Caller<'_, HostState>) -> Result<GuestMem> {
-    match caller.get_export("memory") {
-        Some(Extern::Memory(m)) => Ok(GuestMem(m)),
-        Some(_) => bail!("rustc.wasm export `memory` is not a memory"),
-        None => bail!("rustc.wasm does not export memory"),
-    }
-}
-
-fn read_cstr(caller: &Caller<'_, HostState>, mem: &GuestMem, ptr: u32) -> Result<String> {
-    let mut out = Vec::new();
-    let mut off = ptr as usize;
-    for _ in 0..(1 << 20) {
-        let mut byte = [0u8; 1];
-        mem.read(caller, off, &mut byte)
-            .with_context(|| format!("reading guest string at {ptr:#x}"))?;
-        if byte[0] == 0 {
-            break;
-        }
-        out.push(byte[0]);
-        off += 1;
-    }
-    Ok(String::from_utf8_lossy(&out).into_owned())
-}
-
-fn add_playground_spawn(linker: &mut Linker<HostState>, o: &Opts) -> Result<()> {
-    let linker_path = o.linker.clone();
-    linker
-        .func_wrap(
-            "playground",
-            "spawn",
-            move |mut caller: Caller<'_, HostState>, argv: u32, argc: u32| -> i32 {
-                match spawn_impl(&mut caller, argv, argc, &linker_path) {
-                    Ok(code) => code,
-                    Err(e) => {
-                        eprintln!("[cogwasm-host] spawn failed: {e:#}");
-                        -1
-                    }
-                }
-            },
-        )
-        .wt("defining playground::spawn")?;
-    Ok(())
-}
-
-fn spawn_impl(
-    caller: &mut Caller<'_, HostState>,
-    argv: u32,
-    argc: u32,
-    linker: &Path,
-) -> Result<i32> {
-    let mem = guest_memory(caller)?;
-    let mut raw = vec![0u8; (argc as usize) * 4];
-    mem.read(caller, argv as usize, &mut raw)
-        .context("reading argv pointer array")?;
-    let mut args = Vec::with_capacity(argc as usize);
-    for chunk in raw.chunks_exact(4) {
-        let p = u32::from_le_bytes(chunk.try_into().unwrap());
-        args.push(read_cstr(caller, &mem, p)?);
-    }
-    if env_var_compat("SPAWN_DEBUG").is_some() {
-        eprintln!("[cogwasm-host] spawn argv: {args:?}");
-    }
-    // The rustc patch puts the linker program name first. Run native Wild on
-    // the remaining arguments, inheriting stdio and the filesystem view.
-    let t = Instant::now();
-    let status = Command::new(linker)
-        .args(args.iter().skip(1))
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status();
-    let ms = t.elapsed().as_secs_f64() * 1e3;
-    let code = match status {
-        Ok(s) if s.success() => 0,
-        Ok(s) => s.code().unwrap_or(-1),
-        Err(e) => {
-            eprintln!("[cogwasm-host] cannot run {}: {e}", linker.display());
-            -1
-        }
-    };
-    eprintln!(
-        "[cogwasm-host] spawn: {} ({} args) -> {code} in {ms:.1} ms",
-        args.first().map(String::as_str).unwrap_or("<empty>"),
-        args.len().saturating_sub(1)
-    );
-    caller.data().spawns.lock().unwrap().push(SpawnRecord {
-        argv: args,
-        ms,
-        status: code,
-    });
-    Ok(code)
-}
-
-/// Create the full linker (WASI p1 and playground.spawn) and the store for one
-/// rustc.wasm instance.
-fn prepare_instance(
-    engine: &Engine,
-    module: &Module,
-    o: &Opts,
-    args: Vec<String>,
-) -> Result<(Store<HostState>, wasmtime::Instance)> {
-    let mut linker: Linker<HostState> = Linker::new(engine);
-    p1::add_to_linker_sync(&mut linker, |s: &mut HostState| {
-        s.wasi.as_mut().expect("WASI context present")
-    })
-    .wt("adding WASI p1 imports")?;
-    add_playground_spawn(&mut linker, o)?;
-
-    let mut store = new_store(engine, args)?;
-    let instance = linker
-        .instantiate(&mut store, module)
-        .wt("instantiating rustc.wasm")?;
-    Ok((store, instance))
-}
-
 // ---------------------------------------------------------------------------
 // rustc.wasm
 // ---------------------------------------------------------------------------
@@ -511,7 +314,17 @@ fn run_rustc_with(
 ) -> Result<RunResult> {
     let args = rustc_args(o);
     let t = Instant::now();
-    let (mut store, instance) = prepare_instance(engine, module, o, args)?;
+    let prepared = prepare_instance(
+        engine,
+        module,
+        &args,
+        &o.linker,
+        "[cogwasm-host]",
+        StoreOptions::default(),
+        ArgvRecorder::default(),
+    )?;
+    let mut store = prepared.store;
+    let instance = prepared.instance;
     let instantiate_ms = t.elapsed().as_secs_f64() * 1e3;
     let start = instance
         .get_typed_func::<(), ()>(&mut store, "_start")
@@ -527,15 +340,14 @@ fn run_rustc_with(
     }
     let spawns = store
         .data()
-        .spawns
-        .lock()
-        .unwrap()
+        .recorder()
+        .records()
         .iter()
-        .map(|s| SpawnSummary {
-            program: s.argv.first().cloned().unwrap_or_default(),
-            args: s.argv.len().saturating_sub(1),
-            ms: s.ms,
-            status: s.status,
+        .map(|record| SpawnSummary {
+            program: record.argv.first().cloned().unwrap_or_default(),
+            args: record.argv.len().saturating_sub(1),
+            ms: record.ms,
+            status: record.status,
         })
         .collect::<Vec<_>>();
     let link_ms: f64 = spawns.iter().map(|s| s.ms).sum();
@@ -942,18 +754,6 @@ fn sha256_hex(bytes: &[u8]) -> String {
     h.iter().map(|x| format!("{x:08x}")).collect()
 }
 
-fn median(v: &[f64]) -> f64 {
-    let mut x = v.to_vec();
-    x.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    if x.is_empty() {
-        f64::NAN
-    } else if x.len() % 2 == 0 {
-        (x[x.len() / 2 - 1] + x[x.len() / 2]) / 2.0
-    } else {
-        x[x.len() / 2]
-    }
-}
-
 fn startup_once(o: &Opts, cached: bool) -> Result<()> {
     let e = engine(if cached { o.cache_dir.as_deref() } else { None })?;
     let t = Instant::now();
@@ -963,7 +763,18 @@ fn startup_once(o: &Opts, cached: bool) -> Result<()> {
         .with_context(|| format!("reading size of {}", o.rustc.display()))?
         .len();
     let t = Instant::now();
-    let (store, _instance) = prepare_instance(&e, &loaded.module, o, rustc_args(o))?;
+    let args = rustc_args(o);
+    let prepared = prepare_instance(
+        &e,
+        &loaded.module,
+        &args,
+        &o.linker,
+        "[cogwasm-host]",
+        StoreOptions::default(),
+        ArgvRecorder::default(),
+    )?;
+    let store = prepared.store;
+    let _instance = prepared.instance;
     let instantiate_ms = t.elapsed().as_secs_f64() * 1e3;
     std::mem::forget(store);
     println!(
@@ -1096,13 +907,13 @@ fn bench(o: &Opts) -> Result<Bench> {
     }
 
     let mut med = BTreeMap::new();
-    med.insert("module_load_cold_no_cache_ms".into(), median(&cold));
-    med.insert("module_load_cached_ms".into(), median(&cached));
+    med.insert("module_load_cold_no_cache_ms".into(), median(&cold)?);
+    med.insert("module_load_cached_ms".into(), median(&cached)?);
     med.insert("warm_module_load_ms".into(), warm_module_load_ms);
-    med.insert("instantiate_ms".into(), median(&inst));
+    med.insert("instantiate_ms".into(), median(&inst)?);
     med.insert(
         "instantiate_warm_ms".into(),
-        median(&runs.iter().map(|r| r.instantiate_ms).collect::<Vec<_>>()),
+        median(&runs.iter().map(|r| r.instantiate_ms).collect::<Vec<_>>())?,
     );
     for (name, f) in [
         (
@@ -1115,7 +926,10 @@ fn bench(o: &Opts) -> Result<Bench> {
         ("eval_ms", |r: &RunResult| r.eval_ms),
         ("edit_to_result_ms", |r: &RunResult| r.end_to_end_ms),
     ] {
-        med.insert(name.into(), median(&runs.iter().map(f).collect::<Vec<_>>()));
+        med.insert(
+            name.into(),
+            median(&runs.iter().map(f).collect::<Vec<_>>())?,
+        );
     }
     let result = runs.last().map(|r| r.result).unwrap_or(f64::NAN);
     // `eval_math` has already compared against the A.2 reference; for the
@@ -1321,7 +1135,10 @@ fn incremental(o: &mut Opts) -> Result<Incremental> {
             r.end_to_end_ms
         }),
     ] {
-        med.insert(name.into(), median(&runs.iter().map(f).collect::<Vec<_>>()));
+        med.insert(
+            name.into(),
+            median(&runs.iter().map(f).collect::<Vec<_>>())?,
+        );
     }
     // The first incremental run after a cold build has no cache to reuse, so
     // report the steady state (the remaining edits) separately as well.
@@ -1329,11 +1146,11 @@ fn incremental(o: &mut Opts) -> Result<Incremental> {
         let steady = &runs[1..];
         med.insert(
             "steady_incremental_compile_ms".into(),
-            median(&steady.iter().map(|r| r.compile_ms).collect::<Vec<_>>()),
+            median(&steady.iter().map(|r| r.compile_ms).collect::<Vec<_>>())?,
         );
         med.insert(
             "steady_incremental_edit_to_result_ms".into(),
-            median(&steady.iter().map(|r| r.end_to_end_ms).collect::<Vec<_>>()),
+            median(&steady.iter().map(|r| r.end_to_end_ms).collect::<Vec<_>>())?,
         );
     }
 
@@ -1538,7 +1355,17 @@ fn main() -> Result<()> {
                 args.push(format!("-Cincremental={}", dir.display()));
             }
             args.extend(o.raw.iter().cloned());
-            let (mut store, instance) = prepare_instance(&engine, &module, &o, args)?;
+            let prepared = prepare_instance(
+                &engine,
+                &module,
+                &args,
+                &o.linker,
+                "[cogwasm-host]",
+                StoreOptions::default(),
+                ArgvRecorder::default(),
+            )?;
+            let mut store = prepared.store;
+            let instance = prepared.instance;
             let start = instance
                 .get_typed_func::<(), ()>(&mut store, "_start")
                 .wt("rustc.wasm _start")?;
@@ -1547,11 +1374,10 @@ fn main() -> Result<()> {
             let rustc_total_ms = t.elapsed().as_secs_f64() * 1e3;
             let link_ms: f64 = store
                 .data()
-                .spawns
-                .lock()
-                .unwrap()
+                .recorder()
+                .records()
                 .iter()
-                .map(|s| s.ms)
+                .map(|record| record.ms)
                 .sum();
             if env_var_compat("TIME").is_some() {
                 eprintln!(
