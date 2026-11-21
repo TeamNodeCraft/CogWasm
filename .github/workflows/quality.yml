@@ -56,6 +56,12 @@ jobs:
             "${RUNNER_TEMP}/quality.log" \
             bash agents/scripts/review-scan.sh
 
+      - name: supervisor golden tests
+        env:
+          CARGO_TARGET_DIR: target-quality
+        run: |
+          cargo test --manifest-path experiments/cranelift-wasm/stage-c/supervisor/Cargo.toml
+
       # Publish the full log even when the scan fails, so it can be read
       # without signing in to GitHub (the rolling ci-logs pre-release).
       - name: publish scan log

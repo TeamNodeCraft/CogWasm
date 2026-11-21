@@ -1,0 +1,32 @@
+//! Host-side supervisor for the `CogWasm` compile pipeline.
+//!
+//! The compiler stays a pure function of (source, options); this crate owns the
+//! parts that are policy rather than compilation:
+//!
+//! - the tier map ([`Tier`]) from a requested output to compiler flags;
+//! - a content-addressed artifact store ([`ArtifactStore`]);
+//! - the scheduler seam that drops a build when a newer request supersedes it
+//!   ([`Supervisor`]);
+//! - the swap seam that replaces a running instance at a quiescent point
+//!   ([`Swapper`]).
+//!
+//! [M1] ships the contract, a deterministic fake compiler and a fake runtime, so
+//! the scheduling, caching and swap ordering are tested without a toolchain.
+//! The real compiler backend and the Wasmtime runtime land in M2 and M3; see
+//! `../notes/supervisor.md`.
+//!
+//! [M1]: ../notes/supervisor.md
+
+pub mod compiler;
+pub mod job;
+pub mod runtime;
+pub mod store;
+pub mod supervisor;
+pub mod swap;
+
+pub use compiler::{CompileError, Compiler, FakeCompiler};
+pub use job::{Budgets, Emit, JobSpec, SCHEMA, SourceSpec, Tier};
+pub use runtime::{FakeRuntime, Instance, Runtime};
+pub use store::{Artifact, ArtifactMeta, ArtifactStore};
+pub use supervisor::{Begin, BuildOutcome, BuildTicket, Supervisor};
+pub use swap::Swapper;
