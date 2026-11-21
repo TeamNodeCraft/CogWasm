@@ -242,6 +242,51 @@ M3 uses a cold restart: the new instance re-runs `run(seed)` with the same
 input, which is correct for a plugin whose state is derived from its inputs.
 Stateful plugins need M4's `snapshot`/`restore` contract.
 
+## Edit → result (resident)
+
+`edit-loop` measures the path Goal 2 cares about: one source edit, through the
+supervisor's resident backend, to a running instance that has already returned
+the new result. The clock starts just before `Supervisor::build` and stops just
+after the post-swap `run(seed)` returns, so `edit_to_result_ms = build_ms +
+swap_ms + call_ms`. The fixture is copied into the work directory first; each
+edit sets `BENCH_EDIT_TWEAK` to alternate `0u64`/`1u64` and appends `// edit N`,
+so every edit changes the bytes (and is a real cache miss) while the caller's
+source stays untouched. Each build is asserted not to be a cache hit, and each
+result is checked against the baseline for its probe value. The module load is
+reported separately, before the baseline.
+
+```sh
+cargo run --release -p cogwasm-supervisor -- edit-loop \
+  --backend resident \
+  --host toolchain/target/cogwasm-host/release/cogwasm-host \
+  --rustc toolchain/artifacts/rustc.wasm \
+  --sysroot toolchain/sysroot \
+  --linker toolchain/target/wild/release/wild \
+  --precompiled toolchain/work/precompiled/rustc.cwasm \
+  --work toolchain/work/supervisor \
+  --store toolchain/work/supervisor/store \
+  --compiler-id local \
+  --source crates/cogwasm-supervisor/tests/fixtures/edit_loop.rs \
+  --edits 10 \
+  --json toolchain/work/supervisor/edit-loop.json
+```
+
+| runner | backend | edits | median | p90 | min | max | module load |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| local, macOS arm64 (2026-11-22) | resident | 10 | 41.3 ms | 42.0 ms | 40.3 ms | 43.2 ms | 264.4 ms |
+| local, macOS arm64 (2026-11-22) | host | 10 | 72.8 ms | 78.8 ms | 67.3 ms | 80.0 ms | per job (not measured) |
+| CI runner (ubuntu-latest) | resident | 10 | pending | pending | pending | pending | pending |
+
+Both local runs met the 100 ms target. The fixture is deliberately small (one
+`no_std` function, no dependencies, no incremental cache), so these numbers are
+the floor of the resident path, not a typical plugin. The closest realistic
+number is the host's `incremental` step on plugin (c), about 100 ms
+edit-to-result on the same Mac (`docs/results/incremental-c.json`); a
+plugin-sized `edit-loop` fixture is the next refinement. The CI step "edit → result through the
+resident supervisor" in `ci/build-and-test.sh` prints the median and module
+load as a GitHub notice. It is a measurement, not a gate: it exits non-zero
+only when the build or call correctness assertions fail.
+
 ## State across a swap (M4)
 
 A stateful plugin exports four things beside `run`:

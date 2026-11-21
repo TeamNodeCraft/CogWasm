@@ -172,6 +172,34 @@ step "resident compiler backend (supervisor)"
         --test resident -- --nocapture
 )
 
+# Measure edit -> result through the resident supervisor (G2.1 step 4). The
+# fixture is copied into the work dir, so the committed source is never edited;
+# the copy path is unique per run, so every edit is a real cache miss. This is
+# a measurement, not a gate: it fails only on a correctness failure.
+step "edit → result through the resident supervisor"
+(
+    export RUSTUP_HOME="$TOOL/rustup" CARGO_HOME="$TOOL/cargo"
+    export CARGO_TARGET_DIR="$TOOL/target/cogwasm-host"
+    export RUSTUP_TOOLCHAIN="$(python3 "$UPSTREAM" get rust-stable version)"
+    COGWASM_REQUIRE_TOOLCHAIN=1 "$TOOL/cargo/bin/cargo" run --release \
+        --manifest-path "$REPO/crates/cogwasm-supervisor/Cargo.toml" \
+        --bin cogwasm-supervisor -- edit-loop \
+        --backend resident \
+        --host "$HOST_BIN" \
+        --rustc "$RUSTC_WASM" \
+        --sysroot "$SYSROOT" \
+        --linker "$WILD" \
+        --precompiled "$TOOL/work/precompiled/rustc.cwasm" \
+        --cache-dir "$TOOL/cache" \
+        --work "$TOOL/work/supervisor" \
+        --store "$TOOL/work/supervisor/store" \
+        --compiler-id "resident-ci" \
+        --source "$REPO/crates/cogwasm-supervisor/tests/fixtures/edit_loop.rs" \
+        --edits 10 \
+        --json "$TOOL/work/supervisor/edit-loop.json"
+)
+python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); load=r["module_load_ms"]; print("::notice title=edit to result::median %.1f ms (target %.0f ms: %s), module load %s ms" % (r["median"], r["target_ms"], "MET" if r["met"] else "MISSED", "unknown" if load is None else "%.1f" % load))' "$TOOL/work/supervisor/edit-loop.json"
+
 # Differential test: the same 48 no_std+alloc corpus programs plus 24 seeded
 # random programs are compiled by LLVM rustc and by rustc.wasm+cg_clif, run in
 # Wasmtime, and compared bit-for-bit (u64 return + output buffer). A trap in

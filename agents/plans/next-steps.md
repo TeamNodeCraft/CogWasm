@@ -128,6 +128,7 @@ paying the module load each time; the in-process path
        (`two_jobs_share_one_loaded_module_and_survive_a_rejection`).
 4. [ ] Measure edit → result on the CI runner (`bench` gains a resident
        mode); record against the 100 ms target.
+       Measured by `cogwasm-supervisor edit-loop` (CI step in `ci/build-and-test.sh`; results in `docs/notes/supervisor.md`; CI number pending).
 5. [ ] If instantiation dominates, this hands over to G2.2.
 
 ### G1.1. Finish step 5b: SROA / mem2reg after the inliner (L)

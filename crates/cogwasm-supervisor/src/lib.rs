@@ -21,6 +21,7 @@
 //! [M1]: ../../../docs/notes/supervisor.md
 
 pub mod compiler;
+pub mod edit;
 pub mod job;
 pub mod real;
 pub mod resident;
@@ -33,6 +34,7 @@ pub mod wasmtime_runtime;
 pub mod workspace;
 
 pub use compiler::{CompileError, CompileOutput, Compiler, FakeCompiler};
+pub use edit::{apply_edit, copy_source, has_edit_probe, probe_value, set_probe_value};
 pub use job::{
     Budgets, CompileOptions, CrateKind, Emit, ExternSpec, JobSpec, OptLevel, Preset, SCHEMA,
     SourceSpec, Strip,

@@ -5,6 +5,7 @@
 //! in-process `--backend resident` and prints compile time, artifact size and
 //! cache state per tier (M2).
 
+use std::collections::HashMap;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -15,7 +16,8 @@ use clap::{Parser, Subcommand, ValueEnum};
 use cogwasm_supervisor::{
     Artifact, ArtifactStore, CompileOptions, Compiler, FakeCompiler, JobSpec, Measurement,
     Objective, Preset, RealCompiler, RealCompilerConfig, ResidentCompiler, Runtime, Scoreboard,
-    SourceSpec, Supervisor, Swapper, WasmtimeRuntime, Workspace,
+    SourceSpec, Supervisor, Swapper, WasmtimeRuntime, Workspace, apply_edit, copy_source,
+    has_edit_probe, probe_value, set_probe_value,
 };
 use serde::Serialize;
 
@@ -36,6 +38,15 @@ enum Backend {
     Host,
     /// Keep one loaded rustc.wasm in this process and instantiate per job.
     Resident,
+}
+
+impl Backend {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Host => "host",
+            Self::Resident => "resident",
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -158,6 +169,44 @@ enum Command {
         #[arg(long)]
         probe: bool,
     },
+    /// Measure edit -> result through the selected compiler backend.
+    EditLoop {
+        /// Which compiler backend to use.
+        #[arg(long, value_enum, default_value = "resident")]
+        backend: Backend,
+        #[arg(long)]
+        host: PathBuf,
+        #[arg(long)]
+        rustc: PathBuf,
+        #[arg(long)]
+        precompiled: Option<PathBuf>,
+        #[arg(long)]
+        sysroot: PathBuf,
+        #[arg(long)]
+        linker: PathBuf,
+        #[arg(long)]
+        cache_dir: Option<PathBuf>,
+        #[arg(long)]
+        work: PathBuf,
+        #[arg(long)]
+        store: PathBuf,
+        #[arg(long)]
+        compiler_id: String,
+        /// Source that exports `run(u64) -> u64` and contains the edit probe.
+        #[arg(long)]
+        source: PathBuf,
+        /// Number of measured edits.
+        #[arg(long, default_value_t = 10)]
+        edits: usize,
+        #[arg(long, default_value_t = 42)]
+        seed: u64,
+        /// Write the measurement as JSON here.
+        #[arg(long)]
+        json: Option<PathBuf>,
+        /// Goal 2 target, in milliseconds.
+        #[arg(long, default_value_t = 100.0)]
+        target_ms: f64,
+    },
     /// Build a multi-crate workspace in dependency order.
     Workspace {
         #[arg(long)]
@@ -212,6 +261,37 @@ struct ExecConfig {
 #[derive(Serialize)]
 struct MatrixReport {
     rows: Vec<MatrixRow>,
+}
+
+#[derive(Serialize)]
+struct EditRow {
+    edit: usize,
+    probe: u64,
+    build_ms: f64,
+    swap_ms: f64,
+    call_ms: f64,
+    edit_to_result_ms: f64,
+    link_ms: Option<u64>,
+}
+
+#[derive(Serialize)]
+struct EditLoopReport {
+    backend: &'static str,
+    module_load_ms: Option<f64>,
+    edits: Vec<EditRow>,
+    median: f64,
+    p90: f64,
+    min: f64,
+    max: f64,
+    target_ms: f64,
+    met: bool,
+}
+
+struct Stats {
+    median: f64,
+    p90: f64,
+    min: f64,
+    max: f64,
 }
 
 #[expect(
@@ -329,6 +409,46 @@ fn main() -> Result<()> {
             let compiler = backend_compiler(&config, backend)?;
             demo(&config, compiler, &store, &source, seed, serve_calls, probe)?;
         }
+        Command::EditLoop {
+            backend,
+            host,
+            rustc,
+            precompiled,
+            sysroot,
+            linker,
+            cache_dir,
+            work,
+            store,
+            compiler_id,
+            source,
+            edits,
+            seed,
+            json,
+            target_ms,
+        } => {
+            let config = RealCompilerConfig {
+                host,
+                rustc,
+                sysroot,
+                linker,
+                cache_dir,
+                precompiled,
+                work_root: work,
+                compiler_id,
+            };
+            let loaded = load_backend(&config, backend)?;
+            edit_loop(
+                &config,
+                backend,
+                loaded,
+                &store,
+                &source,
+                edits,
+                seed,
+                json.as_deref(),
+                target_ms,
+            )?;
+        }
         Command::Workspace {
             manifest,
             backend,
@@ -366,20 +486,40 @@ fn load_job(path: &Path) -> Result<JobSpec> {
     serde_json::from_reader(file).with_context(|| format!("parsing {}", path.display()))
 }
 
+/// A compiler backend with the resident module load timed separately.
+struct LoadedBackend {
+    compiler: Arc<dyn Compiler>,
+    /// `None` for the host backend, which loads rustc.wasm per job.
+    module_load_ms: Option<f64>,
+}
+
 /// Build the selected backend once, so a resident module load is reused by
 /// every job (and every worker) in the subcommand.
-fn backend_compiler(config: &RealCompilerConfig, backend: Backend) -> Result<Arc<dyn Compiler>> {
+fn load_backend(config: &RealCompilerConfig, backend: Backend) -> Result<LoadedBackend> {
     match backend {
-        Backend::Host => Ok(Arc::new(RealCompiler::new(config.clone()))),
+        Backend::Host => Ok(LoadedBackend {
+            compiler: Arc::new(RealCompiler::new(config.clone())),
+            module_load_ms: None,
+        }),
         Backend::Resident => {
             let resident = ResidentCompiler::new(config.clone())?;
-            eprintln!(
-                "[cogwasm-supervisor] resident backend: rustc.wasm loaded in {:.1} ms",
-                resident.module_load_ms()
-            );
-            Ok(Arc::new(resident))
+            let module_load_ms = resident.module_load_ms();
+            Ok(LoadedBackend {
+                compiler: Arc::new(resident),
+                module_load_ms: Some(module_load_ms),
+            })
         }
     }
+}
+
+fn backend_compiler(config: &RealCompilerConfig, backend: Backend) -> Result<Arc<dyn Compiler>> {
+    let loaded = load_backend(config, backend)?;
+    if let Some(module_load_ms) = loaded.module_load_ms {
+        eprintln!(
+            "[cogwasm-supervisor] resident backend: rustc.wasm loaded in {module_load_ms:.1} ms"
+        );
+    }
+    Ok(loaded.compiler)
 }
 
 fn build_fake(job: &JobSpec, store: &Path, compiler: &str) -> Result<()> {
@@ -593,6 +733,217 @@ fn demo(
     Ok(())
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the edit-loop command passes the compiler config and its measurement settings"
+)]
+fn edit_loop(
+    config: &RealCompilerConfig,
+    backend: Backend,
+    loaded: LoadedBackend,
+    store: &Path,
+    source: &Path,
+    edits: usize,
+    seed: u64,
+    json: Option<&Path>,
+    target_ms: f64,
+) -> Result<()> {
+    if edits == 0 {
+        bail!("--edits must be at least 1");
+    }
+    if !target_ms.is_finite() || target_ms <= 0.0 {
+        bail!("--target-ms must be a positive number");
+    }
+
+    let original =
+        std::fs::read_to_string(source).with_context(|| format!("reading {}", source.display()))?;
+    if !has_edit_probe(&original) {
+        bail!(
+            "{} has no `const BENCH_EDIT_TWEAK: u64 = ...;` benchmark edit probe",
+            source.display()
+        );
+    }
+    let initial_probe = probe_value(&original).with_context(|| {
+        format!(
+            "{} has a malformed `BENCH_EDIT_TWEAK` declaration",
+            source.display()
+        )
+    })?;
+
+    // Never edit the caller's file: the copy lives under the work root and
+    // gets a fresh path per run, so old artifacts cannot turn an edit into a
+    // cache hit.
+    let copy = copy_source(source, &config.work_root)?;
+    eprintln!("[cogwasm-supervisor] edit-loop source: {}", copy.display());
+    match loaded.module_load_ms {
+        Some(module_load_ms) => eprintln!(
+            "[cogwasm-supervisor] {} backend: module load {module_load_ms:.1} ms",
+            backend.as_str()
+        ),
+        None => eprintln!(
+            "[cogwasm-supervisor] host backend: module load happens per job (not measured)"
+        ),
+    }
+
+    let LoadedBackend {
+        compiler,
+        module_load_ms,
+    } = loaded;
+    let supervisor = Supervisor::new(ArtifactStore::new(store), compiler);
+    let runtime = Arc::new(WasmtimeRuntime::new());
+    let mut swapper = Swapper::new(runtime);
+    let name = crate_name(&copy)?;
+    let make_job = |options: CompileOptions| -> Result<JobSpec> {
+        let mut job = JobSpec::new(SourceSpec::new(copy.clone(), name.clone()), options);
+        if job.options.incremental {
+            let key = ArtifactStore::key_for(&job, &config.compiler_id)?;
+            job.incremental_dir = Some(config.work_root.join("incremental").join(key));
+        }
+        Ok(job)
+    };
+
+    let cold = supervisor.build(&make_job(Preset::Fast.options())?)?;
+    let first = swapper.install(cold.artifact())?;
+    let baseline = swapper.call(seed)?;
+    println!(
+        "cold      gen {first}  {} bytes  build {} ms  {}",
+        cold.artifact().bytes.len(),
+        ms(cold.artifact().meta.compile_ms),
+        if cold.was_hit() { "hit" } else { "built" }
+    );
+
+    let mut text = std::fs::read_to_string(&copy)
+        .with_context(|| format!("reading the edit-loop copy {}", copy.display()))?;
+    let mut expected: HashMap<u64, u64> = HashMap::new();
+    expected.insert(initial_probe, baseline);
+    let mut rows = Vec::with_capacity(edits);
+    let mut totals = Vec::with_capacity(edits);
+
+    for offset in 0..edits {
+        let index = offset + 1;
+        let probe = if offset % 2 == 0 { 0 } else { 1 };
+        let next = apply_edit(&text, index, probe)?;
+        if next.as_bytes() == text.as_bytes() {
+            bail!("edit {index} did not change the source bytes");
+        }
+        std::fs::write(&copy, &next)
+            .with_context(|| format!("writing {} for edit {index}", copy.display()))?;
+        text = next;
+
+        let started = Instant::now();
+        let outcome = supervisor.build(&make_job(Preset::Fast.options())?)?;
+        let build_ms = wall_ms(started);
+        if outcome.was_hit() {
+            bail!("edit {index} was a cache hit; every edit must be a cache miss");
+        }
+        let link_ms = outcome.artifact().meta.link_ms;
+
+        let started = Instant::now();
+        swapper.install(outcome.artifact())?;
+        let swap_ms = wall_ms(started);
+
+        let started = Instant::now();
+        let result = swapper.call(seed)?;
+        let call_ms = wall_ms(started);
+
+        if let Some(want) = expected.get(&probe) {
+            if *want != result {
+                bail!(
+                    "edit {index}: run({seed}) = {result} with probe {probe}u64, expected {want}"
+                );
+            }
+        } else {
+            expected.insert(probe, result);
+        }
+
+        let edit_to_result_ms = build_ms + swap_ms + call_ms;
+        println!(
+            "edit {index:>2}  probe {probe}  build {build_ms:>7.1} ms  swap {swap_ms:>6.1} ms  \
+             call {call_ms:>6.2} ms  edit-to-result {edit_to_result_ms:>7.1} ms  link {} ms",
+            ms(link_ms)
+        );
+        rows.push(EditRow {
+            edit: index,
+            probe,
+            build_ms,
+            swap_ms,
+            call_ms,
+            edit_to_result_ms,
+            link_ms,
+        });
+        totals.push(edit_to_result_ms);
+    }
+
+    let stats = Stats::new(&totals)?;
+    let met = stats.median <= target_ms;
+    let target = if target_ms.fract() == 0.0 {
+        format!("{target_ms:.0}")
+    } else {
+        format!("{target_ms:.1}")
+    };
+    println!(
+        "edit-to-result median {:.1} ms (p90 {:.1} ms, min {:.1} ms) over {edits} edits; \
+         target {target} ms: {}",
+        stats.median,
+        stats.p90,
+        stats.min,
+        if met { "MET" } else { "MISSED" }
+    );
+
+    if let Some(path) = json {
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("creating {}", parent.display()))?;
+        }
+        let report = EditLoopReport {
+            backend: backend.as_str(),
+            module_load_ms,
+            edits: rows,
+            median: stats.median,
+            p90: stats.p90,
+            min: stats.min,
+            max: stats.max,
+            target_ms,
+            met,
+        };
+        let encoded =
+            serde_json::to_vec_pretty(&report).context("serialising the edit-loop report")?;
+        std::fs::write(path, encoded).with_context(|| format!("writing {}", path.display()))?;
+        eprintln!("[cogwasm-supervisor] edit-loop report: {}", path.display());
+    }
+    Ok(())
+}
+
+impl Stats {
+    fn new(values: &[f64]) -> Result<Self> {
+        if values.is_empty() {
+            bail!("no edit measurements");
+        }
+        let mut sorted = values.to_vec();
+        sorted.sort_by(f64::total_cmp);
+        let middle = sorted.len() / 2;
+        let median = if sorted.len().is_multiple_of(2) {
+            (sorted[middle - 1] + sorted[middle]) / 2.0
+        } else {
+            sorted[middle]
+        };
+        // Nearest-rank p90: the smallest sample at or above 90% of the run.
+        let rank = (sorted.len() * 9).div_ceil(10).max(1);
+        Ok(Self {
+            median,
+            p90: sorted[rank - 1],
+            min: sorted[0],
+            max: sorted[sorted.len() - 1],
+        })
+    }
+}
+
+fn wall_ms(started: Instant) -> f64 {
+    started.elapsed().as_secs_f64() * 1000.0
+}
+
 fn spawn_opt(
     compiler: Arc<dyn Compiler>,
     store: &Path,
@@ -651,14 +1002,13 @@ fn build_workspace(
 
 fn toggle_probe(source: &Path) -> Result<()> {
     const FROM: &str = "const BENCH_EDIT_TWEAK: u64 = 0u64;";
-    const TO: &str = "const BENCH_EDIT_TWEAK: u64 = 1u64;";
     let text =
         std::fs::read_to_string(source).with_context(|| format!("reading {}", source.display()))?;
     if !text.contains(FROM) {
         bail!("{} has no benchmark edit probe to toggle", source.display());
     }
-    std::fs::write(source, text.replace(FROM, TO))
-        .with_context(|| format!("writing {}", source.display()))
+    let toggled = set_probe_value(&text, 1)?;
+    std::fs::write(source, toggled).with_context(|| format!("writing {}", source.display()))
 }
 
 fn ms(value: Option<u64>) -> String {
