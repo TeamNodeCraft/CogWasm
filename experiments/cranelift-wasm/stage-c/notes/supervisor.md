@@ -1,6 +1,6 @@
 # Tier 2 supervisor: plan
 
-Status: **M1 and M2 done**. This is the host-side scheduler for Goal 1's
+Status: **M1–M3 done**. This is the host-side scheduler for Goal 1's
 tier 2 and Goal 2's resident compiler service. It keeps the compiler a pure
 function of (source, options) and puts tiering, caching and swapping in the
 host, where they can be tested.
@@ -175,8 +175,41 @@ Reading:
 - **All three tiers return identical `run(seed)` values and output lengths**
   for every program (checked with `bench-host run` on the stored artifacts).
 
-M1 and M2 are accepted: the eight golden tests pass in CI and the matrix above
-is the M2 evidence. M3 (the cold-restart swap demo) is next.
+M1, M2 and M3 are accepted: the nine golden tests pass in CI, the matrix above
+is the M2 evidence, and the swap table above is the M3 evidence. M4 (the
+state ABI for stateful plugins) is next.
+
+## M3: the swap
+
+`demo` compiles T0, serves it, compiles T1 in the background while calls keep
+arriving, then installs T1 and verifies the result. Run on `strings`:
+
+| event | measured |
+| --- | ---: |
+| T0 cold build | 170 ms |
+| edit -> T0 build (incremental) | 122 ms |
+| T0 install (compile to native) | 239 ms |
+| T1 build, edit -> applied | 515 ms |
+| precompile T1 | 267 ms |
+| T1 install (precompiled) | **0.3 ms** |
+| calls served on T0 during the T1 build | 88 |
+| `run(seed)` cold / T0 / T1 | identical |
+
+The finding: **a swap costs a wasm-to-native compile, not an instantiation.**
+Installing an artifact whose module is already compiled is sub-millisecond;
+installing a fresh one pays 240–270 ms in Wasmtime's compiler. That is the
+same trade-off the host's `rustc.wasm` path solved with a precompiled
+`.cwasm` (19 ms load against 38 s cold). The production supervisor should
+precompile each artifact as it is produced (or store a `.cwasm` next to it),
+then the swap is instantiation only.
+
+The reference runtime caches compiled modules in memory by artifact key, which
+is enough for the demo; a real service wants the cache on disk and keyed by
+the engine's compatibility hash, as `stage-c-precompile` does for `rustc.wasm`.
+
+M3 uses a cold restart: the new instance re-runs `run(seed)` with the same
+input, which is correct for a plugin whose state is derived from its inputs.
+Stateful plugins need M4's `snapshot`/`restore` contract.
 
 ## Test matrix (M1)
 

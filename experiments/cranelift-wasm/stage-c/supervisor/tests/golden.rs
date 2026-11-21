@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use cogwasm_supervisor::{
     ArtifactStore, Begin, CompileOutput, FakeCompiler, FakeRuntime, JobSpec, Runtime, SourceSpec,
-    Supervisor, Swapper, Tier,
+    Supervisor, Swapper, Tier, WasmtimeRuntime, wat_artifact,
 };
 use tempfile::TempDir;
 
@@ -186,4 +186,15 @@ fn a_swap_sends_calls_to_the_new_generation() {
         "the old generation stops receiving calls"
     );
     assert_eq!(runtime.calls(second).unwrap(), 1);
+}
+
+#[test]
+fn the_wasmtime_runtime_calls_run() {
+    let artifact =
+        wat_artifact(r#"(module (func (export "run") (param i64) (result i64) local.get 0))"#);
+    let runtime = WasmtimeRuntime::new();
+    let mut instance = runtime.instantiate(&artifact, 1).unwrap();
+    assert_eq!(instance.generation(), 1);
+    assert_eq!(instance.call(42).unwrap(), 42);
+    assert_eq!(instance.call(u64::MAX).unwrap(), u64::MAX);
 }

@@ -24,6 +24,7 @@ pub mod runtime;
 pub mod store;
 pub mod supervisor;
 pub mod swap;
+pub mod wasmtime_runtime;
 
 pub use compiler::{CompileError, CompileOutput, Compiler, FakeCompiler};
 pub use job::{Budgets, Emit, JobSpec, SCHEMA, SourceSpec, Tier};
@@ -32,3 +33,4 @@ pub use runtime::{FakeRuntime, Instance, Runtime};
 pub use store::{Artifact, ArtifactMeta, ArtifactStore};
 pub use supervisor::{Begin, BuildOutcome, BuildTicket, Supervisor};
 pub use swap::Swapper;
+pub use wasmtime_runtime::{WasmtimeRuntime, wat_artifact};

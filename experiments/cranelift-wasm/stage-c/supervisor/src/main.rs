@@ -7,12 +7,14 @@
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::Arc;
+use std::time::Instant;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand};
 use cogwasm_supervisor::{
-    ArtifactStore, FakeCompiler, JobSpec, RealCompiler, RealCompilerConfig, SourceSpec, Supervisor,
-    Tier,
+    Artifact, ArtifactStore, FakeCompiler, JobSpec, RealCompiler, RealCompilerConfig, SourceSpec,
+    Supervisor, Swapper, Tier, WasmtimeRuntime,
 };
 use serde::Serialize;
 
@@ -26,10 +28,6 @@ struct Cli {
     command: Command,
 }
 
-#[expect(
-    clippy::large_enum_variant,
-    reason = "clap subcommand argument structs are parsed once per process"
-)]
 #[derive(Subcommand)]
 enum Command {
     /// Print the cache key a job would be stored under.
@@ -82,6 +80,38 @@ enum Command {
         /// Write the rows as JSON here.
         #[arg(long)]
         json: Option<PathBuf>,
+    },
+    /// Swap demo (M3): serve T0, build T1 in the background, install it, verify.
+    Demo {
+        #[arg(long)]
+        host: PathBuf,
+        #[arg(long)]
+        rustc: PathBuf,
+        #[arg(long)]
+        precompiled: Option<PathBuf>,
+        #[arg(long)]
+        sysroot: PathBuf,
+        #[arg(long)]
+        linker: PathBuf,
+        #[arg(long)]
+        cache_dir: Option<PathBuf>,
+        #[arg(long)]
+        work: PathBuf,
+        #[arg(long)]
+        store: PathBuf,
+        #[arg(long)]
+        compiler_id: String,
+        /// Bench source that exports `run(u64) -> u64` with no imports.
+        #[arg(long)]
+        source: PathBuf,
+        #[arg(long, default_value_t = 42)]
+        seed: u64,
+        /// Calls to serve on the live instance while T1 compiles.
+        #[arg(long, default_value_t = 200)]
+        serve_calls: usize,
+        /// Toggle the benchmark edit probe before the T1 build.
+        #[arg(long)]
+        probe: bool,
     },
 }
 
@@ -142,6 +172,33 @@ fn main() -> Result<()> {
                 std::fs::write(&path, encoded)
                     .with_context(|| format!("writing {}", path.display()))?;
             }
+        }
+        Command::Demo {
+            host,
+            rustc,
+            precompiled,
+            sysroot,
+            linker,
+            cache_dir,
+            work,
+            store,
+            compiler_id,
+            source,
+            seed,
+            serve_calls,
+            probe,
+        } => {
+            let config = RealCompilerConfig {
+                host,
+                rustc,
+                sysroot,
+                linker,
+                cache_dir,
+                precompiled,
+                work_root: work,
+                compiler_id,
+            };
+            demo(&config, &store, &source, seed, serve_calls, probe)?;
         }
     }
     Ok(())
@@ -220,6 +277,120 @@ fn matrix(
         }
     }
     Ok(MatrixReport { rows })
+}
+
+fn demo(
+    config: &RealCompilerConfig,
+    store: &Path,
+    source: &Path,
+    seed: u64,
+    serve_calls: usize,
+    probe: bool,
+) -> Result<()> {
+    let supervisor = Supervisor::new(ArtifactStore::new(store), RealCompiler::new(config.clone()));
+    let name = crate_name(source)?;
+    let make_job = |tier: Tier| {
+        let mut job = JobSpec::new(SourceSpec::new(source.to_path_buf(), name.clone()), tier);
+        if tier == Tier::Fast {
+            job.incremental_dir = Some(config.work_root.join("incremental").join(&name));
+        }
+        job
+    };
+    let runtime = Arc::new(WasmtimeRuntime::new());
+    let mut swapper = Swapper::new(runtime.clone());
+
+    let cold = supervisor.build(&make_job(Tier::Fast))?;
+    let first = swapper.install(cold.artifact())?;
+    let baseline = swapper.call(seed)?;
+    println!(
+        "T0 cold   gen {first}  {} bytes  {:>6} ms",
+        cold.artifact().bytes.len(),
+        ms(cold.artifact().meta.compile_ms)
+    );
+
+    if probe {
+        toggle_probe(source)?;
+    }
+    let edit = Instant::now();
+    let fast = supervisor.build(&make_job(Tier::Fast))?;
+    let edit_to_t0 = edit.elapsed();
+    let swap = Instant::now();
+    let second = swapper.install(fast.artifact())?;
+    let swap_t0 = swap.elapsed();
+    let after_t0 = swapper.call(seed)?;
+
+    let background = spawn_opt(config, store, source, &name);
+    let mut served = 0;
+    while served < serve_calls && !background.is_finished() {
+        swapper.call(seed)?;
+        served += 1;
+    }
+    let opt = background
+        .join()
+        .map_err(|_| anyhow!("the background build panicked"))??;
+    let edit_to_t1 = edit.elapsed();
+    let precompile = Instant::now();
+    runtime.precompile(&opt)?;
+    let precompile_t1 = precompile.elapsed();
+    let swap = Instant::now();
+    let third = swapper.install(&opt)?;
+    let swap_t1 = swap.elapsed();
+    let after_t1 = swapper.call(seed)?;
+
+    println!(
+        "T0 edit   gen {second}  {:>9}  swap {}",
+        fmt_ms(edit_to_t0),
+        fmt_ms(swap_t0)
+    );
+    println!(
+        "T1 build  gen {third}  {:>9}  precompile {}  swap {}  served {served} calls on T0",
+        fmt_ms(edit_to_t1),
+        fmt_ms(precompile_t1),
+        fmt_ms(swap_t1)
+    );
+    println!("results: cold {baseline}, T0 {after_t0}, T1 {after_t1}");
+    if baseline != after_t0 || baseline != after_t1 {
+        bail!("tiers disagree on run({seed})");
+    }
+    Ok(())
+}
+
+fn spawn_opt(
+    config: &RealCompilerConfig,
+    store: &Path,
+    source: &Path,
+    name: &str,
+) -> std::thread::JoinHandle<Result<Artifact>> {
+    let config = config.clone();
+    let store = store.to_path_buf();
+    let source = source.to_path_buf();
+    let name = name.to_owned();
+    std::thread::spawn(move || {
+        let supervisor = Supervisor::new(ArtifactStore::new(store), RealCompiler::new(config));
+        let mut job = JobSpec::new(SourceSpec::new(source, name), Tier::Opt);
+        job.request_id = Some("background-opt".to_owned());
+        Ok(supervisor.build(&job)?.artifact().clone())
+    })
+}
+
+fn toggle_probe(source: &Path) -> Result<()> {
+    const FROM: &str = "const BENCH_EDIT_TWEAK: u64 = 0u64;";
+    const TO: &str = "const BENCH_EDIT_TWEAK: u64 = 1u64;";
+    let text =
+        std::fs::read_to_string(source).with_context(|| format!("reading {}", source.display()))?;
+    if !text.contains(FROM) {
+        bail!("{} has no benchmark edit probe to toggle", source.display());
+    }
+    std::fs::write(source, text.replace(FROM, TO))
+        .with_context(|| format!("writing {}", source.display()))
+}
+
+fn ms(value: Option<u64>) -> String {
+    value.map_or_else(|| "-".to_owned(), |ms| ms.to_string())
+}
+
+fn fmt_ms(elapsed: std::time::Duration) -> String {
+    format!("{:.1} ms", elapsed.as_secs_f64() * 1000.0)
 }
 
 fn crate_name(path: &Path) -> Result<String> {
