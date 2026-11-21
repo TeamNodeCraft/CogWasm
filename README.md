@@ -59,6 +59,10 @@ for the interactive chart.
 | Output | A small module of about 18 KB for a typical program (46 KB median over the suite, down from 64 KB), with a growable heap |
 | Performance suite | [`bench/run.sh --quick`](bench/README.md) in CI on every compiler change; the full suite is published from the `bench-results` release |
 
+The version numbers in this table are for orientation. The authoritative pins
+for the compiler, host toolchain and wasi-sdk are in
+[`compiler/upstreams.toml`](compiler/upstreams.toml).
+
 Known limits:
 
 - LLVM is still used **once at build time** to compile rustc itself into

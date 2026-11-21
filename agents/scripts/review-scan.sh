@@ -83,13 +83,14 @@ if [[ $changed -eq 1 ]]; then
   fi
 fi
 
-# 0. The machine-readable upstream/patch manifest still matches the tree.
+# 0. The machine-readable upstream/patch manifest still matches the tree, the
+#    Cargo.toml Wasmtime pins match it, and differing PR bundles are explained.
 note "upstream manifest"
 if ! command -v python3 >/dev/null; then
   blocking "python3 not installed; cannot check compiler/upstreams.toml"
   failed=1
-elif ! python3 "$root/compiler/scripts/upstream.py" check; then
-  blocking "compiler/upstreams.toml does not match compiler/patches/ (run python3 compiler/scripts/upstream.py check)"
+elif ! python3 "$root/compiler/scripts/check-upstreams.py"; then
+  blocking "compiler/upstreams.toml does not match compiler/patches/ (run python3 compiler/scripts/check-upstreams.py)"
   failed=1
 fi
 

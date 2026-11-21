@@ -15,12 +15,14 @@ set -euo pipefail
 GAP=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 BENCH=$(cd "$GAP/.." && pwd)
 ROOT=$(cd "$BENCH/.." && pwd)
+UPSTREAM="$ROOT/compiler/scripts/upstream.py"
+pin() { python3 "$UPSTREAM" get "$1" "$2"; }
 TOOLCHAIN=${BENCH_TOOLCHAIN:-$ROOT/toolchain}
 CARGO_HOME=${CARGO_HOME:-$TOOLCHAIN/cargo}
 RUSTUP_HOME=${RUSTUP_HOME:-$TOOLCHAIN/rustup}
 export CARGO_HOME RUSTUP_HOME
 export PATH="$CARGO_HOME/bin:$PATH"
-RUSTUP_TOOLCHAIN=${BENCH_HOST_TOOLCHAIN:-1.99.1}
+RUSTUP_TOOLCHAIN=${BENCH_HOST_TOOLCHAIN:-$(pin rust-stable version)}
 export RUSTUP_TOOLCHAIN
 export CARGO_TARGET_DIR=${BENCH_CARGO_TARGET_DIR:-$TOOLCHAIN/target/bench-host}
 

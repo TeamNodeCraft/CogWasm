@@ -35,10 +35,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: read version pins
+        id: pins
+        run: |
+          echo "rust_stable=$(python3 compiler/scripts/upstream.py get rust-stable version)" >> "$GITHUB_OUTPUT"
       - name: Rust toolchain (pinned)
         run: |
-          rustup toolchain install 1.99.1 --profile minimal --component clippy,rustfmt
-          rustup default 1.99.1
+          rustup toolchain install ${{ steps.pins.outputs.rust_stable }} --profile minimal --component clippy,rustfmt
+          rustup default ${{ steps.pins.outputs.rust_stable }}
       - name: ast-grep (pinned)
         run: npm install --global @ast-grep/cli@0.51.2
       - uses: actions/cache@v4

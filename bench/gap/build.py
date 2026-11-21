@@ -52,7 +52,9 @@ def main() -> int:
     ))).resolve()
     llvm_rustc = args.llvm_rustc
     if llvm_rustc is None:
-        nightly = os.environ.get("BENCH_NIGHTLY", "nightly-2026-10-19")
+        nightly = os.environ.get(
+            "BENCH_NIGHTLY", run.manifest_value("rust-nightly", "version")
+        )
         candidates = sorted((toolchain / "rustup" / "toolchains").glob(f"{nightly}-*/bin/rustc"))
         if not candidates:
             print(f"no {nightly} rustc under {toolchain}/rustup", file=sys.stderr)
@@ -75,8 +77,12 @@ def main() -> int:
         return 1
 
     os.environ.setdefault("BENCH_HOST_TRIPLE", run.detect_host_triple(toolchain))
-    os.environ.setdefault("BENCH_NIGHTLY", "nightly-2026-10-19")
-    os.environ.setdefault("BENCH_HOST_TOOLCHAIN", "1.99.1")
+    os.environ.setdefault(
+        "BENCH_NIGHTLY", run.manifest_value("rust-nightly", "version")
+    )
+    os.environ.setdefault(
+        "BENCH_HOST_TOOLCHAIN", run.manifest_value("rust-stable", "version")
+    )
     # Reuse the suite's work directory (and therefore the same absolute source
     # paths) so the compiler produces the same module the suite measured.
     work = BENCH / "work"

@@ -2,7 +2,7 @@ name: cranelift_wasm
 
 # Pure-Rust compiler path: build rustc.wasm with cg_clif/clif-to-wasm only,
 # build the plugin sysroot with rustc.wasm itself, run plugin (c) end to end on
-# Wasmtime 50.0.2, assert A.2 (e)/(f) correctness, and prove there is no LLVM
+# Wasmtime, assert A.2 (e)/(f) correctness, and prove there is no LLVM
 # inside rustc.wasm. The logic lives in
 # ci/build-and-test.sh so the same script runs
 # locally on macOS and on this Linux runner.
@@ -68,6 +68,17 @@ jobs:
       - name: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # The pins live in compiler/upstreams.toml. Read them once so the cache
+      # keys below are built from the manifest instead of a second literal copy.
+      - name: read version pins
+        id: pins
+        run: |
+          {
+            echo "rust_nightly=$(python3 compiler/scripts/upstream.py get rust-nightly version)"
+            echo "rust_stable=$(python3 compiler/scripts/upstream.py get rust-stable version)"
+            echo "wasi_sdk_version=$(python3 compiler/scripts/upstream.py get wasi-sdk version)"
+          } >> "$GITHUB_OUTPUT"
+
       - name: free disk space
         uses: jlumbroso/free-disk-space@main
         with:
@@ -96,7 +107,7 @@ jobs:
           path: |
             toolchain/rustup
             toolchain/cargo/bin
-          key: cranelift-wasm-rustup-${{ runner.os }}-${{ runner.arch }}-nightly-2026-10-19-1.99.1-v1
+          key: cranelift-wasm-rustup-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.rust_nightly }}-${{ steps.pins.outputs.rust_stable }}-v1
 
       - name: restore cargo registry and git
         id: cache-cargo
@@ -124,9 +135,9 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            toolchain/wasi-sdk-34.0-x86_64-linux
+            toolchain/wasi-sdk-${{ steps.pins.outputs.wasi_sdk_version }}-x86_64-linux
             toolchain/wasi-sdk
-          key: cranelift-wasm-wasi-sdk-${{ runner.os }}-${{ runner.arch }}-34.0-v2
+          key: cranelift-wasm-wasi-sdk-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.wasi_sdk_version }}-v2
 
       # The ~26 minute rustc.wasm build (plus the stage1 compiler it needs at
       # run time, the pure sysroot and the Wild linker) is what this workflow
@@ -290,7 +301,7 @@ jobs:
           path: |
             toolchain/rustup
             toolchain/cargo/bin
-          key: cranelift-wasm-rustup-${{ runner.os }}-${{ runner.arch }}-nightly-2026-10-19-1.99.1-v1
+          key: cranelift-wasm-rustup-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.rust_nightly }}-${{ steps.pins.outputs.rust_stable }}-v1
 
       - name: save cargo registry and git
         if: success() && steps.cache-cargo.outputs.cache-hit != 'true'
@@ -316,9 +327,9 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            toolchain/wasi-sdk-34.0-x86_64-linux
+            toolchain/wasi-sdk-${{ steps.pins.outputs.wasi_sdk_version }}-x86_64-linux
             toolchain/wasi-sdk
-          key: cranelift-wasm-wasi-sdk-${{ runner.os }}-${{ runner.arch }}-34.0-v2
+          key: cranelift-wasm-wasi-sdk-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.wasi_sdk_version }}-v2
 
       - name: upload rustc.wasm and pure sysroot
         if: always()

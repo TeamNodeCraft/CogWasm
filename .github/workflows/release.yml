@@ -48,6 +48,17 @@ jobs:
       - name: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # The pins live in compiler/upstreams.toml. Read them once so the cache
+      # keys below are built from the manifest instead of a second literal copy.
+      - name: read version pins
+        id: pins
+        run: |
+          {
+            echo "rust_nightly=$(python3 compiler/scripts/upstream.py get rust-nightly version)"
+            echo "rust_stable=$(python3 compiler/scripts/upstream.py get rust-stable version)"
+            echo "wasi_sdk_version=$(python3 compiler/scripts/upstream.py get wasi-sdk version)"
+          } >> "$GITHUB_OUTPUT"
+
       - name: free disk space
         uses: jlumbroso/free-disk-space@main
         with:
@@ -74,7 +85,7 @@ jobs:
           path: |
             toolchain/rustup
             toolchain/cargo/bin
-          key: cranelift-wasm-rustup-${{ runner.os }}-${{ runner.arch }}-nightly-2026-10-19-1.99.1-v1
+          key: cranelift-wasm-rustup-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.rust_nightly }}-${{ steps.pins.outputs.rust_stable }}-v1
 
       - name: restore cargo registry and git
         id: cache-cargo
@@ -102,9 +113,9 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            toolchain/wasi-sdk-34.0-x86_64-linux
+            toolchain/wasi-sdk-${{ steps.pins.outputs.wasi_sdk_version }}-x86_64-linux
             toolchain/wasi-sdk
-          key: cranelift-wasm-wasi-sdk-${{ runner.os }}-${{ runner.arch }}-34.0-v2
+          key: cranelift-wasm-wasi-sdk-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.wasi_sdk_version }}-v2
 
       - name: setup pinned toolchain and sources
         run: bash ci/setup-toolchain.sh
@@ -123,6 +134,7 @@ jobs:
       - name: write version metadata
         env:
           TAG: ${{ inputs.tag }}
+          NIGHTLY: ${{ steps.pins.outputs.rust_nightly }}
         run: |
           set -euo pipefail
           RUSTC="toolchain/artifacts/rustc.wasm"
@@ -154,7 +166,7 @@ jobs:
               "rustc_wasm_sha256": rustc_sha,
               "sysroot_pure_bytes": int(sys_bytes),
               "rustc_version": rustc_version,
-              "nightly": "nightly-2026-10-19",
+              "nightly": os.environ.get("NIGHTLY", "unknown"),
               "rustc_source": rev("toolchain/rust"),
               "clif_to_wasm": rev("toolchain/clif-to-wasm"),
               "wild": rev("toolchain/wild"),
@@ -194,7 +206,7 @@ jobs:
           path: |
             toolchain/rustup
             toolchain/cargo/bin
-          key: cranelift-wasm-rustup-${{ runner.os }}-${{ runner.arch }}-nightly-2026-10-19-1.99.1-v1
+          key: cranelift-wasm-rustup-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.rust_nightly }}-${{ steps.pins.outputs.rust_stable }}-v1
 
       - name: save cargo registry and git
         if: success() && steps.cache-cargo.outputs.cache-hit != 'true'
@@ -216,7 +228,7 @@ jobs:
           key: cranelift-wasm-src-${{ runner.os }}-${{ hashFiles('compiler/patches/**', 'compiler/upstreams.toml') }}-f5298630-0e4e0458-fd79578-v1
 
   # One job per host. Each downloads the one rustc.wasm, builds the host and
-  # Wild with the pinned stable 1.99.1, precompiles the .cwasm with the host's
+  # Wild with the pinned stable toolchain, precompiles the .cwasm with the host's
   # own engine config, and packages a versioned bundle.
   host:
     name: bundle ${{ matrix.triple }}
@@ -234,6 +246,17 @@ jobs:
     steps:
       - name: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The pins live in compiler/upstreams.toml. Read them once so the cache
+      # keys below are built from the manifest instead of a second literal copy.
+      - name: read version pins
+        id: pins
+        run: |
+          {
+            echo "rust_nightly=$(python3 compiler/scripts/upstream.py get rust-nightly version)"
+            echo "rust_stable=$(python3 compiler/scripts/upstream.py get rust-stable version)"
+            echo "wasi_sdk_version=$(python3 compiler/scripts/upstream.py get wasi-sdk version)"
+          } >> "$GITHUB_OUTPUT"
 
       - name: free disk space
         # The action only supports Linux runners.
@@ -262,7 +285,7 @@ jobs:
           path: |
             toolchain/rustup
             toolchain/cargo/bin
-          key: cranelift-wasm-rustup-${{ runner.os }}-${{ runner.arch }}-nightly-2026-10-19-1.99.1-v1
+          key: cranelift-wasm-rustup-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.rust_nightly }}-${{ steps.pins.outputs.rust_stable }}-v1
 
       - name: restore cargo registry and git
         id: cache-cargo
@@ -290,9 +313,9 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            toolchain/wasi-sdk-34.0-x86_64-linux
+            toolchain/wasi-sdk-${{ steps.pins.outputs.wasi_sdk_version }}-x86_64-linux
             toolchain/wasi-sdk
-          key: cranelift-wasm-wasi-sdk-${{ runner.os }}-${{ runner.arch }}-34.0-v2
+          key: cranelift-wasm-wasi-sdk-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.wasi_sdk_version }}-v2
 
       - name: download rustc.wasm and sysroot
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
@@ -338,6 +361,11 @@ jobs:
     steps:
       - name: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: read version pins
+        id: pins
+        run: |
+          echo "wasmtime=$(python3 compiler/scripts/upstream.py get wasmtime version)" >> "$GITHUB_OUTPUT"
 
       - name: download all host bundles
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
@@ -394,6 +422,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: ${{ inputs.tag }}
           DRY_RUN: ${{ inputs.dry_run }}
+          WASMTIME: ${{ steps.pins.outputs.wasmtime }}
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -403,7 +432,7 @@ jobs:
 
           rustc.wasm is a modified build of rustc (Cranelift only, no LLVM inside);
           it is not the official Rust compiler. See README-$TAG.md and
-          THIRD_PARTY_NOTICES for use, the exact Wasmtime 50.0.2 requirement and
+          THIRD_PARTY_NOTICES for use, the exact Wasmtime $WASMTIME requirement and
           licensing. Verify SHA256SUMS-$TAG before installing."
           if gh release view "$TAG" >/dev/null 2>&1; then
             if [ "$DRY_RUN" = "true" ]; then

@@ -13,16 +13,18 @@
 #   BENCH_TOOLCHAIN      toolchain directory to measure (default: toolchain/)
 #   BENCH_LLVM_RUSTC     LLVM rustc used for the reference builds
 #   BENCH_HOST_TRIPLE    host triple for the isolated stage1 compiler
-#   BENCH_NIGHTLY        pinned nightly (default nightly-2026-10-19)
-#   BENCH_HOST_TOOLCHAIN stable toolchain for the host binary (default 1.99.1)
+#   BENCH_NIGHTLY        pinned nightly (default: compiler/upstreams.toml)
+#   BENCH_HOST_TOOLCHAIN stable toolchain for the host binary (default: manifest)
 #   BENCH_REBUILD_DEPS   rebuild the vendored libm/miniz_oxide rlibs
 set -euo pipefail
 
 BENCH=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT=$(cd "$BENCH/.." && pwd)
+UPSTREAM="$ROOT/compiler/scripts/upstream.py"
+pin() { python3 "$UPSTREAM" get "$1" "$2"; }
 TOOLCHAIN=${BENCH_TOOLCHAIN:-$ROOT/toolchain}
-NIGHTLY=${BENCH_NIGHTLY:-nightly-2026-10-19}
-HOST_TOOLCHAIN=${BENCH_HOST_TOOLCHAIN:-1.99.1}
+NIGHTLY=${BENCH_NIGHTLY:-$(pin rust-nightly version)}
+HOST_TOOLCHAIN=${BENCH_HOST_TOOLCHAIN:-$(pin rust-stable version)}
 MODE=full
 PROGRAMS=
 RUNS=

@@ -26,6 +26,8 @@ set -euo pipefail
 
 DIFFTEST=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(cd "$DIFFTEST/.." && pwd)
+UPSTREAM="$REPO/compiler/scripts/upstream.py"
+pin() { python3 "$UPSTREAM" get "$1" "$2"; }
 TOOL="$REPO/toolchain"
 CORPUS="$DIFFTEST/corpus"
 RESULTS=${DIFFTEST_RESULTS:-$DIFFTEST/results}
@@ -58,7 +60,7 @@ while [ $# -gt 0 ]; do
         --seeds=*) SEEDS=${1#--seeds=}; shift ;;
         --quick) SEEDS=8; RUN_SEEDS="0,1"; shift ;;
         -h|--help)
-            sed -n '2,29p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+            sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
             exit 0 ;;
         *) printf 'unknown argument: %s (try --help)\n' "$1" >&2; exit 2 ;;
     esac
@@ -83,7 +85,7 @@ GEN_START=${DIFFTEST_GEN_START:-1}
 # environment; keep it overridable for a caller that already exported it.
 export RUSTUP_HOME=${RUSTUP_HOME:-$TOOL/rustup}
 export CARGO_HOME=${CARGO_HOME:-$TOOL/cargo}
-export RUSTUP_TOOLCHAIN=${RUSTUP_TOOLCHAIN:-nightly-2026-10-19}
+export RUSTUP_TOOLCHAIN=${RUSTUP_TOOLCHAIN:-$(pin rust-nightly version)}
 if [ -x "$CARGO_HOME/bin/cargo" ]; then
     PATH="$CARGO_HOME/bin:$PATH"
 fi
@@ -142,9 +144,10 @@ MANIFEST="$WORK/manifest.tsv"
 # the Wasmtime dependency is already compiled in CI.
 # ---------------------------------------------------------------------------
 step "build difftest runner and generator"
-# The CogWasm host is built with stable 1.99.1; use the same toolchain so the
-# release Wasmtime dependency units in the shared target dir are reused in CI.
-HOST_TOOLCHAIN=${DIFFTEST_HOST_TOOLCHAIN:-1.99.1}
+# The CogWasm host is built with the manifest's stable toolchain; use the same
+# toolchain so the release Wasmtime dependency units in the shared target dir
+# are reused in CI.
+HOST_TOOLCHAIN=${DIFFTEST_HOST_TOOLCHAIN:-$(pin rust-stable version)}
 shopt -s nullglob
 host_tc_dirs=("$RUSTUP_HOME"/toolchains/"$HOST_TOOLCHAIN"-*)
 shopt -u nullglob

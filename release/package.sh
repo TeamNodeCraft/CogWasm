@@ -10,6 +10,8 @@
 # with the same names are replaced.
 set -euo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+UPSTREAM="$REPO/compiler/scripts/upstream.py"
+STABLE=$(python3 "$UPSTREAM" get rust-stable version)
 TOOL="$REPO/toolchain"
 export RUSTUP_HOME="${RUSTUP_HOME:-$TOOL/rustup}"
 export CARGO_HOME="${CARGO_HOME:-$TOOL/cargo}"
@@ -72,7 +74,7 @@ need() { [ -e "$1" ] || { echo "missing $1" >&2; exit 1; }; }
 
 if [ -z "$HOST_TRIPLE" ]; then
     need "$PRECOMPILE"
-    HOST_TRIPLE=$(RUSTUP_TOOLCHAIN=1.99.1 rustc -vV | sed -n 's/^host: //p')
+    HOST_TRIPLE=$(RUSTUP_TOOLCHAIN="$STABLE" rustc -vV | sed -n 's/^host: //p')
 fi
 [ -n "$HOST_TRIPLE" ] || { echo "could not determine the host triple" >&2; exit 1; }
 
@@ -80,7 +82,7 @@ if [ "$SKIP_BUILD" = 0 ]; then
     echo "== building the reference host"
     "$REPO/compiler/scripts/build-host.sh"
     echo "== building Wild for $HOST_TRIPLE"
-    ( cd "$TOOL/wild" && RUSTUP_TOOLCHAIN=1.99.1 \
+    ( cd "$TOOL/wild" && RUSTUP_TOOLCHAIN="$STABLE" \
         CARGO_TARGET_DIR="$TOOL/target/wild" \
         cargo build --release -p wild-linker )
 fi

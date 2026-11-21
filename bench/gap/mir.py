@@ -64,7 +64,9 @@ def main() -> int:
             "BENCH_TOOLCHAIN", ROOT / "toolchain"
         )
     ).resolve()
-    nightly = os.environ.get("BENCH_NIGHTLY", "nightly-2026-10-19")
+    nightly = os.environ.get(
+        "BENCH_NIGHTLY", run.manifest_value("rust-nightly", "version")
+    )
     llvm_candidates = sorted(
         (toolchain / "rustup" / "toolchains").glob(f"{nightly}-*/bin/rustc")
     )
@@ -85,7 +87,9 @@ def main() -> int:
 
     os.environ.setdefault("BENCH_HOST_TRIPLE", run.detect_host_triple(toolchain))
     os.environ.setdefault("BENCH_NIGHTLY", nightly)
-    os.environ.setdefault("BENCH_HOST_TOOLCHAIN", "1.99.1")
+    os.environ.setdefault(
+        "BENCH_HOST_TOOLCHAIN", run.manifest_value("rust-stable", "version")
+    )
     work = BENCH / "work"
     gap_work = GAP / "work" / "mir"
     deps = run.build_deps(toolchain, work)

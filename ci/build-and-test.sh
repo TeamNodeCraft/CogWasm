@@ -5,7 +5,8 @@
 #   1. fetch the pinned toolchain inputs (rustup, rust + prior-art patches,
 #      clif-to-wasm, Wild, wasi-sdk)
 #   2. build the CogWasm rustc.wasm (wasm32-wasip1, cg_clif only, single-threaded)
-#   3. build the Wasmtime 50.0.2 host (the sysroot builder executes rustc.wasm)
+#   3. build the Wasmtime host from compiler/upstreams.toml (the sysroot
+#      builder executes rustc.wasm)
 #   4. build core/alloc/compiler_builtins with rustc.wasm itself (strict)
 #   5. run plugin (c) end to end and assert eval(1,2,3,4) == 2.25
 #   6. build plugins (a)-(f) and assert A.2 (e)/(f) correctness
@@ -27,6 +28,8 @@
 set -euo pipefail
 CI_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(cd "$CI_DIR/.." && pwd)
+UPSTREAM="$REPO/compiler/scripts/upstream.py"
+WASMTIME=$(python3 "$UPSTREAM" get wasmtime version)
 TOOL="$REPO/toolchain"
 RUSTC_WASM="$TOOL/artifacts/rustc.wasm"
 SYSROOT="$TOOL/sysroot"
@@ -88,11 +91,12 @@ fi
 echo "budget: $(free_gb "$REPO") GiB free, $JOBS build jobs, $(uname -s) $(uname -m)"
 
 # Cheap manifest sanity check before any checkout/build: the patch lists in
-# compiler/upstreams.toml must match compiler/patches/, and the PR bundles are
-# reported if they have drifted (a warning, not a failure). A failure here
-# means the toolchain setup would apply a different series than the manifest.
+# compiler/upstreams.toml must match compiler/patches/, the root Cargo.toml
+# Wasmtime pins must match the manifest, and every differing PR bundle must
+# have a DIVERGES.md. A failure here means the toolchain setup would apply a
+# different series than the manifest.
 step "upstream manifest"
-python3 "$REPO/compiler/scripts/upstream.py" check
+python3 "$REPO/compiler/scripts/check-upstreams.py"
 
 if [ "$REUSE_COMPILER" = true ]; then
     step "reuse the cached compiler build"
@@ -122,7 +126,7 @@ else
     "$REPO/compiler/scripts/build-rustc-wasm.sh"
 fi
 
-step "build Wasmtime 50.0.2 host"
+step "build Wasmtime $WASMTIME host"
 "$REPO/compiler/scripts/build-host.sh"
 
 if [ "$REUSE_COMPILER" != true ]; then

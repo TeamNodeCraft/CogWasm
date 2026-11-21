@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -39,6 +40,21 @@ MANIFESTS = [
 PROGRAM_GLOB = "guests/*/Cargo.toml"
 
 SPDX_TEXT_DIRS = ["toolchain/rust/LICENSES", "toolchain/playground/licenses/spdx"]
+
+
+def manifest_value(root: Path, upstream: str, key: str) -> str:
+    """Read a pin from compiler/upstreams.toml through the shared reader."""
+    script = root / "compiler" / "scripts" / "upstream.py"
+    spec = importlib.util.spec_from_file_location("cogwasm_upstream", script)
+    if spec is None or spec.loader is None:
+        raise SystemExit(f"error: cannot load {script}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    entry = module.upstream(upstream)
+    if key not in entry:
+        raise SystemExit(f"error: [upstream.{upstream}] has no '{key}'")
+    return str(entry[key])
+
 
 # The explicit components. `files` are relative to the repository root.
 NAMED_COMPONENTS = [
@@ -65,7 +81,7 @@ NAMED_COMPONENTS = [
         # The registry source directory hash varies by host/cargo version, so
         # resolve this path from the lock file at run time.
         "registry_package": "wasmtime",
-        "note": "The host links Wasmtime 50.0.2; rustc.wasm contains Cranelift codegen.",
+        "note": "The host links Wasmtime {wasmtime}; rustc.wasm contains Cranelift codegen.",
     },
     {
         "title": "clif-to-wasm",
@@ -292,7 +308,10 @@ def component_section(root: Path, component: dict) -> tuple[list[str], int]:
         f"Source: {component['source']}",
     ]
     if component.get("note"):
-        lines.append(component["note"])
+        note = component["note"]
+        if "{wasmtime}" in note:
+            note = note.format(wasmtime=manifest_value(root, "wasmtime", "version"))
+        lines.append(note)
     lines.append("")
     if "registry_package" in component:
         files = registry_licence_files(root, component["registry_package"])
@@ -404,7 +423,7 @@ def main() -> None:
             "----------",
             (
                 f"rustc source: {git_revision(root / 'toolchain/rust')} "
-                "(nightly-2026-10-19 plus compiler patches)"
+                f"({manifest_value(root, 'rust-nightly', 'version')} plus compiler patches)"
             ),
             f"clif-to-wasm: {git_revision(root / 'toolchain/clif-to-wasm')}",
             f"Wild: {git_revision(root / 'toolchain/wild')}",

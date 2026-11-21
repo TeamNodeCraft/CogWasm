@@ -27,6 +27,8 @@ set -euo pipefail
 
 DIFFTEST=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(cd "$DIFFTEST/.." && pwd)
+UPSTREAM="$REPO/compiler/scripts/upstream.py"
+pin() { python3 "$UPSTREAM" get "$1" "$2"; }
 TOOL="$REPO/toolchain"
 SRC="$DIFFTEST/corpus/smoke.rs"
 WORK=${DIFFTEST_WORK:-$TOOL/difftest-work}/incremental-check
@@ -60,7 +62,7 @@ if [ ! -x "$RUNNER" ]; then
     export RUSTUP_HOME=${RUSTUP_HOME:-$TOOL/rustup}
     export CARGO_HOME=${CARGO_HOME:-$TOOL/cargo}
     CARGO=${DIFFTEST_CARGO:-$CARGO_HOME/bin/cargo}
-    HOST_TOOLCHAIN=${DIFFTEST_HOST_TOOLCHAIN:-1.99.1}
+    HOST_TOOLCHAIN=${DIFFTEST_HOST_TOOLCHAIN:-$(pin rust-stable version)}
     CARGO_TARGET_DIR="$TARGET_DIR" RUSTUP_TOOLCHAIN="$HOST_TOOLCHAIN" \
         "$CARGO" build --release --manifest-path "$REPO/crates/difftest-host/Cargo.toml" --bin difftest-host
 fi

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import platform
@@ -19,6 +20,7 @@ import subprocess
 import sys
 import time
 from datetime import UTC, datetime
+from functools import cache
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -27,6 +29,25 @@ WORK = BENCH / "work"
 RESULTS = BENCH / "results"
 PROGRAMS_FILE = BENCH / "programs.json"
 PRELUDE = BENCH / "programs" / "prelude.rs"
+UPSTREAM_SCRIPT = ROOT / "compiler" / "scripts" / "upstream.py"
+
+
+@cache
+def manifest_value(upstream: str, key: str) -> str:
+    """Read a toolchain pin from compiler/upstreams.toml through upstream.py."""
+    spec = importlib.util.spec_from_file_location("cogwasm_upstream", UPSTREAM_SCRIPT)
+    if spec is None or spec.loader is None:
+        raise BenchError(f"cannot load {UPSTREAM_SCRIPT}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    entry = module.upstream(upstream)
+    if key not in entry:
+        raise BenchError(f"[upstream.{upstream}] has no '{key}'")
+    value = entry[key]
+    if isinstance(value, list):
+        raise BenchError(f"[upstream.{upstream}] {key} is a list, not a pin")
+    return str(value)
+
 PROBE = """
 // Added by the benchmark harness: a one-line edit whose two spellings are both
 // zero, so an incremental recompile never changes the result.
@@ -212,7 +233,9 @@ def clif_env(toolchain: Path) -> dict:
     env["RUSTC"] = str(
         ROOT / "compiler" / "scripts" / "rustc-wasm-wrapper.sh"
     )
-    env["RUSTUP_TOOLCHAIN"] = os.environ.get("BENCH_HOST_TOOLCHAIN", "1.99.1")
+    env["RUSTUP_TOOLCHAIN"] = os.environ.get(
+        "BENCH_HOST_TOOLCHAIN", manifest_value("rust-stable", "version")
+    )
     objcopy = sorted((toolchain / "rustup" / "toolchains").glob("nightly-*/lib/rustlib/*/bin"))
     if objcopy:
         env["PATH"] = f"{objcopy[0]}:{env.get('PATH', '')}"
@@ -222,7 +245,9 @@ def clif_env(toolchain: Path) -> dict:
 def llvm_env() -> dict:
     env = os.environ.copy()
     env.pop("RUSTC", None)
-    env["RUSTUP_TOOLCHAIN"] = os.environ.get("BENCH_NIGHTLY", "nightly-2026-10-19")
+    env["RUSTUP_TOOLCHAIN"] = os.environ.get(
+        "BENCH_NIGHTLY", manifest_value("rust-nightly", "version")
+    )
     return env
 
 
@@ -274,7 +299,9 @@ def build_deps(toolchain: Path, work: Path) -> dict[str, Path]:
         env = clif_env(toolchain) if pipeline == "clif" else llvm_env()
         env["CARGO_TARGET_DIR"] = str(target)
         if pipeline == "llvm":
-            env["RUSTUP_TOOLCHAIN"] = os.environ.get("BENCH_NIGHTLY", "nightly-2026-10-19")
+            env["RUSTUP_TOOLCHAIN"] = os.environ.get(
+                "BENCH_NIGHTLY", manifest_value("rust-nightly", "version")
+            )
         print(f"building vendored benchmark dependencies with {pipeline}", file=sys.stderr)
         run(command, env=env, quiet=True)
         roots[pipeline] = target
@@ -887,7 +914,9 @@ def main(argv: list[str]) -> int:
         "commit": git_commit(),
         "pins": {
             "rustc": rustc_version,
-            "nightly": os.environ.get("BENCH_NIGHTLY", "nightly-2026-10-19"),
+            "nightly": os.environ.get(
+                "BENCH_NIGHTLY", manifest_value("rust-nightly", "version")
+            ),
             "wasmtime": startup.get("wasmtime_version", "unknown"),
             "libm": "0.2.16",
             "adler2": "2.0.1",

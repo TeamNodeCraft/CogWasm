@@ -33,6 +33,19 @@ do not conflict. The f128 test also needs a wasm backend (the test is gated on
 a `wasm32` target), so both cg_clif patches are stacked on the wasm-backend
 series, which is not part of this submission.
 
+## Bundle divergence from the live series
+
+Each bundle below is the refreshed upstream form, not a copy of the live
+`compiler/patches/` file. `check-upstreams.py` fails on a differing bundle
+unless its directory has a `DIVERGES.md` explaining the difference; all four
+do.
+
+| Bundle | Live patch | Relationship | Before sending |
+|---|---|---|---|
+| [`rust/0001-…/0001-…patch`](rust/0001-wasm-run-compiler-and-codegen-on-calling-thread/0001-wasm-run-compiler-and-codegen-on-calling-thread.patch) ([why](rust/0001-wasm-run-compiler-and-codegen-on-calling-thread/DIVERGES.md)) | `compiler/patches/rust/0001-wasm-run-compiler-and-codegen-on-calling-thread.patch` | Refreshed for upstream: rebased `b6eeb93` → `e3b9a83`, reflowed, License line. Live series applies the older form against `b6eeb93`. | Repeat the end-to-end `rustc.wasm`/Wasmtime run and `./x.py check`; settle the `wasm32` gate and test plan. |
+| [`cg_clif/0001-wasm-lower-memory-grow-and-size/…patch`](cg_clif/0001-wasm-lower-memory-grow-and-size/0001-wasm-lower-memory-grow-and-size.patch) ([why](cg_clif/0001-wasm-lower-memory-grow-and-size/DIVERGES.md)) | `compiler/patches/cg_clif/0001-wasm-lower-memory-grow-and-size.patch` | Refreshed for upstream: adds the `wasm-memory-intrinsics` example/test and License line, rebased `4f78fd3` → `a4af0a9`. Live series applies the older form without the test. | Regenerate from the live series, re-run the cg_clif wasm suite, pair with the clif-to-wasm PR. |
+| [`cg_clif/0002-wasm-f128-sret-return/…patch`](cg_clif/0002-wasm-f128-sret-return/0002-wasm-f128-sret-return.patch) ([why](cg_clif/0002-wasm-f128-sret-return/DIVERGES.md)) | `compiler/patches/cg_clif/0002-wasm-f128-sret-return.patch` | Refreshed for upstream: adds the `f128-wasm-abi` example/test and License line, rebased `4f78fd3` → `a4af0a9`. Live series applies the older form. | Regenerate from the live series, re-run the cg_clif wasm suite, stack on the wasm-backend series. |
+| [`clif-to-wasm/0001-lower-wasm-memory-grow-and-size/…patch`](clif-to-wasm/0001-lower-wasm-memory-grow-and-size/0001-lower-wasm-memory-grow-and-size.patch) ([why](clif-to-wasm/0001-lower-wasm-memory-grow-and-size/DIVERGES.md)) | `compiler/patches/clif-to-wasm/0001-lower-wasm-memory-grow-and-size.patch` | Refreshed for upstream: License line and tests/memory.rs wording, new commit metadata at the same `0e4e0458` base. Live series applies the older commit form. | Regenerate from the live series, re-run `cargo test --all-features` and `cargo fmt --check`, send first. |
 
 ## Equivalent-change search summary
 

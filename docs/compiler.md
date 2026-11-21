@@ -39,7 +39,8 @@ reused. New or changed pins:
 
 The authoritative machine-readable list, including the ordered patch series,
 is [`compiler/upstreams.toml`](../compiler/upstreams.toml); this table is the
-explanatory view.
+explanatory view. The scripts and workflows read the pins from the manifest at
+run time, so the numbers below are for orientation.
 
 | Component | Source | Revision / version |
 |---|---|---|
@@ -66,7 +67,8 @@ compiler/                           # build rustc.wasm and the pure sysroot
 ├── upstreams.toml                  # machine-readable upstream revisions + patch lists
 ├── run.sh                          # plugins/check/bench/a2
 ├── scripts/
-│   ├── upstream.py                 # read/validate upstreams.toml (get/patches/check)
+│   ├── upstream.py                 # read upstreams.toml (get/patches)
+│   ├── check-upstreams.py          # strict manifest, Wasmtime-pin and bundle checks
 │   ├── setup-sources.sh            # rust checkout, prior-art patches, wasi-sdk
 │   ├── build-rustc-wasm.sh         # apply compiler patches + x.py install
 │   ├── build-host.sh               # Wasmtime 50.0.2 p1 host

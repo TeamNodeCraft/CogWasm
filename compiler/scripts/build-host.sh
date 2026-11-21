@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the CogWasm Wasmtime 50.0.2 host (plain WASI p1, no wasi-threads).
+# Build the CogWasm Wasmtime host (plain WASI p1, no wasi-threads).
 # The sysroot builder also needs it: rustc.wasm is executed through this host
 # while Cargo compiles core/alloc/compiler_builtins.
 set -euo pipefail
