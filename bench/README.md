@@ -57,7 +57,7 @@ both pipelines, so a result mismatch is a suite failure, never a speed-up.
 | kernels | `hostcall_f` | 41 | A.2 (f): 200k `nodecraft` host calls |
 | large | `libm_driver` | 31 + libm 0.2.16 | real no_std crate built as an rlib, driver linked against it |
 | large | `miniz_driver` | 34 + miniz_oxide 0.9.1 + adler2 2.0.1 | second substantial no_std crate |
-| large | `generated_stress` | 6,266 generated | 1,024 generic instantiations in 1,024 small functions |
+| large | `generated_stress` | 6,290 generated | 1,024 generic instantiations in 1,024 small functions across 8 modules |
 
 The three vendored crates live in [`vendor/`](vendor/) with their licences and
 a pinned `Cargo.lock`. `bench/scripts/gen_stress.py` generates the stress
