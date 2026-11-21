@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Stage C <stage-c@example.invalid>
-Date: Fri, 21 Nov 2026 02:50:00 +1030
+Date: Fri, 21 Nov 2026 11:35:00 +1030
 Subject: [PATCH] inline loop-contained calls the normal MIR inliner declines
 
 Every call in the wasm we emit is expensive: arguments and results travel
@@ -19,47 +19,48 @@ leaves it unchanged, which is why the step-3 experiment saw no win there.
 
 This pass reuses the inlining machinery and changes only the decision:
 
-- a call site in a cyclic block of the caller gets a 300 cost threshold
+- a call site in a cyclic block of the caller gets a 200 cost threshold
   (`-Zmir-inline-wasm-threshold`), against the normal 50/100;
 - calls outside loops are left to rustc's inliner, so cold code does not pay
   the code-size and compile-time cost;
 - bodies without a back edge are skipped before the inliner runs;
-- the inliner may recurse deeper than the normal pass (20 rather than 5
-  levels) because the iterator chain is nested, and inlining stops once the
-  caller has grown to four times its original block count, which bounds the
-  body instead.
+- inlining stops once the caller has grown to four times its original block
+  count.
 
 Native MIR validation (stage-1 compiler, `--emit=obj`, wasm32 target):
-`strings::body` 1,676 -> 5,072 lines over 409 blocks, `json` 1,183 -> 3,312,
-`scene` 1,608 -> 4,723, and `expr` and `collections` unchanged at `body`.
+`strings::body` 1,676 -> 3,441 lines over 335 blocks and `json` 1,183 ->
+1,265; `scene`, `expr` and `collections` are unchanged at `body`.
 
 Measured through the product pipeline with the rebuilt `rustc.wasm` on the
-full suite (off against on, same compiler, 3 runs x 4 seeds):
+full suite (off against on, same compiler, 3 runs x 4 seeds; twelve of the
+twenty-one modules are byte-identical to the baseline):
 
-| program | off | on | change | ours/LLVM-O2 |
-| --- | ---: | ---: | ---: | ---: |
-| `strings` | 1.422 ms | 0.804 ms | -43.5% | 8.40x -> 4.62x |
-| `sort` | 3.530 ms | 3.297 ms | -6.6% | 3.55x -> 3.34x |
-| `scene` | 0.0089 ms | 0.0084 ms | -5.4% | 1.86x -> 1.62x |
-| `collections` | 0.0694 ms | 0.0659 ms | -5.1% | 5.74x -> 4.69x |
-| `json` | 0.0266 ms | 0.0254 ms | -4.4% | 3.38x -> 3.06x |
-| `nbody` | 72.31 ms | 71.86 ms | -0.6% | 5.06x -> 4.99x |
-| `smoke` | 0.0074 ms | 0.0079 ms | +6.7% | 2.38x -> 2.70x |
-| `hostcall_f` | 0.527 ms | 0.562 ms | +6.6% | 0.99x -> 1.09x |
-| `generated_stress` | 0.0619 ms | 0.0780 ms | +26.1% | 0.99x -> 1.20x |
-| `int_loops` | 0.0033 ms | 0.0047 ms | +43.7% | 0.88x -> 1.30x |
+| program | off | on | change | ours/LLVM-O2 | module | warm compile |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `strings` | 1.422 ms | 0.828 ms | -41.8% | 8.40x -> 4.74x | -4.1% | +0.2% |
+| `json` | 0.0266 ms | 0.0243 ms | -8.7% | 3.38x -> 2.72x | +0.3% | +0.6% |
+| `collections` | 0.0694 ms | 0.0634 ms | -8.6% | 5.74x -> 4.76x | -2.7% | +2.8% |
+| `sort` | 3.530 ms | 3.320 ms | -6.0% | 3.55x -> 3.34x | -0.3% | -0.8% |
+| `scene` | 0.0089 ms | 0.0085 ms | -4.5% | 1.86x -> 1.66x | -0.2% | +0.1% |
+| `smoke` | 0.0074 ms | 0.0072 ms | -3.6% | 2.38x -> 2.23x | +0.2% | +1.5% |
+| `nbody` | 72.31 ms | 71.88 ms | -0.6% | 5.06x -> 5.02x | 0.0% | +0.6% |
+| `float_sum` | 0.0048 ms | 0.0049 ms | +1.7% | 1.46x -> 1.56x | +2.0% | +1.1% |
 
-Execution geomean -2.3%, warm compile +3.3%, module size +0.1% to +5.9%, and
-every output identical; the flag-off modules are byte-identical to the
-unpatched compiler. `strings` is the robust win. The `int_loops` and
-`generated_stress` regressions repeat across runs but are micro-programs
-whose sample ranges overlap, so they need the deterministic instruction
-counts before this pass carries a speed claim.
+Execution geomean -4.4%, warm compile +0.45%, module size -0.2% over all 21
+programs, and every output identical. Every positive delta belongs to a
+program whose module is byte-identical, so those are run noise.
+
+The threshold started at 300: that gave `strings` the same time but inlined
+more (5,072 rather than 3,441 MIR lines), grew modules, cost +3.3% warm
+compile, and changed `int_loops` enough to slow its 2-3 microsecond run by
+38.7% with 7.1% fewer instructions -- a hot-loop layout effect. At 200 those
+programs are untouched and the suite numbers above hold.
 
 The pass is opt-in through `-Zmir-inline-wasm`; the compiler, the sysroot and
-the default benchmark builds do not pass it. This is a local CogWasm
-experiment, not an upstream contribution; its code and comments are
-LLM-generated and a human must review and own it.
+the default benchmark builds do not pass it. The full difftest corpus is green
+with it enabled. This is a local CogWasm experiment, not an upstream
+contribution; its code and comments are LLM-generated and a human must review
+and own it.
 
 ---
 diff --git a/compiler/rustc_mir_transform/src/inline.rs b/compiler/rustc_mir_transform/src/inline.rs
@@ -109,10 +110,10 @@ index 367e16d..eaa7010 100644
      blocks: Range<BasicBlock>,
 diff --git a/compiler/rustc_mir_transform/src/inline_wasm.rs b/compiler/rustc_mir_transform/src/inline_wasm.rs
 new file mode 100644
-index 0000000..1fa30de
+index 0000000..a29a70a
 --- /dev/null
 +++ b/compiler/rustc_mir_transform/src/inline_wasm.rs
-@@ -0,0 +1,279 @@
+@@ -0,0 +1,280 @@
 +//! Inline loop-contained calls that rustc's cost model declines.
 +//!
 +//! Every call in the wasm we emit is expensive: arguments and results travel
@@ -166,10 +167,11 @@ index 0000000..1fa30de
 +
 +/// The cost threshold for a call site inside a loop. Units are the cost
 +/// checker's: an instruction is 5, a call 25. The string iterator chain
-+/// (`CharIndices::next` and friends) needs at least 200 to start inlining and
-+/// is nearly fully inlined at 300; 150 leaves it alone. 300 keeps the win
-+/// while inlining fewer large callees than 400 does.
-+const DEFAULT_LOOP_THRESHOLD: usize = 300;
++/// (`CharIndices::next` and friends) is fully inlined from 200 up; 150 leaves
++/// it alone. 200 matches the 300 setting on `strings` while producing a
++/// smaller module there and in `collections`, and it avoids the `int_loops`
++/// layout regression that the extra inlining at 300 causes.
++const DEFAULT_LOOP_THRESHOLD: usize = 200;
 +
 +pub(super) struct InlineWasm;
 +

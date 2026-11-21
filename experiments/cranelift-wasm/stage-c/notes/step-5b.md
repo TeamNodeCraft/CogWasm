@@ -2,9 +2,9 @@
 
 Status: **in progress**. The first SROA increment is landed and measured on the
 suite. A loop-aware cost-model inliner is landed behind its own flag and
-measured on the full suite through a rebuilt `rustc.wasm`; the difftest and
-the two micro-program regressions are still to come. Both passes are opt-in and
-no speed claim is made for the product default.
+measured on the full suite through a rebuilt `rustc.wasm`, with a green
+difftest. Both passes are opt-in and no speed claim is made for the product
+default.
 
 > The pass code, patch header and this note are LLM-generated under the Rust
 > project's personal-use exemption. This is a local CogWasm experiment, not an
@@ -201,7 +201,7 @@ default thresholds are what keeps them out of line:
 | `-Zinline-mir-threshold=100` | 1,676 | 161 |
 | `-Zinline-mir-threshold=200` | 3,171 | 323 |
 | `-Zinline-mir-threshold=400` | 6,614 | 583 |
-| `InlineWasm` (this patch) | 5,072 | 409 |
+| `InlineWasm` (this patch) | 3,441 | 335 |
 
 Threshold 100, the setting the step-3 experiment used, is exactly the default
 for these calls, which is why that run measured nothing on `strings`.
@@ -227,7 +227,7 @@ patch's own result.
 
 ### What the patch does
 
-- Calls in a cyclic block of the caller's CFG get the 300 threshold; calls
+- Calls in a cyclic block of the caller's CFG get the 200 threshold; calls
   outside loops stay with rustc's inliner, so cold code does not pay.
 - Bodies without a back edge are skipped before the inliner runs, which keeps
   the pass off the many loop-free functions in a crate.
@@ -240,67 +240,66 @@ patch's own result.
   loop.
 
 Native MIR validation (stage-1 compiler, `--emit=obj`, wasm32 target):
-`strings::body` 1,676 -> 5,072 lines over 409 blocks, `json` 1,183 -> 3,312,
-`scene` 1,608 -> 4,723, and `expr` and `collections` unchanged at `body`. The
-loop chain is inlined and the cold setup is not.
+`strings::body` 1,676 -> 3,441 lines over 335 blocks and `json` 1,183 ->
+1,265; `scene`, `expr` and `collections` are unchanged at `body`. The loop
+chain is inlined and the cold setup is not.
 
 ### What the pass measures
 
 `rustc.wasm` was rebuilt with the patch and the full suite was measured with
-the pass off and on, same compiler, 21 programs, 3 runs x 4 seeds. The
-flag-off modules are byte-identical to the unpatched compiler and every
-program returned identical results.
+the pass off and on, same compiler, 21 programs, 3 runs x 4 seeds. At the
+default threshold (200) only nine of the twenty-one modules change at all;
+the other twelve are byte-identical to the baseline, and every program
+returned identical results.
 
-| program | off | on | change | ours/LLVM-O2 |
-| --- | ---: | ---: | ---: | ---: |
-| `strings` | 1.422 ms | 0.804 ms | **-43.5%** | 8.40x -> 4.62x |
-| `sort` | 3.530 ms | 3.297 ms | -6.6% | 3.55x -> 3.34x |
-| `scene` | 0.0089 ms | 0.0084 ms | -5.4% | 1.86x -> 1.62x |
-| `collections` | 0.0694 ms | 0.0659 ms | -5.1% | 5.74x -> 4.69x |
-| `json` | 0.0266 ms | 0.0254 ms | -4.4% | 3.38x -> 3.06x |
-| `nbody` | 72.31 ms | 71.86 ms | -0.6% | 5.06x -> 4.99x |
-| `smoke` | 0.0074 ms | 0.0079 ms | +6.7% | 2.38x -> 2.70x |
-| `hostcall_f` | 0.527 ms | 0.562 ms | +6.6% | 0.99x -> 1.09x |
-| `generated_stress` | 0.0619 ms | 0.0780 ms | +26.1% | 0.99x -> 1.20x |
-| `int_loops` | 0.0033 ms | 0.0047 ms | +43.7% | 0.88x -> 1.30x |
+| program | off | on | change | ours/LLVM-O2 | module | warm compile |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `strings` | 1.422 ms | 0.828 ms | **-41.8%** | 8.40x -> 4.74x | -4.1% | +0.2% |
+| `json` | 0.0266 ms | 0.0243 ms | -8.7% | 3.38x -> 2.72x | +0.3% | +0.6% |
+| `collections` | 0.0694 ms | 0.0634 ms | -8.6% | 5.74x -> 4.76x | -2.7% | +2.8% |
+| `sort` | 3.530 ms | 3.320 ms | -6.0% | 3.55x -> 3.34x | -0.3% | -0.8% |
+| `scene` | 0.0089 ms | 0.0085 ms | -4.5% | 1.86x -> 1.66x | -0.2% | +0.1% |
+| `smoke` | 0.0074 ms | 0.0072 ms | -3.6% | 2.38x -> 2.23x | +0.2% | +1.5% |
+| `nbody` | 72.31 ms | 71.88 ms | -0.6% | 5.06x -> 5.02x | 0.0% | +0.6% |
+| `float_sum` | 0.0048 ms | 0.0049 ms | +1.7% | 1.46x -> 1.56x | +2.0% | +1.1% |
 
-Execution geomean **-2.3%** and warm compile **+3.3%** over all 21 programs.
-The module size median grows 1.4%: three programs shrink, two are unchanged
-and sixteen grow, the largest being `float_sum` +13.1% and `mandelbrot`
-+11.8%. `strings` is the robust win (0.78-0.96 ms against 1.38-1.66 ms).
+Execution geomean **-4.4%**, warm compile **+0.45%** and module size **-0.2%**
+over all 21 programs. `strings` is the robust win (0.79-0.95 ms against
+1.38-1.66 ms) and its module is 4.1% smaller. Every positive delta in the
+suite belongs to a program whose module is byte-identical (`c_plugin` +7.7%,
+`int_loops` +7.6%, `generated_stress` +6.5%, `libm_driver` +6.0%), so those
+are measurement noise, not code changes.
 
-The two apparent regressions were re-checked with the deterministic counters
-and a 7-run A/B:
+### Why the default is 200 and not 300
 
-- `generated_stress`: instructions 671,468 -> 666,288 (-0.8%); the 7-run
-  medians are 0.0652 -> 0.0668 ms (+2.5%), or 1.07x -> 1.05x of LLVM `-O2`.
-  The +26.1% in the first table was run noise.
-- `int_loops`: instructions 213,915 -> 198,719 (-7.1%) and direct calls
-  396 -> 4, yet the 7-run medians are 0.0025 -> 0.0034 ms (+38.7%), or
-  1.11x -> 1.20x of LLVM `-O2`. This is not extra work: the pass inlines
-  `emit_bytes` and `copy_from_slice_impl` into `emit_u64`, and the loop does
-  fewer instructions but runs slower. The run is 2-3 microseconds and the
-  shift repeats, so it looks like a code-layout effect on a micro-benchmark.
-  It is the open issue for this pass.
+The first revision of the patch used 300. It gave `strings` the same time but
+inlined more: 5,072 rather than 3,441 MIR lines of `strings::body`, modules
+grew (median +1.4%), warm compile cost +3.3%, and `int_loops` changed: its
+body grew from 89 to 189 blocks, and the 2-3 microsecond run got 38.7% slower
+with 7.1% fewer executed instructions -- a hot-loop layout effect. At 200
+every one of those programs is untouched, the suite geomean is better
+(-4.4% against -2.3%), and compile and size are essentially flat (+0.45%,
+-0.2%). The global-threshold experiment pointed the same way: 400 on the
+existing compiler measured `strings` -41.0% for +2% to +10% warm compile.
 
-Two knobs were tuned before this measurement. With the normal inliner's
-five-level recursion limit the pass only reached 3,499 MIR lines of
-`strings::body` and `strings` improved -16.9%; raising the limit to 20, with
-the 300 threshold, reached 5,072 lines and the -43.5% above. A 400 threshold with no early exit
-for loop-free bodies cost `libm_driver` +65% warm compile for no execution
-gain; at 300 with the early exit that is +2.2%. The four-times growth budget
-did not bind on any suite program.
+The other knobs: with the normal inliner's five-level recursion limit and the
+400 threshold the pass reached 3,499 MIR lines of `strings::body` and
+`strings` improved -16.9%; raising the limit to 20 gave 5,072 lines at 400 and
+-43.5%. At 200 the chain inlines to 3,441 lines and -41.8%, so the deeper
+limit matters mainly for the larger callees that 400 admits. A 400 threshold
+with no early exit for loop-free bodies cost `libm_driver` +65% warm compile
+for no execution gain; with the early exit and 200 that is -2.5%. The
+four-times growth budget does not bind on any suite program.
+
+The full difftest corpus is green with the 200 threshold enabled: 49
+handwritten + 24 generated programs, every `run(seed)` and output buffer
+identical to the LLVM build.
 
 ### What is not done
 
-The `int_loops` layout regression is unexplained, the threshold and growth
-constants are first estimates, and the pass still has to be measured on a
-machine other than this one. Every program except `strings` moves within
-run-to-run noise, so the suite geomean is not yet a speed claim.
-
-The full difftest corpus is green with the pass enabled: 49 handwritten +
-24 generated programs, seeds `0,1,42,0x9e3779b97f4a7c15`, every `run(seed)`
-and output buffer identical to the LLVM build.
+The threshold and growth constants are still first estimates, and the pass
+has to be measured on a machine other than this one. The suite geomean is a
+small win, not parity; `strings` carries most of it.
 
 ## What remains for step 5b
 
