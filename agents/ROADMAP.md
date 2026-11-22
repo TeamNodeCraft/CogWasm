@@ -21,6 +21,7 @@ investigation before it can be planned).
 | **done** | Growable heap (`memory.grow` / `memory.size` in clif-to-wasm) |
 | **done** | CI that builds and tests the whole pipeline and audits `rustc.wasm` for LLVM |
 | **done** | Differential tests: the same programs built with LLVM and with our pipeline must produce identical output ([`difftest/`](../difftest/)) |
+| **done** | A live REPL on the site: `rustc.wasm` and a single-threaded `wild.wasm` compile the visitor's Rust in their browser (≈ 50 ms per edit once warm) and hot-swap it into a running program; 40 MB, downloaded on request; CI packages it and checks it in Node's V8 ([`site/repl/`](../site/repl/)) |
 
 ## Goal 1 — Generated code as fast as LLVM, faster where it counts
 
@@ -144,9 +145,11 @@ The resident service and tier 2 share the supervisor planned in [supervisor.md](
 
 | Status | Item | Done when |
 | --- | --- | --- |
-| **open** | Procedural macros: proc-macro crates compiled to wasm and run inside the compiler (host-provided Wasmtime instance, at native speed) | `serde`'s derive works |
-| **open** | `std` for WASI preview 1 and 2, built by Cranelift | A `std` program in the difftest corpus |
-| **open** | Multiple crates and dependencies: a small resolver in the host plus a cache of prebuilt popular crates | A program using several crates.io crates builds |
+| **done** | Libraries built by `rustc.wasm` itself: a `no_std` + `alloc` library compiles to an `rlib` and a program links against it with `--extern`; the supervisor's workspace mode builds a crate graph with a cache per crate (editing the app leaves the library a cache hit) | A program using a library crate, both compiled by `rustc.wasm`, runs correctly |
+| **open** | Libraries in the live REPL, step 1: a curated set of pure-Rust `no_std` crates (for example `libm`, `glam` with `libm`, `fastrand`) built by `rustc.wasm` in CI from the same build as the sysroot, published with the REPL's compiler and fetched on demand when the visitor's code names them | A REPL example that `use`s a crate compiles in the browser; the smoke test covers it |
+| **open** | Libraries, step 2: `std` for WASI preview 1 and 2, built by `rustc.wasm` and Cranelift, so crates that need `std` build | A `std` program in the difftest corpus |
+| **open** | Libraries, step 3: procedural macros: proc-macro crates compiled to wasm and run inside the compiler (host-provided Wasmtime instance, at native speed; an interpreter in the browser, as the in-browser playground does) | `serde`'s derive works |
+| **open** | Libraries, step 4: dependencies without cargo: a small resolver in the host that reads `Cargo.toml` and lock files, fetches sources, and feeds the workspace scheduler, plus a cache of prebuilt popular crates | A program using several crates.io crates builds |
 | **open** | Component model output (WIT, WASI 0.2) | A component runs in Wasmtime |
 | **open** | Debug info: DWARF through the Cranelift backend, clif-to-wasm and Wild | Stack traces with source lines |
 | **open** | Panics that unwind, via wasm exception handling | Unwinding tests pass |

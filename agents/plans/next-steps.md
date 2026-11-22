@@ -250,6 +250,18 @@ toolchain now lives at a different absolute path on every machine. Add
 different directories, and compare. This also stabilises the supervisor's
 cache keys.
 
+### G3.0. Libraries in the live REPL (M)
+
+`rustc.wasm` already builds library crates (an `rlib` linked with `--extern`,
+checked by hand on 2026-11-22; the supervisor's workspace mode builds crate
+graphs). Give the site's REPL a curated set of pure-Rust `no_std` crates
+(`libm`, `glam` with `libm`, `fastrand`): build them with `rustc.wasm` in
+`ci/build-repl-assets.sh` (same build as the sysroot, so the crate hashes
+match), list them in `manifest.json`, have the worker fetch an `rlib` only when
+the code names its crate and pass `--extern`, and add an example that uses one
+to `site/repl/examples.js` (the smoke test then compiles it). Then the roadmap's
+library steps 2-4: `std` for WASI, proc macros (G3.1), a resolver.
+
 ### G3.1. Procedural macros (L, research spike first)
 
 The largest ecosystem gap (`serde` derive). Spike: compile one proc-macro
