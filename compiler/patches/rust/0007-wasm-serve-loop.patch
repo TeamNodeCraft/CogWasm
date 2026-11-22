@@ -1,0 +1,411 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CogWasm <cogwasm@example.invalid>
+Date: Sun, 22 Nov 2026 12:00:00 +1030
+Subject: [PATCH] wasm: serve many compile requests from one rustc guest
+
+wasm32-wasip1 has no threads, so a host starts a fresh rustc.wasm for every
+compile. That pays guest start-up, every sysroot metadata read and fresh
+linear memory each time. This adds COGWASM_SERVE=1: after the usual one-time
+setup main reads NUL-separated argv requests from cogwasm.next_request, runs
+compiler_entrypoint for each, reports the exit code through cogwasm.finish,
+and returns when the host closes the channel. Without COGWASM_SERVE=1 main is
+the one-shot path unchanged.
+
+next_request(buf, cap) returns the request length, -n when cap is too small
+(the guest retries with a larger buffer), or 0 when serving is done. On
+non-wasm targets the imports are stubs that exit with an error, so the host
+build still type-checks the same loop.
+
+The second half is a process-global metadata cache in rustc_metadata, also
+enabled only by COGWASM_SERVE=1. Both whole-file metadata loaders (the rmeta
+path in locator::get_metadata_section and codegen's load_metadata_with) ask
+it for an OwnedSlice keyed by path, length and mtime; only .rmeta and .rlib
+files are cached, and any metadata error falls back to the existing loader
+and its error messages.
+
+Per-process state: the logger, signal handler, ctrlc handler and ICE hook
+are installed once before the loop. ICE_PATH and ICE_COLOR keep the first
+request's configuration (they are OnceLocks), and the ICE hook reports only
+the first panic (FIRST_PANIC). USING_INTERNAL_FEATURES is reset by each
+entrypoint. The request loop does not use std::env::args, so no per-request
+argv global is involved.
+
+Each compiler session on wasm32 runs on the calling thread (patch 0001), so
+the worker-local `Registry` that a freshly spawned thread would start without
+stayed attached and the second request panicked ("Thread already has a
+registry"). `Registry`'s thread-local is now a `RefCell<Option<_>>` with
+`Registry::unregister_current_thread`, and the wasm path of
+`run_in_thread_with_globals` detaches the thread when a session ends,
+including when a fatal error unwinds.
+---
+ .../rustc_codegen_ssa/src/back/metadata.rs    | 16 ++--
+ .../src/sync/worker_local.rs                  | 30 +++++--
+ compiler/rustc_driver_impl/src/lib.rs         | 88 +++++++++++++++++++
+ compiler/rustc_interface/src/util.rs          |  5 ++
+ compiler/rustc_metadata/src/cache.rs          | 72 +++++++++++++++
+ compiler/rustc_metadata/src/lib.rs            |  2 +
+ compiler/rustc_metadata/src/locator.rs        | 35 ++++----
+ 7 files changed, 220 insertions(+), 28 deletions(-)
+
+diff --git a/compiler/rustc_codegen_ssa/src/back/metadata.rs b/compiler/rustc_codegen_ssa/src/back/metadata.rs
+index 45dcde58d..69bb55893 100644
+--- a/compiler/rustc_codegen_ssa/src/back/metadata.rs
++++ b/compiler/rustc_codegen_ssa/src/back/metadata.rs
+@@ -44,12 +44,16 @@ fn load_metadata_with(
+     path: &Path,
+     f: impl for<'a> FnOnce(&'a [u8]) -> Result<&'a [u8], String>,
+ ) -> Result<OwnedSlice, String> {
+-    let file =
+-        File::open(path).map_err(|e| format!("failed to open file '{}': {}", path.display(), e))?;
+-
+-    unsafe { Mmap::map(file) }
+-        .map_err(|e| format!("failed to mmap file '{}': {}", path.display(), e))
+-        .and_then(|mmap| try_slice_owned(mmap, |mmap| f(mmap)))
++    // A serving rustc shares the rmeta/rlib bytes with the metadata loader;
++    // a one-shot rustc maps the file just as before.
++    rustc_metadata::cached_file_bytes(path, || {
++        let file = File::open(path)
++            .map_err(|e| format!("failed to open file '{}': {}", path.display(), e))?;
++
++        unsafe { Mmap::map(file) }
++            .map_err(|e| format!("failed to mmap file '{}': {}", path.display(), e))
++            .and_then(|mmap| try_slice_owned(mmap, |mmap| f(mmap)))
++    })
+ }
+ 
+ impl MetadataLoader for DefaultMetadataLoader {
+diff --git a/compiler/rustc_data_structures/src/sync/worker_local.rs b/compiler/rustc_data_structures/src/sync/worker_local.rs
+index d75af0098..965f1213f 100644
+--- a/compiler/rustc_data_structures/src/sync/worker_local.rs
++++ b/compiler/rustc_data_structures/src/sync/worker_local.rs
+@@ -1,4 +1,4 @@
+-use std::cell::{Cell, OnceCell};
++use std::cell::{Cell, RefCell};
+ use std::num::NonZero;
+ use std::ops::Deref;
+ use std::ptr;
+@@ -41,7 +41,10 @@ struct RegistryData {
+ thread_local! {
+     /// The registry associated with the thread.
+     /// This allows the `WorkerLocal` type to clone the registry in its constructor.
+-    static REGISTRY: OnceCell<Registry> = const { OnceCell::new() };
++    /// A `RefCell` rather than a `OnceCell` so a wasm rustc that runs many
++    /// compiler sessions on its only thread can detach between them (see
++    /// `Registry::unregister_current_thread`).
++    static REGISTRY: RefCell<Option<Registry>> = const { RefCell::new(None) };
+ }
+ 
+ struct ThreadData {
+@@ -66,7 +69,7 @@ pub fn new(thread_limit: NonZero<usize>) -> Self {
+ 
+     /// Gets the registry associated with the current thread. Panics if there's no such registry.
+     pub fn current() -> Self {
+-        REGISTRY.with(|registry| registry.get().cloned().expect("No associated registry"))
++        REGISTRY.with_borrow(|registry| registry.clone().expect("No associated registry"))
+     }
+ 
+     /// Registers the current thread with the registry so worker locals can be used on it.
+@@ -74,12 +77,12 @@ pub fn current() -> Self {
+     pub fn register(&self) {
+         let mut threads = self.0.threads.lock();
+         if *threads < self.0.thread_limit.get() {
+-            REGISTRY.with(|registry| {
+-                if registry.get().is_some() {
++            REGISTRY.with_borrow_mut(|registry| {
++                if registry.is_some() {
+                     drop(threads);
+                     panic!("Thread already has a registry");
+                 }
+-                registry.set(self.clone()).ok();
++                *registry = Some(self.clone());
+                 THREAD_DATA.with(|data| {
+                     data.registry_id.set(self.id());
+                     data.index.set(*threads);
+@@ -92,6 +95,21 @@ pub fn register(&self) {
+         }
+     }
+ 
++    /// Detaches the current thread from its registry, as if it were a fresh
++    /// thread.
++    ///
++    /// rustc normally runs each compiler session on a newly spawned thread.
++    /// On wasm32 it runs on the calling thread, and a rustc that serves many
++    /// requests from one process (`COGWASM_SERVE`) would otherwise find the
++    /// previous session's registry still attached and panic in `register`.
++    pub fn unregister_current_thread() {
++        REGISTRY.with_borrow_mut(|registry| *registry = None);
++        THREAD_DATA.with(|data| {
++            data.registry_id.set(RegistryId(ptr::null()));
++            data.index.set(0);
++        });
++    }
++
+     /// Gets the identifier of this registry.
+     fn id(&self) -> RegistryId {
+         RegistryId(&*self.0)
+diff --git a/compiler/rustc_driver_impl/src/lib.rs b/compiler/rustc_driver_impl/src/lib.rs
+index 8b5d38184..01ebd370d 100644
+--- a/compiler/rustc_driver_impl/src/lib.rs
++++ b/compiler/rustc_driver_impl/src/lib.rs
+@@ -1677,6 +1677,90 @@ pub fn install_ctrlc_handler() {
+     .expect("Unable to install ctrlc handler");
+ }
+ 
++/// Initial buffer for one host request. A request is small (an argument
++/// vector), so this normally avoids the `-n` retry.
++const SERVE_REQUEST_CAPACITY: usize = 4096;
++
++#[cfg(target_family = "wasm")]
++mod serve_imports {
++    #[link(wasm_import_module = "cogwasm")]
++    unsafe extern "C" {
++        /// Copy the next request into `buf` and return its length, `-n` when
++        /// the buffer must be at least `n` bytes, or `0` when serving is over.
++        pub fn next_request(buf: *mut u8, cap: usize) -> isize;
++        /// Report the exit code of the request that just finished.
++        pub fn finish(code: i32);
++    }
++}
++
++/// Read one request, retrying when the host's reply says the buffer was too
++/// small. The host keeps the request pending until it fits.
++#[cfg(target_family = "wasm")]
++fn next_request_bytes(mut capacity: usize) -> Option<Vec<u8>> {
++    loop {
++        capacity = capacity.max(1);
++        let mut buffer = vec![0u8; capacity];
++        let length = unsafe { serve_imports::next_request(buffer.as_mut_ptr(), buffer.len()) };
++        if length > 0 {
++            buffer.truncate(length.unsigned_abs());
++            return Some(buffer);
++        }
++        if length < 0 {
++            capacity = length.unsigned_abs();
++            continue;
++        }
++        return None;
++    }
++}
++
++#[cfg(not(target_family = "wasm"))]
++fn next_request_bytes(_capacity: usize) -> Option<Vec<u8>> {
++    eprintln!("rustc: COGWASM_SERVE is only supported when rustc is built for wasm32");
++    std::process::exit(1)
++}
++
++#[cfg(target_family = "wasm")]
++fn finish_request(code: i32) {
++    unsafe { serve_imports::finish(code) }
++}
++
++#[cfg(not(target_family = "wasm"))]
++fn finish_request(_code: i32) {}
++
++/// Serve requests until the host closes the channel, then return success.
++///
++/// Every request is an independent compiler entrypoint; the logger, signal
++/// handler and ICE hook above are process-wide and stay installed for the
++/// whole loop. `ICE_PATH`/`ICE_COLOR` keep the first request's configuration,
++/// as rustc's `OnceLock`s already define that behaviour, and the panic hook
++/// reports only the first panic.
++fn serve() -> ExitCode {
++    loop {
++        let Some(request) = next_request_bytes(SERVE_REQUEST_CAPACITY) else {
++            break;
++        };
++        let request = String::from_utf8_lossy(&request);
++        let mut args: Vec<String> = request.split('\0').map(str::to_owned).collect();
++        if args.last().is_some_and(String::is_empty) {
++            args.pop();
++        }
++
++        let start_time = Instant::now();
++        let start_rss = get_resident_set_size();
++        let mut callbacks = TimePassesCallbacks::default();
++        let code = match catch_fatal_errors(|| compiler_entrypoint(&args, &mut callbacks)) {
++            Ok(()) => 0,
++            Err(_) => 1,
++        };
++        if let Some(format) = callbacks.time_passes {
++            let end_rss = get_resident_set_size();
++            print_time_passes_entry("total", start_time.elapsed(), start_rss, end_rss, format);
++        }
++        finish_request(code);
++    }
++    ExitCode::SUCCESS
++}
++
+ pub fn main() -> ExitCode {
+     let start_time = Instant::now();
+     let start_rss = get_resident_set_size();
+@@ -1689,6 +1773,10 @@ pub fn main() -> ExitCode {
+     install_ice_hook(DEFAULT_BUG_REPORT_URL, |_| ());
+     install_ctrlc_handler();
+ 
++    if matches!(env::var("COGWASM_SERVE").as_deref(), Ok("1")) {
++        return serve();
++    }
++
+     let exit_code =
+         catch_with_exit_code(|| compiler_entrypoint(&args::raw_args(&early_dcx), &mut callbacks));
+ 
+diff --git a/compiler/rustc_interface/src/util.rs b/compiler/rustc_interface/src/util.rs
+index 6b5e1731b..b751be3ad 100644
+--- a/compiler/rustc_interface/src/util.rs
++++ b/compiler/rustc_interface/src/util.rs
+@@ -196,6 +196,11 @@ fn run_in_thread_with_globals<F: FnOnce(CurrentGcx) -> R + Send, R: Send>(
+     #[cfg(target_arch = "wasm32")]
+     {
+         let _ = thread_stack_size;
++        // A spawned thread would start every session with no registry; this
++        // one thread must look the same to the next session, including after
++        // a fatal error unwinds out of `run` (a serving rustc, COGWASM_SERVE,
++        // runs many sessions here).
++        let _detach = rustc_data_structures::defer(sync::Registry::unregister_current_thread);
+         run()
+     }
+ 
+diff --git a/compiler/rustc_metadata/src/cache.rs b/compiler/rustc_metadata/src/cache.rs
+new file mode 100644
+index 000000000..3f620d770
+--- /dev/null
++++ b/compiler/rustc_metadata/src/cache.rs
+@@ -0,0 +1,72 @@
++//! A process-global cache of metadata file bytes for a long-lived rustc.
++//!
++//! A rustc built for wasm can serve many compile requests from one process
++//! when the host asks it to (`COGWASM_SERVE=1`). Every request otherwise
++//! re-reads the same sysroot and dependency `.rmeta`/`.rlib` files, which is
++//! a large part of a small compile's wall time and grows the guest's linear
++//! memory on every request.
++//!
++//! The cache is keyed by path, file length and modification time, so a
++//! rebuilt sysroot or dependency misses instead of serving stale bytes. Only
++//! whole metadata files are cached, and the environment is read once: without
++//! `COGWASM_SERVE=1` this module adds a branch and nothing else.
++
++use std::path::{Path, PathBuf};
++use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
++use std::time::SystemTime;
++
++use rustc_data_structures::fx::FxHashMap;
++use rustc_data_structures::owned_slice::OwnedSlice;
++
++type CacheKey = (PathBuf, u64, SystemTime);
++type Cache = Mutex<FxHashMap<CacheKey, OwnedSlice>>;
++
++fn enabled() -> bool {
++    static ENABLED: OnceLock<bool> = OnceLock::new();
++    *ENABLED.get_or_init(|| matches!(std::env::var("COGWASM_SERVE").as_deref(), Ok("1")))
++}
++
++fn cache() -> &'static Cache {
++    static CACHE: OnceLock<Cache> = OnceLock::new();
++    CACHE.get_or_init(|| Mutex::new(FxHashMap::default()))
++}
++
++fn lock(cache: &'static Cache) -> MutexGuard<'static, FxHashMap<CacheKey, OwnedSlice>> {
++    // Entries are replaced whole and only ever read under this lock, so a
++    // panic elsewhere cannot leave the map structurally invalid.
++    cache.lock().unwrap_or_else(PoisonError::into_inner)
++}
++
++fn cacheable(path: &Path) -> bool {
++    matches!(path.extension().and_then(|extension| extension.to_str()), Some("rmeta" | "rlib"))
++}
++
++/// Return the bytes of `path`, reusing a previous read when the file metadata
++/// is unchanged.
++///
++/// On any metadata error, or when serving is off or the path is not a
++/// `.rmeta`/`.rlib`, this calls `load` and returns its result unchanged, so
++/// the caller's error messages and behaviour do not depend on the cache.
++pub fn cached_file_bytes<E>(
++    path: &Path,
++    load: impl FnOnce() -> Result<OwnedSlice, E>,
++) -> Result<OwnedSlice, E> {
++    if !enabled() || !cacheable(path) {
++        return load();
++    }
++    let Ok(metadata) = std::fs::metadata(path) else {
++        return load();
++    };
++    let Ok(modified) = metadata.modified() else {
++        return load();
++    };
++    let key = (path.to_path_buf(), metadata.len(), modified);
++
++    if let Some(bytes) = lock(cache()).get(&key).cloned() {
++        return Ok(bytes);
++    }
++
++    let bytes = load()?;
++    lock(cache()).insert(key, bytes.clone());
++    Ok(bytes)
++}
+diff --git a/compiler/rustc_metadata/src/lib.rs b/compiler/rustc_metadata/src/lib.rs
+index 1706fece2..e6a455f90 100644
+--- a/compiler/rustc_metadata/src/lib.rs
++++ b/compiler/rustc_metadata/src/lib.rs
+@@ -12,6 +12,7 @@
+ 
+ pub use rmeta::provide;
+ 
++mod cache;
+ mod dependency_format;
+ mod eii;
+ mod foreign_modules;
+@@ -24,6 +25,7 @@
+ pub mod fs;
+ pub mod locator;
+ 
++pub use cache::cached_file_bytes;
+ pub use fs::{METADATA_FILENAME, emit_wrapper_file};
+ pub use host_dylib::{DylibError, load_symbol_from_dylib};
+ pub use rmeta::{EncodedMetadata, METADATA_HEADER, ProcMacroKind, encode_metadata, rendered_const};
+diff --git a/compiler/rustc_metadata/src/locator.rs b/compiler/rustc_metadata/src/locator.rs
+index 3097de335..2194c1167 100644
+--- a/compiler/rustc_metadata/src/locator.rs
++++ b/compiler/rustc_metadata/src/locator.rs
+@@ -935,22 +935,25 @@ fn get_metadata_section<'p>(
+ }
+ 
+ fn get_rmeta_metadata_section<'a, 'p>(filename: &'p Path) -> Result<OwnedSlice, MetadataError<'a>> {
+-    // mmap the file, because only a small fraction of it is read.
+-    let file = std::fs::File::open(filename).map_err(|_| {
+-        MetadataError::LoadFailure(format!(
+-            "failed to open rmeta metadata: '{}'",
+-            filename.display()
+-        ))
+-    })?;
+-    let mmap = unsafe { Mmap::map(file) };
+-    let mmap = mmap.map_err(|_| {
+-        MetadataError::LoadFailure(format!(
+-            "failed to mmap rmeta metadata: '{}'",
+-            filename.display()
+-        ))
+-    })?;
+-
+-    Ok(slice_owned(mmap, Deref::deref))
++    // A serving rustc reuses the bytes; a one-shot rustc always maps the file.
++    crate::cached_file_bytes(filename, || {
++        // mmap the file, because only a small fraction of it is read.
++        let file = std::fs::File::open(filename).map_err(|_| {
++            MetadataError::LoadFailure(format!(
++                "failed to open rmeta metadata: '{}'",
++                filename.display()
++            ))
++        })?;
++        let mmap = unsafe { Mmap::map(file) };
++        let mmap = mmap.map_err(|_| {
++            MetadataError::LoadFailure(format!(
++                "failed to mmap rmeta metadata: '{}'",
++                filename.display()
++            ))
++        })?;
++
++        Ok(slice_owned(mmap, Deref::deref))
++    })
+ }
+ 
+ /// A diagnostic function for dumping crate metadata to an output stream.

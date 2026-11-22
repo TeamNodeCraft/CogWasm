@@ -206,6 +206,10 @@ enum Command {
         /// Goal 2 target, in milliseconds.
         #[arg(long, default_value_t = 100.0)]
         target_ms: f64,
+        /// After each edit, compile the same source in a fresh guest and
+        /// require byte-identical output.
+        #[arg(long)]
+        verify_cold: bool,
     },
     /// Build a multi-crate workspace in dependency order.
     Workspace {
@@ -425,6 +429,7 @@ fn main() -> Result<()> {
             seed,
             json,
             target_ms,
+            verify_cold,
         } => {
             let config = RealCompilerConfig {
                 host,
@@ -447,6 +452,7 @@ fn main() -> Result<()> {
                 seed,
                 json.as_deref(),
                 target_ms,
+                verify_cold,
             )?;
         }
         Command::Workspace {
@@ -491,6 +497,8 @@ struct LoadedBackend {
     compiler: Arc<dyn Compiler>,
     /// `None` for the host backend, which loads rustc.wasm per job.
     module_load_ms: Option<f64>,
+    /// Whether the resident backend is using one long-lived guest.
+    serving: bool,
 }
 
 /// Build the selected backend once, so a resident module load is reused by
@@ -500,13 +508,16 @@ fn load_backend(config: &RealCompilerConfig, backend: Backend) -> Result<LoadedB
         Backend::Host => Ok(LoadedBackend {
             compiler: Arc::new(RealCompiler::new(config.clone())),
             module_load_ms: None,
+            serving: false,
         }),
         Backend::Resident => {
             let resident = ResidentCompiler::new(config.clone())?;
             let module_load_ms = resident.module_load_ms();
+            let serving = resident.is_serving();
             Ok(LoadedBackend {
                 compiler: Arc::new(resident),
                 module_load_ms: Some(module_load_ms),
+                serving,
             })
         }
     }
@@ -747,6 +758,7 @@ fn edit_loop(
     seed: u64,
     json: Option<&Path>,
     target_ms: f64,
+    verify_cold: bool,
 ) -> Result<()> {
     if edits == 0 {
         bail!("--edits must be at least 1");
@@ -784,10 +796,21 @@ fn edit_loop(
             "[cogwasm-supervisor] host backend: module load happens per job (not measured)"
         ),
     }
+    let mode = if loaded.serving {
+        "serving (one guest)"
+    } else {
+        "one instance per job"
+    };
+    if backend == Backend::Resident {
+        eprintln!("[cogwasm-supervisor] resident backend: {mode}");
+    } else {
+        eprintln!("[cogwasm-supervisor] host backend: {mode}");
+    }
 
     let LoadedBackend {
         compiler,
         module_load_ms,
+        serving: _,
     } = loaded;
     let supervisor = Supervisor::new(ArtifactStore::new(store), compiler);
     let runtime = Arc::new(WasmtimeRuntime::new());
@@ -831,10 +854,26 @@ fn edit_loop(
         text = next;
 
         let started = Instant::now();
-        let outcome = supervisor.build(&make_job(Preset::Fast.options())?)?;
+        let job = make_job(Preset::Fast.options())?;
+        let outcome = supervisor.build(&job)?;
         let build_ms = wall_ms(started);
         if outcome.was_hit() {
             bail!("edit {index} was a cache hit; every edit must be a cache miss");
+        }
+        if verify_cold {
+            let cold = supervisor
+                .compiler()
+                .compile_cold(&job, &outcome.artifact().key)
+                .map_err(anyhow::Error::new)
+                .with_context(|| format!("compiling edit {index} in a fresh guest"))?;
+            if cold.bytes != outcome.artifact().bytes {
+                bail!(
+                    "edit {index}: warm artifact is {} bytes but a cold compile is {} bytes; \
+                     the serving guest did not produce a byte-identical wasm",
+                    outcome.artifact().bytes.len(),
+                    cold.bytes.len()
+                );
+            }
         }
         let link_ms = outcome.artifact().meta.link_ms;
 

@@ -66,6 +66,18 @@ pub trait Compiler: Send + Sync {
     ///
     /// Returns [`CompileError`] when the build fails or cannot start.
     fn compile(&self, job: &JobSpec, key: &str) -> Result<CompileOutput, CompileError>;
+
+    /// Compile `job` with a fresh guest, for a warm-versus-cold comparison.
+    ///
+    /// The default is the normal path, which is already a fresh process for
+    /// the subprocess backend; the resident backend overrides it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CompileError`] when the build fails or cannot start.
+    fn compile_cold(&self, job: &JobSpec, key: &str) -> Result<CompileOutput, CompileError> {
+        self.compile(job, key)
+    }
 }
 
 /// A shared compiler is itself a compiler, so a resident backend can serve
@@ -77,6 +89,10 @@ impl<T: Compiler + ?Sized> Compiler for Arc<T> {
 
     fn compile(&self, job: &JobSpec, key: &str) -> Result<CompileOutput, CompileError> {
         (**self).compile(job, key)
+    }
+
+    fn compile_cold(&self, job: &JobSpec, key: &str) -> Result<CompileOutput, CompileError> {
+        (**self).compile_cold(job, key)
     }
 }
 

@@ -196,6 +196,7 @@ step "edit → result through the resident supervisor"
         --compiler-id "resident-ci" \
         --source "$REPO/crates/cogwasm-supervisor/tests/fixtures/edit_loop.rs" \
         --edits 10 \
+        --verify-cold \
         --json "$TOOL/work/supervisor/edit-loop.json"
 )
 python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); load=r["module_load_ms"]; print("::notice title=edit to result::median %.1f ms (target %.0f ms: %s), module load %s ms" % (r["median"], r["target_ms"], "MET" if r["met"] else "MISSED", "unknown" if load is None else "%.1f" % load))' "$TOOL/work/supervisor/edit-loop.json"

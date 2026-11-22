@@ -42,6 +42,15 @@ pub trait SpawnRecorder: Send + 'static {
     fn log_summary(&self) -> bool {
         false
     }
+
+    /// Drop every record. A serving store calls this before each request so a
+    /// request's report contains only its own spawns.
+    fn reset(&self) {}
+
+    /// Snapshot the records in the summarized form the host reports.
+    fn summaries(&self) -> Vec<SpawnSummary> {
+        Vec::new()
+    }
 }
 
 /// One recorded invocation with its full argv.
@@ -80,6 +89,22 @@ impl SpawnRecorder for ArgvRecorder {
     fn log_summary(&self) -> bool {
         true
     }
+
+    fn reset(&self) {
+        locked(&self.records).clear();
+    }
+
+    fn summaries(&self) -> Vec<SpawnSummary> {
+        self.records()
+            .iter()
+            .map(|record| SpawnSummary {
+                program: record.argv.first().cloned().unwrap_or_default(),
+                args: record.argv.len().saturating_sub(1),
+                ms: record.ms,
+                status: record.status,
+            })
+            .collect()
+    }
 }
 
 /// The benchmark host's recorder: keeps only the reported summary.
@@ -103,6 +128,14 @@ impl SpawnRecorder for SummaryRecorder {
             ms,
             status,
         });
+    }
+
+    fn reset(&self) {
+        locked(&self.summaries).clear();
+    }
+
+    fn summaries(&self) -> Vec<SpawnSummary> {
+        SummaryRecorder::summaries(self)
     }
 }
 

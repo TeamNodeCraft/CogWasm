@@ -23,6 +23,14 @@ impl GuestMem {
             .with_context(|| format!("reading guest memory at {offset:#x}"))
     }
 
+    /// Write `buf` into guest memory at `offset`, adding context to an
+    /// out-of-bounds access.
+    pub fn write<T>(&self, caller: &mut Caller<'_, T>, offset: usize, buf: &[u8]) -> Result<()> {
+        self.0
+            .write(caller, offset, buf)
+            .with_context(|| format!("writing guest memory at {offset:#x}"))
+    }
+
     /// Read a NUL-terminated UTF-8 string starting at `pointer`.
     ///
     /// Bytes past the terminator are ignored. A string without a terminator

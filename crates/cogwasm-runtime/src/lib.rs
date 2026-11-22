@@ -10,6 +10,7 @@
 mod env;
 mod error;
 mod mem;
+mod serve;
 mod spawn;
 mod stats;
 mod store;
@@ -17,6 +18,10 @@ mod store;
 pub use env::env_var_compat;
 pub use error::Wt;
 pub use mem::{GuestMem, MAX_CSTR_BYTES, guest_memory};
+pub use serve::{
+    NextRequest, ServeEvent, ServeFinish, ServeHooks, add_serve_imports, decode_request,
+    encode_request,
+};
 pub use spawn::{
     ArgvRecord, ArgvRecorder, SpawnRecorder, SpawnSummary, SummaryRecorder, add_playground_spawn,
 };

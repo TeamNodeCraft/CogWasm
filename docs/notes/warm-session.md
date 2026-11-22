@@ -375,6 +375,101 @@ link, ≈ 10 ms of the rest. Option A (a long-lived guest that keeps the
 metadata) now targets that ≈ 40 ms, which matters for plugin-sized programs
 (plugin (c) is still above 100 ms) more than for the fixture.
 
+## Option A implementation plan (2026-11-22)
+
+Goal: one rustc guest per resident backend that compiles many requests, so a
+request skips guest start-up, the metadata reads (≈ 7–20 ms on the runner)
+and the memory growth, and keeps the allocator warm. Target: plugin-sized
+edits (plugin (c) ≈ 120–130 ms, `json` ≈ 500 ms on CI) measurably faster, with
+artifacts byte-identical to a fresh compile.
+
+### Guest: rust patch `0007-wasm-serve-loop.patch` (wasm32 only)
+
+1. **Request loop** in `rustc_driver_impl::main`, only when the environment
+   has `COGWASM_SERVE=1` (one-shot behaviour is untouched otherwise):
+   - two host imports from module `cogwasm`:
+     `next_request(buf: *mut u8, cap: usize) -> isize` (the request length;
+     a negative value `-n` asks for a buffer of `n` bytes; `0` means no more
+     requests) and `finish(code: i32)`;
+   - a request is the argv, NUL-separated, starting with `rustc`;
+   - each request runs `catch_fatal_errors(|| compiler_entrypoint(&args, &mut
+     TimePassesCallbacks::default()))`, mapped to 0 or 1 (rustc's errors end
+     in a caught `FatalError`), prints the `-Ztime-passes` total as `main`
+     does, then calls `finish(code)`;
+   - logger, signal handler and ICE hook are installed once, before the loop.
+2. **Metadata cache**, active only under `COGWASM_SERVE`: a process-global
+   map from (path, length, mtime) to the `OwnedSlice` of the file's bytes, in
+   `rustc_metadata` (so `rustc_codegen_ssa`, which depends on it, can share
+   it). Used where the two loaders read whole files: the rmeta path in
+   `rustc_metadata::locator::get_metadata_section` and
+   `rustc_codegen_ssa::back::metadata` (`load_metadata_with`). Only `.rmeta`
+   and `.rlib` files are cached; the key's length and mtime make a rebuilt
+   sysroot or dependency a miss. `rustc_data_structures` is not touched, so
+   the patch does not rebuild every compiler crate.
+
+Portability: rustc.wasm already imports `playground.spawn`, so it only runs
+under our hosts; two more host imports do not change that. Every host that
+instantiates rustc.wasm defines them (`cogwasm-runtime`), returning "no more
+requests" when serving is off.
+
+### Host: `cogwasm-host` and the supervisor
+
+3. **`ServeSession`** in the `cogwasm-host` library: a worker thread owns the
+   store and runs `_start` with `COGWASM_SERVE=1`. `next_request` blocks on a
+   channel for the next job; `finish` sends back the exit code, the timings
+   and that request's spawn records (the recorder is reset per request).
+   Dropping the session closes the channel, `next_request` returns 0 and the
+   guest returns from `main`.
+4. **Fallbacks:** a trap or `proc_exit` during a request fails that job with
+   the guest's message and the session is restarted for the next one. A
+   linear memory above a cap (default 1 GiB,
+   `COGWASM_SERVE_MAX_MEMORY_MB`) after a job also restarts it, to bound any
+   per-request leak. A rustc.wasm without the `cogwasm.next_request` import
+   (an older build) falls back to one instance per job.
+5. **`ResidentCompiler`** uses a `ServeSession` when the module supports it;
+   `COGWASM_SERVE=0` forces one instance per job (today's path, pooled).
+
+### Checks
+
+6. `edit-loop --verify-cold`: after each warm compile, compile the same
+   source in a fresh instance and require byte-identical output; CI runs it
+   on the fixture and on `json`. The one-shot CLI path (plugins, A.2,
+   difftest, bench, fuel) must be unchanged, and the fuel counts identical.
+7. Measure the fixture, `json` and plugin (c) on CI against today's numbers
+   (53.6 ms, ≈ 500 ms, ≈ 120–130 ms) and record them here.
+
+Order of work: the guest patch and a rustc.wasm rebuild first (locally, then
+CI's cold rebuild, since the patch series is in the compiler cache key), then
+the host session, then the supervisor and the CI checks.
+
+**Phase 1 status (2026-11-22):** implemented and working locally.
+
+- `0007-wasm-serve-loop.patch` (7 files): the guest request loop, the
+  metadata cache, and a fix found on the first end-to-end run: patch 0001
+  runs every session on the calling thread, so the worker-local `Registry` a
+  freshly spawned thread would start without stayed attached and the second
+  request panicked ("Thread already has a registry"). The registry's
+  thread-local is now detachable (`Registry::unregister_current_thread`) and
+  the wasm path detaches it when a session ends, also on unwind.
+- Host: `ServeSession` (`crates/cogwasm-host/src/serve.rs`), the serve hooks
+  in `cogwasm-runtime`, the supervisor's serving path with a per-job
+  fallback, `compile_cold` and `edit-loop --verify-cold`. CI's edit-loop now
+  runs with `--verify-cold`.
+- Local (macOS arm64), 10 edits each, every warm artifact byte-identical to a
+  cold compile:
+
+  | source | one instance per job | serving (one guest) |
+  | --- | ---: | ---: |
+  | fixture | 42.3 ms | **31.5 ms** (−26%) |
+  | `json` | 254.2 ms | **240.5 ms** (−5%) |
+
+  A fixed ≈ 11–14 ms per job, as predicted (no metadata read, no guest
+  start). CI numbers pending; the runner's read cost was larger (7–20 ms).
+- Not run locally (disk below the 15 GiB guard): the full CI script,
+  difftest and the fuel benchmark; CI runs them. The registry change is in
+  code the compiler executes, so compiler-fuel values may shift slightly from
+  405581528 / 806598433 / 458378659.
+
 ## Recommendation
 
 1. E1, A0, E2 and E4 are done (above). E4 found the real CI cost: WASI file

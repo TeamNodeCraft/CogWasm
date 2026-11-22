@@ -8,6 +8,7 @@
 pub mod compile;
 pub mod config;
 pub mod precompiled;
+pub mod serve;
 
 pub use compile::{
     compile, compile_args, rustc_args, CompileOutcome, CompileRequest, Compiler, Teardown,
@@ -19,3 +20,4 @@ pub use precompiled::{
     compatibility_hash_hex, load_rustc_module, metadata_sidecar, sha256_file, sha256_hex,
     wasmtime_version, ArtifactMetadata, FileInfo, LoadedModule, ModuleSource, TargetInfo,
 };
+pub use serve::{module_supports_serve, ServeSession};

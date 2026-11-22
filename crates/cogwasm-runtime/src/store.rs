@@ -7,6 +7,7 @@
 //! product host exactly.
 
 use crate::Wt;
+use crate::serve::{ServeHooks, add_serve_imports};
 use crate::spawn::{SpawnRecorder, add_playground_spawn};
 use anyhow::Result;
 use std::path::Path;
@@ -60,6 +61,8 @@ pub struct HostState<R: SpawnRecorder> {
     /// Peak-memory tracker installed only when [`StoreOptions::limits`] is set.
     pub limits: Limits,
     recorder: R,
+    /// Request/response channels when this store serves many compiles.
+    pub serve: Option<ServeHooks>,
 }
 
 impl<R: SpawnRecorder> HostState<R> {
@@ -69,7 +72,15 @@ impl<R: SpawnRecorder> HostState<R> {
             wasi,
             limits,
             recorder,
+            serve: None,
         }
+    }
+
+    /// Attach the serving channels, if this store should serve requests.
+    #[must_use]
+    pub fn with_serve(mut self, serve: Option<ServeHooks>) -> Self {
+        self.serve = serve;
+        self
     }
 
     /// The spawn recorder installed for this store.
@@ -83,7 +94,7 @@ impl<R: SpawnRecorder> HostState<R> {
 /// `StoreOptions::default()` is the product host's configuration: stderr is
 /// inherited, randomness and the clock come from the OS, and there is no fuel
 /// or resource limiter.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Default)]
 pub struct StoreOptions {
     /// Capture guest stderr into the returned [`PreparedInstance::stderr`]
     /// instead of inheriting the host's stderr.
@@ -106,6 +117,12 @@ pub struct StoreOptions {
     /// advancing clock (or a different host time zone) changes the fuel cost
     /// of the formatter. Timed runs keep the real clock and time zone.
     pub deterministic_clock: bool,
+    /// Extra environment variables for the guest, applied after the defaults.
+    pub env: Vec<(String, String)>,
+    /// Serve many requests from this one guest. When set, the store defines
+    /// `cogwasm.next_request` and `cogwasm.finish` around these channels;
+    /// when unset, the imported functions report that there are no requests.
+    pub serve: Option<ServeHooks>,
 }
 
 /// Wall-clock instant frozen for deterministic fuel runs:
@@ -205,6 +222,9 @@ pub fn prepare_instance<R: SpawnRecorder>(
     if let Ok(value) = std::env::var("CG_CLIF_WASM_STRICT") {
         wasi.env("CG_CLIF_WASM_STRICT", value);
     }
+    for (key, value) in &options.env {
+        wasi.env(key, value);
+    }
     // rustc sees the host filesystem at the same absolute paths, so the native
     // Wild process can consume the linker arguments unchanged.
     wasi.preopened_dir(Path::new("/"), "/", FsPerms::ReadWrite)
@@ -219,7 +239,10 @@ pub fn prepare_instance<R: SpawnRecorder>(
     wasi.allow_blocking_current_thread(true);
 
     let limits = options.limits.unwrap_or_default();
-    let mut store = Store::new(engine, HostState::new(wasi.build_p1(), limits, recorder));
+    let mut store = Store::new(
+        engine,
+        HostState::new(wasi.build_p1(), limits, recorder).with_serve(options.serve),
+    );
     if let Some(fuel) = options.fuel {
         store.set_fuel(fuel).wt("setting fuel")?;
     }
@@ -231,6 +254,7 @@ pub fn prepare_instance<R: SpawnRecorder>(
     p1::add_to_linker_sync(&mut linker, |state: &mut HostState<R>| &mut state.wasi)
         .wt("adding WASI p1 imports")?;
     add_playground_spawn(&mut linker, linker_path, log_prefix)?;
+    add_serve_imports(&mut linker)?;
     let instance = linker
         .instantiate(&mut store, module)
         .wt("instantiating rustc.wasm")?;
