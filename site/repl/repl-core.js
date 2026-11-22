@@ -19,10 +19,77 @@ import {
   PreopenDirectory,
 } from "./vendor/browser_wasi_shim/index.js";
 
+// The maths a no_std program lacks. core already has abs, min, max, clamp,
+// signum and copysign on f32; everything here comes from the page's Math as a
+// wasm import ("math" module) and is offered both as a free function,
+// floor(x), and as a method, x.floor(), the way std spells it. One table
+// drives the Rust prelude below and PROGRAM_IMPORTS.
+const MATH = [
+  // [Rust name, JS Math function, arity]
+  ["sin", "sin", 1], ["cos", "cos", 1], ["tan", "tan", 1],
+  ["asin", "asin", 1], ["acos", "acos", 1], ["atan", "atan", 1],
+  ["sinh", "sinh", 1], ["cosh", "cosh", 1], ["tanh", "tanh", 1],
+  ["sqrt", "sqrt", 1], ["cbrt", "cbrt", 1], ["exp", "exp", 1],
+  ["ln", "log", 1], ["log2", "log2", 1], ["log10", "log10", 1],
+  ["floor", "floor", 1], ["ceil", "ceil", 1], ["trunc", "trunc", 1],
+  ["atan2", "atan2", 2], ["powf", "pow", 2], ["hypot", "hypot", 2],
+];
+
+function preludeSource() {
+  // Two-argument functions take (y, x) for atan2 and (x, y) otherwise, as std does.
+  const params = (arity) => (arity === 1 ? "x: f32" : "x: f32, y: f32");
+  const args = (arity) => (arity === 1 ? "x" : "x, y");
+  const imports = MATH.map(([name, , arity]) =>
+    `            #[link_name = "${name}"]\n            pub fn ${name}(${params(arity)}) -> f32;`).join("\n");
+  const free = MATH.map(([name, , arity]) =>
+    `    pub fn ${name}(${params(arity)}) -> f32 { unsafe { host::${name}(${args(arity)}) } }`).join("\n");
+  const decl = MATH.map(([name, , arity]) =>
+    `        fn ${name}(self${arity === 2 ? ", y: f32" : ""}) -> f32;`).join("\n");
+  const impl = MATH.map(([name, , arity]) =>
+    `        fn ${name}(self${arity === 2 ? ", y: f32" : ""}) -> f32 { ${name}(self${arity === 2 ? ", y" : ""}) }`).join("\n");
+  return `// Glob-imported, so a function of the visitor's own with the same name wins.
+#[allow(unused_imports)]
+use __prelude::*;
+#[allow(dead_code)]
+mod __prelude {
+    #[allow(unused_imports)]
+    pub use core::f32::consts::{E, PI, TAU};
+    mod host {
+        #[link(wasm_import_module = "math")]
+        unsafe extern "C" {
+${imports}
+        }
+    }
+${free}
+    /// Rust's rounding: halfway cases away from zero.
+    pub fn round(x: f32) -> f32 { if x < 0.0 { -floor(0.5 - x) } else { floor(x + 0.5) } }
+    pub fn fract(x: f32) -> f32 { x - trunc(x) }
+    pub fn powi(x: f32, n: i32) -> f32 { powf(x, n as f32) }
+    pub fn abs(x: f32) -> f32 { x.abs() }
+    pub fn min(x: f32, y: f32) -> f32 { x.min(y) }
+    pub fn max(x: f32, y: f32) -> f32 { x.max(y) }
+    pub fn clamp(x: f32, lo: f32, hi: f32) -> f32 { x.clamp(lo, hi) }
+    pub fn lerp(a: f32, b: f32, t: f32) -> f32 { a + (b - a) * t }
+    /// The std f32 methods that no_std core lacks.
+    pub trait FloatMath {
+${decl}
+        fn round(self) -> f32;
+        fn fract(self) -> f32;
+        fn powi(self, n: i32) -> f32;
+    }
+    impl FloatMath for f32 {
+${impl}
+        fn round(self) -> f32 { round(self) }
+        fn fract(self) -> f32 { fract(self) }
+        fn powi(self, n: i32) -> f32 { powi(self, n) }
+    }
+}`;
+}
+
 // Appended after the visitor's code, so rustc's line numbers in errors match
-// the editor. The crate is `no_std` (passed as -Zcrate-attr), the page supplies
-// sin/cos/sqrt as wasm imports, and `frame` calls the visitor's `particle` for
-// every particle and returns a pointer to the positions.
+// the editor. The crate is \`no_std\` (passed as -Zcrate-attr), the maths
+// prelude above stands in for std's f32 functions, and \`frame\` calls the
+// visitor's \`particle\` for every particle and returns the positions.
 export const HARNESS = `
 
 // ---- appended by the page ------------------------------------------------
@@ -30,23 +97,7 @@ export const HARNESS = `
 fn __panic(_: &core::panic::PanicInfo) -> ! {
     core::arch::wasm32::unreachable()
 }
-#[allow(unused_imports)]
-use core::f32::consts::{PI, TAU};
-#[link(wasm_import_module = "math")]
-unsafe extern "C" {
-    #[link_name = "sin"]
-    fn __sin(x: f32) -> f32;
-    #[link_name = "cos"]
-    fn __cos(x: f32) -> f32;
-    #[link_name = "sqrt"]
-    fn __sqrt(x: f32) -> f32;
-}
-#[allow(dead_code)]
-fn sin(x: f32) -> f32 { unsafe { __sin(x) } }
-#[allow(dead_code)]
-fn cos(x: f32) -> f32 { unsafe { __cos(x) } }
-#[allow(dead_code)]
-fn sqrt(x: f32) -> f32 { unsafe { __sqrt(x) } }
+${preludeSource()}
 const __MAX: usize = 4096;
 static mut __POSITIONS: [f32; 2 * __MAX] = [0.0; 2 * __MAX];
 #[unsafe(no_mangle)]
@@ -184,7 +235,7 @@ export class Compiler {
   }
 }
 
-// What the compiled program imports: the page's maths.
+// What the compiled program imports: the page's maths, per the MATH table.
 export const PROGRAM_IMPORTS = {
-  math: { sin: Math.sin, cos: Math.cos, sqrt: Math.sqrt },
+  math: Object.fromEntries(MATH.map(([name, js]) => [name, Math[js]])),
 };

@@ -58,6 +58,29 @@ for (const pass of [1, 2]) {
   for (const example of EXAMPLES) check(`${example.name}${pass === 2 ? "*" : ""}`, example.source);
 }
 
+// The maths prelude: std's f32 functions as free functions and as methods,
+// Rust's rounding, and a visitor's own function shadowing a prelude one.
+{
+  const source = `fn min(a: f32, b: f32) -> f32 { if a < b { a } else { b } }
+fn particle(i: f32, n: f32, t: f32) -> (f32, f32) {
+    let h = 2.75f32;
+    let x = floor(h) + h.fract() + round(-2.5) + h.floor() + min(1.0, 2.0) + (-3.0f32).abs();
+    let y = atan2(1.0, 1.0) * 4.0 + 0.0 * (i + n + t) + powf(2.0, 3.0) + 2.0f32.powi(2) + E.ln();
+    (x, y)
+}
+`;
+  const result = compiler.compile(source);
+  if (!result.ok) fail(`the maths prelude program did not compile:\n${result.stderr}`);
+  else {
+    if (result.stderr.trim()) fail(`the maths prelude program has warnings:\n${result.stderr}`);
+    const { exports } = new WebAssembly.Instance(new WebAssembly.Module(result.wasm), PROGRAM_IMPORTS);
+    const [x, y] = new Float32Array(exports.memory.buffer, exports.frame(1, 0), 2);
+    const close = (a, b) => Math.abs(a - b) < 1e-4;
+    if (!close(x, 5.75) || !close(y, Math.PI + 13)) fail(`maths prelude gave (${x}, ${y}), expected (5.75, ${Math.PI + 13})`);
+    else console.log("prelude    floor/fract/round/atan2/powf/powi/ln, methods and shadowing  ok");
+  }
+}
+
 // A type error must fail with rustc's message, pointing at the visitor's line.
 const broken = "fn particle(i: f32, n: f32, t: f32) -> (f32, f32) {\n    (i, \"no\")\n}\n";
 const result = compiler.compile(broken);
