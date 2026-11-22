@@ -136,6 +136,19 @@ paying the module load each time; the in-process path
        rustc inside the guest. Next for Goal 2 is cutting rustc.wasm's
        per-invocation set-up (snapshot after session/prelude load), not G2.2.
 
+### G2.3. Warm rustc session across compiles (L, design first)
+
+Profiling (`docs/notes/supervisor.md`, "Fixed versus per-source cost") shows
+~90% of a small compile is fixed per invocation: ≈ 19 ms loading sysroot
+crate metadata, ≈ 8 ms session floor, ≈ 8 ms link (macOS; ×4.2 on the CI
+runner, where the edit is 174 ms against the 100 ms target).
+
+1. [ ] Design note: how a guest keeps one session's crate store warm across
+       compiles (driver loop over WASI vs. snapshotting an instance after
+       sysroot load; what query/incremental state must be reset per request).
+2. [ ] Prototype the cheapest variant and measure with `edit-loop`.
+3. [ ] Acceptance: CI edit → result under 100 ms; difftest green.
+
 ### G1.1. Finish step 5b: SROA / mem2reg after the inliner (L)
 
 The cost-model inliner (patch `0006`) and the opt-in loop-field hoist

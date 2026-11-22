@@ -304,6 +304,57 @@ prelude/std loading measured earlier), which the Goal 2 snapshot work
 targets, and the compile itself (G1.1 and a smaller rustc.wasm, G2.2, help
 less directly).
 
+### Fixed versus per-source cost inside rustc.wasm
+
+Profiled on 2026-11-22 (macOS arm64, `cogwasm-host raw` with the precompiled
+module, `-Copt-level=2`, `-Ztime-passes -Ztime-passes-format=json`, median of
+five). An empty `#![no_std]` cdylib (just a panic handler) is compared with the
+edit-loop fixture:
+
+| pass | empty crate | fixture |
+| --- | ---: | ---: |
+| `macro_expand_crate` | 8.8 ms | 8.9 ms |
+| `resolve_crate` | 10.2 ms | 10.4 ms |
+| type check, borrowck, mono, codegen | ≈ 5 ms | ≈ 8 ms |
+| `link` (of which the Wild spawn) | 7.8 ms (4.6) | 7.9 ms (4.5) |
+| **rustc `total`** | **37.2 ms** | **41.4 ms** |
+
+The source being compiled is worth about **4 ms of 41 (10%)**; the remaining
+~37 ms is paid identically by an empty crate on every invocation.
+
+Where the fixed cost goes, from two more metadata-only runs (`--crate-type lib
+--emit=metadata`):
+
+| crate | `macro_expand_crate` | `resolve_crate` | `total` |
+| --- | ---: | ---: | ---: |
+| `#![no_core]` | 0.1 ms | 0.4 ms | 7.9 ms |
+| `#![no_std]` | 8.2 ms | 2.7 ms | 18.6 ms |
+
+So, of the ~37 ms fixed cost:
+
+- **≈ 19 ms (≈ 50%) is loading the sysroot crates' metadata**: decoding
+  `core` and building its prelude/module tree during expansion, plus the
+  further loading a cdylib triggers in late resolution (compiler_builtins and
+  link-time metadata).
+- **≈ 8 ms is the link step**: the Wild subprocess (4.6 ms) and ~3 ms of
+  rustc-side link preparation.
+- **≈ 8 ms is the session floor** (a `no_core` crate's whole front end), plus
+  ~3 ms outside rustc's `total` (guest start-up, argument and target set-up).
+
+CI runs the same work about 4.2× slower (≈ 170 ms build per edit). If the
+proportions hold, removing the crate-loading cost alone brings the CI edit to
+roughly 95 ms; also removing the session floor brings it to roughly 60 ms.
+
+What that means for the Goal 2 snapshot design: a Wasmtime-level snapshot of
+a fresh guest (memory image taken before `main`) skips only the guest
+start-up (the ~3 ms). The ~27 ms worth removing lives inside one rustc
+session (`CStore` and the crate metadata are owned by the session/`TyCtxt`), so
+it needs a guest that stays alive across compiles: a patched driver that
+creates the session and loads the sysroot crates once, then serves compile
+requests (new source text, same options) from that warm state, with the host
+snapshotting or reusing that instance. That is a rustc patch, not a host
+change, and it is the next Goal 2 item (G2.3 in `agents/plans/next-steps.md`).
+
 ## State across a swap (M4)
 
 A stateful plugin exports four things beside `run`:
