@@ -143,9 +143,14 @@ Profiling (`docs/notes/supervisor.md`, "Fixed versus per-source cost") shows
 crate metadata, ≈ 8 ms session floor, ≈ 8 ms link (macOS; ×4.2 on the CI
 runner, where the edit is 174 ms against the 100 ms target).
 
-1. [ ] Design note: how a guest keeps one session's crate store warm across
+1. [x] Design note: how a guest keeps one session's crate store warm across
        compiles (driver loop over WASI vs. snapshotting an instance after
        sysroot load; what query/incremental state must be reset per request).
+       Drafted in `docs/notes/warm-session.md`: options A (long-lived guest +
+       metadata cache), C (warm session template), D (cheaper fixed work,
+       in-process Wild); experiments E1–E4 decide between them.
+1a. [ ] Run E1 (is crate loading mostly the 45 MB `libcore.rmeta` read?),
+        E2 (memory size / restore cost), E4 (per-pass ratio on CI).
 2. [ ] Prototype the cheapest variant and measure with `edit-loop`.
 3. [ ] Acceptance: CI edit → result under 100 ms; difftest green.
 
