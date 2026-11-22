@@ -72,9 +72,54 @@
       <h1 id="intro-title">CogWasm</h1>
       <p class="lede">rustc, built as a WebAssembly module that compiles Rust to WebAssembly, with no LLVM inside.</p>
       <p class="intro-links">
-        <a class="button" href="#try-it">Try it live</a>
         <a class="button button-quiet" href="#benchmarks">Benchmarks</a>
       </p>
+    </div>
+  </section>
+
+  <section class="container section repl" id="try-it" aria-labelledby="repl-title">
+    <div class="repl-intro">
+      <p class="repl-kicker"><span class="repl-dot" aria-hidden="true"></span>Live: compiled in your browser</p>
+      <h2 id="repl-title">Edit Rust. Watch it run.</h2>
+      <p>This is not a recording. The code below is compiled by <code>rustc.wasm</code> and linked by Wild, both running as WebAssembly inside this page, with no server. Every edit is recompiled and swapped into the running program, which keeps its state.</p>
+    </div>
+    <noscript><p class="repl-noscript">The live compiler needs JavaScript. The same pipeline runs from the command line: see the <a href="https://github.com/TeamNodeCraft/CogWasm/blob/main/README.md">README</a>.</p></noscript>
+    <div class="repl-grid" hidden>
+      <div class="repl-card">
+        <div class="repl-bar">
+          <span class="repl-file">src/particles.rs</span>
+          <span class="repl-badge" id="repl-status" aria-live="polite">not loaded</span>
+        </div>
+        <div class="repl-examples" role="group" aria-label="Example programs"></div>
+        <div class="repl-editor">
+          <pre class="repl-gutter" aria-hidden="true"></pre>
+          <pre class="repl-highlight" aria-hidden="true"><code></code></pre>
+          <textarea class="repl-input" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Rust source of particle(), recompiled as you type" aria-describedby="repl-help"></textarea>
+        </div>
+        <p class="repl-help" id="repl-help">The program is <code>no_std</code>; std's float maths is provided as functions and methods (<code>floor(x)</code> or <code>x.floor()</code>, <code>sin</code>, <code>atan2</code>, <code>powf</code>, <code>fract</code>, <code>lerp</code>&hellip;) with <code>PI</code>, <code>TAU</code> and <code>E</code>. Edits rebuild after a short pause; <kbd>Ctrl</kbd>/<kbd>⌘</kbd>&nbsp;+&nbsp;<kbd>Enter</kbd> rebuilds now.</p>
+        <pre class="repl-output" id="repl-output" aria-live="polite" hidden></pre>
+      </div>
+      <div class="repl-card repl-stage-card">
+        <div class="repl-bar">
+          <span class="repl-file">running program</span>
+          <button type="button" class="repl-pause" aria-pressed="false">Pause</button>
+        </div>
+        <div class="repl-stage">
+          <canvas class="repl-canvas" role="img" aria-label="Particles placed each frame by the compiled particle function"></canvas>
+          <div class="repl-overlay">
+            <button type="button" class="button repl-load">Load the compiler</button>
+            <p class="repl-load-note">Downloads <span class="repl-size">about 40&nbsp;MB</span> (rustc, the Wild linker and <code>core</code>, as WebAssembly) and compiles everything here, in your browser.</p>
+            <div class="repl-progress" hidden><div class="repl-progress-bar"></div></div>
+          </div>
+        </div>
+        <dl class="repl-stats">
+          <div><dt>Compile</dt><dd data-stat="compile">&ndash;</dd></div>
+          <div><dt>Link</dt><dd data-stat="link">&ndash;</dd></div>
+          <div><dt>Swap</dt><dd data-stat="swap">&ndash;</dd></div>
+          <div><dt>Edits</dt><dd data-stat="edits">0</dd></div>
+          <div><dt>Frames, no restart</dt><dd data-stat="frames">0</dd></div>
+        </dl>
+      </div>
     </div>
   </section>
 
@@ -86,52 +131,6 @@
       <li><strong>Sandboxed compile services and playgrounds.</strong> Compile in a sandbox the host controls, including in the browser.</li>
       <li><strong>Platforms without a native toolchain.</strong> Compile Rust where installing one is not possible or not wanted.</li>
     </ul>
-
-    <div class="repl" id="try-it" aria-labelledby="repl-title">
-      <div class="repl-intro">
-        <p class="repl-kicker"><span class="repl-dot" aria-hidden="true"></span>Live: compiled in your browser</p>
-        <h3 id="repl-title">Edit Rust. Watch it run.</h3>
-        <p>This is not a recording. The code below is compiled by <code>rustc.wasm</code> and linked by Wild, both running as WebAssembly inside this page, with no server. Every edit is recompiled and swapped into the running program, which keeps its state.</p>
-      </div>
-      <noscript><p class="repl-noscript">The live compiler needs JavaScript. The same pipeline runs from the command line: see the <a href="https://github.com/TeamNodeCraft/CogWasm/blob/main/README.md">README</a>.</p></noscript>
-      <div class="repl-grid" hidden>
-        <div class="repl-card">
-          <div class="repl-bar">
-            <span class="repl-file">src/particles.rs</span>
-            <span class="repl-badge" id="repl-status" aria-live="polite">not loaded</span>
-          </div>
-          <div class="repl-examples" role="group" aria-label="Example programs"></div>
-          <div class="repl-editor">
-            <pre class="repl-gutter" aria-hidden="true"></pre>
-            <pre class="repl-highlight" aria-hidden="true"><code></code></pre>
-            <textarea class="repl-input" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Rust source of particle(), recompiled as you type" aria-describedby="repl-help"></textarea>
-          </div>
-          <p class="repl-help" id="repl-help">The program is <code>no_std</code>; std's float maths is provided as functions and methods (<code>floor(x)</code> or <code>x.floor()</code>, <code>sin</code>, <code>atan2</code>, <code>powf</code>, <code>fract</code>, <code>lerp</code>&hellip;) with <code>PI</code>, <code>TAU</code> and <code>E</code>. Edits rebuild after a short pause; <kbd>Ctrl</kbd>/<kbd>⌘</kbd>&nbsp;+&nbsp;<kbd>Enter</kbd> rebuilds now.</p>
-          <pre class="repl-output" id="repl-output" aria-live="polite" hidden></pre>
-        </div>
-        <div class="repl-card repl-stage-card">
-          <div class="repl-bar">
-            <span class="repl-file">running program</span>
-            <button type="button" class="repl-pause" aria-pressed="false">Pause</button>
-          </div>
-          <div class="repl-stage">
-            <canvas class="repl-canvas" role="img" aria-label="Particles placed each frame by the compiled particle function"></canvas>
-            <div class="repl-overlay">
-              <button type="button" class="button repl-load">Load the compiler</button>
-              <p class="repl-load-note">Downloads <span class="repl-size">about 40&nbsp;MB</span> (rustc, the Wild linker and <code>core</code>, as WebAssembly) and compiles everything here, in your browser.</p>
-              <div class="repl-progress" hidden><div class="repl-progress-bar"></div></div>
-            </div>
-          </div>
-          <dl class="repl-stats">
-            <div><dt>Compile</dt><dd data-stat="compile">&ndash;</dd></div>
-            <div><dt>Link</dt><dd data-stat="link">&ndash;</dd></div>
-            <div><dt>Swap</dt><dd data-stat="swap">&ndash;</dd></div>
-            <div><dt>Edits</dt><dd data-stat="edits">0</dd></div>
-            <div><dt>Frames, no restart</dt><dd data-stat="frames">0</dd></div>
-          </dl>
-        </div>
-      </div>
-    </div>
 
     <h3>Priorities</h3>
     <ol class="priorities">

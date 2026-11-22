@@ -932,7 +932,6 @@ html.js .theme-toggle {
   --tok-string: light-dark(#2f7d32, #8fd694);
   --tok-comment: var(--muted);
   --tok-const: light-dark(#a3550f, #f5c542);
-  margin: 2.2rem 0 0.5rem;
 }
 
 .repl-intro {
@@ -960,9 +959,9 @@ html.js .theme-toggle {
   box-shadow: 0 0 0 0.25rem light-dark(rgba(242, 116, 18, 0.18), rgba(242, 116, 18, 0.28));
 }
 
-.repl-intro h3 {
+.repl-intro h2 {
   margin: 0 0 0.5rem;
-  font-size: clamp(1.35rem, 2.6vw, 1.7rem);
+  font-size: clamp(1.5rem, 3vw, 1.9rem);
   font-weight: 650;
 }
 
