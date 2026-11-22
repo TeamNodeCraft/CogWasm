@@ -68,7 +68,9 @@ ${free}
     pub fn abs(x: f32) -> f32 { x.abs() }
     pub fn min(x: f32, y: f32) -> f32 { x.min(y) }
     pub fn max(x: f32, y: f32) -> f32 { x.max(y) }
-    pub fn clamp(x: f32, lo: f32, hi: f32) -> f32 { x.clamp(lo, hi) }
+    /// Not core's f32::clamp: its assert formats floats into a panic message,
+    /// which links about 110 KB of float formatting into every program.
+    pub fn clamp(x: f32, lo: f32, hi: f32) -> f32 { if x < lo { lo } else if x > hi { hi } else { x } }
     pub fn lerp(a: f32, b: f32, t: f32) -> f32 { a + (b - a) * t }
     /// The std f32 methods that no_std core lacks.
     pub trait FloatMath {
