@@ -132,30 +132,65 @@ pub struct StoreOptions {
 /// Most directories [`guest_preopens`] preopens; the rest go through `/`.
 const MAX_EXTRA_PREOPENS: usize = 32;
 
-/// The directories to preopen for a guest besides `/`: `extra`, then each
-/// absolute path in `args` (a whole argument, or the value after `=` as in
-/// `-Cincremental=/dir` or `--extern name=/lib.rlib`) that is a directory, or
-/// whose parent is, so an output file not written yet still counts. Each must
-/// be an existing directory, and only
-/// plain absolute paths (no `.` or `..`) qualify, since wasi-libc matches a
-/// preopen by its literal components.
+/// The directories to preopen for a guest besides `/`: `extra`, then the
+/// directories rustc treats as roots it only joins names onto, read from the
+/// flags in `args`: `--sysroot`, `--out-dir`, `-L` (after any `kind=`), the
+/// incremental directory (`-C incremental=`), and the directory of `-o` and of
+/// each `--extern` file.
+///
+/// Source directories are never preopened, and neither is any root that
+/// contains an input source file. wasi-libc picks a preopen by the longest
+/// literal prefix of a path and Wasmtime refuses a path that climbs out of
+/// its preopen, so `src/../../stdarch/mod.rs` (core's `#[path]` modules) fails
+/// with "permission denied" if `src`, or any directory under the path's
+/// climb, is a preopen. Through `/` it resolves as on any host.
+///
+/// Each directory must exist, be absolute and contain no `.` or `..`.
 fn guest_preopens(args: &[String], extra: &[PathBuf]) -> Vec<PathBuf> {
-    let from_args = args.iter().filter_map(|arg| {
-        let value = match arg.find("=/") {
-            Some(index) if !arg.starts_with('/') => &arg[index + 1..],
-            _ => arg.as_str(),
+    let mut roots: Vec<PathBuf> = Vec::new();
+    let mut sources: Vec<&Path> = Vec::new();
+    let parent = |value: &str| Path::new(value).parent().map(Path::to_path_buf);
+    let mut index = 1; // argv[0] is the program name
+    while index < args.len() {
+        let arg = args[index].as_str();
+        let next = args.get(index + 1).map(String::as_str);
+        let mut take = |flag: &str| -> Option<&str> {
+            if arg == flag {
+                index += 1;
+                next
+            } else {
+                arg.strip_prefix(flag)
+                    .map(|rest| rest.strip_prefix('=').unwrap_or(rest))
+                    .filter(|rest| !rest.is_empty())
+            }
         };
-        let path = Path::new(value);
-        if path.is_dir() {
-            Some(path.to_path_buf())
-        } else {
-            path.parent()
-                .filter(|parent| parent.is_dir())
-                .map(Path::to_path_buf)
+        if let Some(value) = take("--sysroot").or_else(|| take("--out-dir")) {
+            roots.push(PathBuf::from(value));
+        } else if let Some(value) = take("--extern") {
+            roots.extend(value.split_once('=').and_then(|(_, file)| parent(file)));
+        } else if let Some(value) = take("-L") {
+            let dir = match value.split_once('=') {
+                Some((kind, dir))
+                    if ["dependency", "crate", "native", "framework", "all"].contains(&kind) =>
+                {
+                    dir
+                }
+                _ => value,
+            };
+            roots.push(PathBuf::from(dir));
+        } else if let Some(value) = take("-C").or_else(|| take("--codegen")) {
+            roots.extend(value.strip_prefix("incremental=").map(PathBuf::from));
+        } else if let Some(value) = take("-o") {
+            roots.extend(parent(value));
+        } else if !arg.starts_with('-') && Path::new(arg).extension().is_some_and(|ext| ext == "rs")
+        {
+            sources.push(Path::new(arg));
         }
-    });
+        index += 1;
+    }
+
     let mut dirs: Vec<PathBuf> = Vec::new();
-    for dir in extra.iter().cloned().chain(from_args) {
+    for dir in extra.iter().cloned().chain(roots) {
         let plain = dir.is_dir()
             && dir.is_absolute()
             && dir
@@ -163,7 +198,8 @@ fn guest_preopens(args: &[String], extra: &[PathBuf]) -> Vec<PathBuf> {
                 .skip(1)
                 .all(|part| matches!(part, Component::Normal(_)))
             && dir.components().count() > 1;
-        if plain && !dirs.contains(&dir) && dirs.len() < MAX_EXTRA_PREOPENS {
+        let holds_a_source = sources.iter().any(|source| source.starts_with(&dir));
+        if plain && !holds_a_source && !dirs.contains(&dir) && dirs.len() < MAX_EXTRA_PREOPENS {
             dirs.push(dir);
         }
     }
@@ -329,31 +365,41 @@ mod tests {
     use crate::SummaryRecorder;
 
     #[test]
-    fn preopens_come_from_absolute_argument_paths() {
+    fn preopens_are_rustc_roots_not_source_directories() {
         let root = tempfile::tempdir().expect("temp dir");
         let base = root.path().canonicalize().expect("canonical temp dir");
-        let sysroot = base.join("sysroot");
-        let inc = base.join("inc");
-        let src = base.join("src");
-        for dir in [&sysroot, &inc, &src, &base.join("extra")] {
-            std::fs::create_dir(dir).expect("create dir");
+        for dir in [
+            "sysroot", "inc", "src", "out", "deps", "native", "extra", "work",
+        ] {
+            std::fs::create_dir(base.join(dir)).expect("create dir");
         }
-        let at = |path: &Path| path.display().to_string();
+        let at = |name: &str| base.join(name).display().to_string();
         let args = vec![
             "rustc".to_owned(),
-            at(&src.join("lib.rs")), // a file: its directory
+            format!("{}/lib.rs", at("src")), // a source: its directory is never a root
             "--sysroot".to_owned(),
-            at(&sysroot),                          // a directory
-            format!("-Cincremental={}", at(&inc)), // the value after `=`
+            at("sysroot"),
+            format!("-Cincremental={}", at("inc")),
             "-o".to_owned(),
-            at(&base.join("missing").join("out.wasm")), // parent missing: skipped
-            "relative/dir".to_owned(),                  // not absolute: skipped
-            format!("{}/../sysroot", at(&src)),         // `..`: skipped
-            at(&sysroot),                               // duplicate: once
+            format!("{}/out.wasm", at("out")), // the output's directory
+            "-L".to_owned(),
+            format!("dependency={}", at("deps")), // after the kind
+            format!("-L{}", at("native")),        // attached form
+            "--extern".to_owned(),
+            format!("dep={}/libdep.rlib", at("deps")), // duplicate root: once
+            "-Clinker=/usr/bin/wild".to_owned(),       // not a root
+            at("work"),                                // a bare directory: not a root
+            "--out-dir".to_owned(),
+            format!("{}/missing", at("out")), // does not exist: skipped
         ];
-        let extra = vec![base.join("extra"), base.join("gone")]; // gone: skipped
+        // `extra` is kept, except a directory that holds an input source.
+        let extra = vec![base.join("extra"), base.clone()];
         let dirs = guest_preopens(&args, &extra);
-        assert_eq!(dirs, vec![base.join("extra"), src, sysroot, inc]);
+        let expected: Vec<PathBuf> = ["extra", "sysroot", "inc", "out", "deps", "native"]
+            .iter()
+            .map(|name| base.join(name))
+            .collect();
+        assert_eq!(dirs, expected);
     }
 
     /// A one-page module whose `_start` calls `clock_time_get` for the wall

@@ -666,6 +666,20 @@ green), serving guest edit → result: `collections` 182.7 → 145.9 ms,
 −25%); the small fixture 24.6 → 20.8 ms. Linux gains about as much as macOS,
 so the per-component cost is not only cap-std's manual walk.
 
+**Correction (run 45025292229).** The first version also preopened each
+source file's directory, and the first cold CI build after it failed to
+build `core`: core's `#[path]` modules open
+`library/core/src/../../stdarch/...`, wasi-libc matched that path to the
+`library/core/src` preopen by its literal prefix, and Wasmtime refused the
+climb out of the preopen ("permission denied"). Warm runs had reused the
+cached sysroot, so they never compiled core. Preopens now come only from the
+directories rustc uses as roots it joins names onto (`--sysroot`,
+`--out-dir`, `-L`, `-C incremental=`, and the directories of `-o` and of
+`--extern` files), never a source directory nor any root that contains an
+input source; `/` resolves everything else as before. A `#[path =
+"../../shared/x.rs"]` module reproduced the failure and now builds, and the
+pure sysroot builds again.
+
 ## Recommendation
 
 1. E1, A0, E2 and E4 are done (above). E4 found the real CI cost: WASI file
