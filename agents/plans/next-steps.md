@@ -236,6 +236,27 @@ publishes results; add a generated table between markers in `README.md`
       `allow-needs-expect` in the difftest corpus).
 - [ ] Switch `review-scan.sh --strict` on in `quality.yml`.
 
+### G2.4. The live REPL's fast path (M)
+
+The site's REPL (`site/repl/`) compiles every edit with a fresh `rustc.wasm`
+instance and no incremental cache (about 50 ms per small edit once V8 has
+warmed up). In order:
+
+1. Incremental: give `repl-core.js` a stable `-Cincremental` directory per
+   program in the worker's in-memory filesystem, kept across edits; the smoke
+   test checks each edit against a cold compile. Plain workers, so GitHub
+   Pages needs nothing new.
+2. Persistent rustc: run the serving loop in the worker so one instance and
+   its metadata cache survive edits. `cogwasm.next_request` must block
+   between edits: `Atomics.wait` on a `SharedArrayBuffer` (needs
+   cross-origin isolation; on GitHub Pages a service worker adds the headers,
+   as the in-browser playground's `coi-sw.js` does) or JS Promise
+   Integration. Keep the fresh-instance path as the fallback.
+3. Tier 2 in the browser: fast build swapped in at once, the optimising build
+   in a second worker swapped in after, both timings shown, with a
+   compute-heavy example. Depends on the native tier 2 being measurably
+   faster (G1.1 and the roadmap's Tier 2 row).
+
 ### G2.2. Smaller `rustc.wasm` (M)
 
 Drop Clippy, rustfmt and unused targets from `compiler/bootstrap.toml`.
