@@ -48,4 +48,34 @@ fn particle(i: f32, n: f32, t: f32) -> (f32, f32) {
 }
 `,
   },
+  {
+    name: "Wobbly",
+    source: `fn particle(i: f32, n: f32, t: f32) -> (f32, f32) {
+    let side = sqrt(n);
+    let col = i % side;
+    let row = (i - col) / side;
+
+    let x = col / side * 1.8 - 0.9;
+    let y = row / side * 1.8 - 0.9;
+    let r = sqrt(x * x + y * y);
+
+    // Strong near the centre, fading toward the edges.
+    let falloff = 1.0 / (1.0 + r * 3.0);
+    let twist = 1.8 * falloff * sin(t * 1.4 - r * 8.0);
+
+    let sx = x * cos(twist) - y * sin(twist);
+    let sy = x * sin(twist) + y * cos(twist);
+
+    // Two travelling waves interfere across the twisted field.
+    let wave_a = sin(sx * 8.0 + sy * 3.0 - t * 2.5);
+    let wave_b = sin(sy * 10.0 - sx * 4.0 + t * 1.8);
+    let rings = sin(r * 24.0 - t * 4.0) * falloff;
+
+    let out_x = sx + 0.035 * wave_b;
+    let out_y = sy + 0.035 * wave_a + 0.035 * rings;
+
+    (out_x, out_y)
+}
+`,
+  },
 ];
