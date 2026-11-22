@@ -124,7 +124,9 @@ halved (171–363 → 101–179 ms; CI 191–323 ms) once edits reused rustc's i
 which a cache-key bug had been discarding on every edit. The swap's native
 compile of the output then went from 18–53 to 2–5 ms (parallel compilation
 plus Wasmtime's incremental cache), so these edits are now 86–134 ms locally
-and almost all rustc's incremental rebuild; see
+and almost all rustc's incremental rebuild. Preopening the directories the guest
+uses (instead of only `/`) made its file calls 3–7× cheaper: on CI these edits
+are now 113–146 ms (small fixture 20.8 ms); see
 [supervisor.md](../docs/notes/supervisor.md) and
 [warm-session.md](../docs/notes/warm-session.md).
 

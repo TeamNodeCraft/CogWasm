@@ -658,9 +658,13 @@ matching preopen, so `/` still covers everything else.
 Edit loop, A/B interleaved on a loaded machine (load ≈ 18), serving guest,
 edit → result: `collections` 147 → 117 ms, `json` 150 → 97 ms. With the
 change, on a machine at load ≈ 13: `expr` 75 ms, `scene` 81 ms, `json`
-94 ms, `collections` 154 ms (noisy), all byte-identical. The gain on the
-Linux CI runner may be smaller: cap-std can resolve a whole path with one
-`openat2` there.
+94 ms, `collections` 154 ms (noisy), all byte-identical.
+
+**CI runner** (run 45019526253, `5b9113b`; all byte-identical, difftest
+green), serving guest edit → result: `collections` 182.7 → 145.9 ms,
+`json` 165.1 → 131.6, `scene` 151.0 → 113.4, `expr` 145.6 → 114.5 (−20 to
+−25%); the small fixture 24.6 → 20.8 ms. Linux gains about as much as macOS,
+so the per-component cost is not only cap-std's manual walk.
 
 ## Recommendation
 
