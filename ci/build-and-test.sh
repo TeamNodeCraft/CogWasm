@@ -209,6 +209,15 @@ python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); load=r["module_load
 step "edit -> result, plugin-sized sources (serving vs per job)"
 "$CI_DIR/edit-loop-sources.sh"
 
+# The site's live REPL runs this same rustc.wasm, with a single-threaded
+# wild.wasm as its linker, inside the visitor's browser (site/repl/). Package
+# those assets (cranelift_wasm.yml publishes them on main) and check them in
+# Node, whose V8 is Chrome's: every example compiles and runs, and a type error
+# is reported at the visitor's line.
+step "in-browser REPL compiler (rustc.wasm + wild.wasm in V8)"
+"$CI_DIR/build-repl-assets.sh" "$TOOL/work/repl-assets"
+node --stack-size=8000 "$REPO/site/repl/tests/smoke.mjs" "$TOOL/work/repl-assets"
+
 # Differential test: the same 48 no_std+alloc corpus programs plus 24 seeded
 # random programs are compiled by LLVM rustc and by rustc.wasm+cg_clif, run in
 # Wasmtime, and compared bit-for-bit (u64 return + output buffer). A trap in

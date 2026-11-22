@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CogWasm <cogwasm@example.invalid>
+Date: Sun, 22 Nov 2026 23:30:00 +1030
+Subject: [PATCH] wasm32-wasip1: run the thread pool on the current thread
+
+Wild always lets Rayon spawn its pool's workers, even for --no-threads. On
+wasm32-wasip1 (no wasm threads) spawning a thread fails with ENOTSUP, so a
+Wild built for that target exits before reading any input.
+
+When the target has no atomics, build a one-thread pool that uses the current
+thread instead. Nothing else owns the thread there, which is the case the
+existing comment guards against. Native and wasm32-wasip1-threads builds are
+unchanged. CogWasm's in-browser REPL runs this build of Wild as rustc.wasm's
+linker inside a Web Worker.
+---
+diff --git a/libwild/src/args.rs b/libwild/src/args.rs
+index b21f68ee..79d7261d 100644
+--- a/libwild/src/args.rs
++++ b/libwild/src/args.rs
+@@ -504,9 +504,20 @@ impl CommonArgs {
+         // Always let Rayon spawn the pool's workers, even when only one thread is requested.
+         // Reusing the current thread would fail if it already belonged to another pool; instead,
+         // it blocks in `install` until linking finishes.
++        #[cfg(not(all(target_family = "wasm", not(target_feature = "atomics"))))]
+         let pool = ThreadPoolBuilder::new()
+             .num_threads(self.available_threads.get())
+             .build()?;
++        // Without wasm threads (wasm32-wasip1) no worker can be spawned, so the
++        // pool is the current thread alone; nothing else owns it there.
++        #[cfg(all(target_family = "wasm", not(target_feature = "atomics")))]
++        let pool = {
++            self.available_threads = NonZeroUsize::new(1).unwrap();
++            ThreadPoolBuilder::new()
++                .num_threads(1)
++                .use_current_thread()
++                .build()?
++        };
+ 
+         Ok(ThreadPool {
+             pool,

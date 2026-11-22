@@ -85,6 +85,21 @@ jobs:
             echo "::warning::bench-history release does not exist yet; the page will show no data"
           fi
 
+      # The live REPL's compiler (rustc.wasm, wild.wasm, sysroot, manifest.json)
+      # comes from the `repl` release that cranelift_wasm publishes on main.
+      # Without it the page says the compiler is not published yet.
+      - name: Download the REPL compiler
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p public/repl/assets
+          if gh release view repl >/dev/null 2>&1; then
+            gh release download repl --dir public/repl/assets --clobber
+            ls -l public/repl/assets
+          else
+            echo "::warning::the repl release does not exist yet; the live REPL will say so"
+          fi
+
       # Enabling Pages is a repository setting, not something this workflow may
       # change. Fail with an actionable message instead of letting
       # actions/configure-pages fail with a generic error.

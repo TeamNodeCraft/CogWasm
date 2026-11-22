@@ -282,6 +282,16 @@ jobs:
           bash bench/scripts/publish-history.sh "$json"
           bash bench/scripts/build-chart.sh
 
+      # The site's live REPL downloads this run's rustc.wasm, wild.wasm and
+      # sysroot (packaged and checked by ci/build-and-test.sh) from the `repl`
+      # release; deploy_pages.yml copies them into the site after this run.
+      - name: publish the in-browser REPL compiler
+        if: success() && github.ref == 'refs/heads/main' && github.event.inputs.mir_hoist != 'true' && github.event.inputs.inline_wasm != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: bash ci/publish-repl-assets.sh toolchain/work/repl-assets
+
       # The full log is published even when the build fails, and the log
       # helper above adds ::error annotations for the interesting lines.
       - name: publish build log

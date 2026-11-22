@@ -14,10 +14,17 @@ The Benchmarks section's interactive chart is ``bench/chart/chart.js`` and
 and the static ``chart.svg`` are release assets: the Pages workflow downloads
 them into ``bench/``, and ``--include-bench`` copies local copies for a preview.
 
+The live REPL's code, ``site/repl/`` (without its tests), is copied to
+``repl/``. Its compiler download (``repl/assets/``: rustc.wasm, wild.wasm,
+sysroot files and ``manifest.json``) is a release asset built by
+``ci/build-repl-assets.sh``; the Pages workflow downloads it, and
+``--repl-assets DIR`` copies a local build for a preview.
+
 Usage:
 
     python3 site/build.py --output public
     python3 site/build.py --output /tmp/cogwasm-site --include-bench
+    python3 site/build.py --output /tmp/cogwasm-site --repl-assets toolchain/work/repl-assets
 
 Requires only the Python standard library.
 """
@@ -36,6 +43,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SITE_DIR = Path(__file__).resolve().parent
 ARTWORK_DIR = REPO_ROOT / "artwork" / "cog-logo"
 BENCH_DIR = REPO_ROOT / "bench" / "chart"
+REPL_DIR = SITE_DIR / "repl"
 
 # The source page keeps visible placeholders so it is obvious when a build has
 # not run. They are replaced here; any placeholder left over is an error.
@@ -121,7 +129,21 @@ def build_artwork(output: Path) -> None:
         copy_file(ARTWORK_DIR / artwork_name, output / name)
 
 
-def build_site(output: Path, commit: str, date: str, include_bench: bool) -> None:
+def build_repl(output: Path, assets: Path | None) -> None:
+    """Copy the REPL's code (not its tests), and local assets when given."""
+    for source in sorted(REPL_DIR.rglob("*")):
+        relative = source.relative_to(REPL_DIR)
+        if source.is_file() and relative.parts[0] != "tests" and "__pycache__" not in relative.parts:
+            copy_file(source, output / "repl" / relative)
+    if assets is not None:
+        if not (assets / "manifest.json").is_file():
+            raise BuildError(f"{assets} has no manifest.json; run ci/build-repl-assets.sh")
+        shutil.copytree(assets, output / "repl" / "assets", dirs_exist_ok=True)
+
+
+def build_site(
+    output: Path, commit: str, date: str, include_bench: bool, repl_assets: Path | None = None
+) -> None:
     """Assemble the whole site into an existing or new output directory."""
     output.mkdir(parents=True, exist_ok=True)
 
@@ -131,6 +153,8 @@ def build_site(output: Path, commit: str, date: str, include_bench: bool) -> Non
     build_artwork(output)
     for name in BENCH_CODE:
         copy_file(BENCH_DIR / name, output / "bench" / name)
+
+    build_repl(output, repl_assets)
 
     if include_bench:
         build_bench_assets(output)
@@ -176,6 +200,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="also copy local bench/chart/chart.svg and data.json, for a preview",
     )
+    parser.add_argument(
+        "--repl-assets",
+        type=Path,
+        help="copy a local ci/build-repl-assets.sh output to repl/assets, for a preview",
+    )
     return parser.parse_args(argv)
 
 
@@ -187,6 +216,7 @@ def main(argv: list[str] | None = None) -> int:
             commit_short(args.commit),
             commit_date(args.date),
             args.include_bench,
+            args.repl_assets.resolve() if args.repl_assets else None,
         )
     except (BuildError, subprocess.CalledProcessError) as error:
         print(f"build failed: {error}", file=sys.stderr)

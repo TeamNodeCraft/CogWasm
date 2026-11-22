@@ -31,6 +31,14 @@ The priorities are: **pure Rust** (the shipped compiler contains no LLVM),
 **fast edit-to-result** for small programs, and **output that runs in a
 sandbox** with nothing but what the host chooses to provide.
 
+**[Try it live](https://teamnodecraft.github.io/CogWasm/#try-it):** the site
+runs this `rustc.wasm`, with Wild built for single-threaded WASI as its linker,
+inside your browser: edit a Rust function and it is recompiled (about 50 ms
+once the browser has warmed up) and swapped into a running animation. The
+compiler is a 40 MB download, fetched only when you ask for it. The code is in
+[`site/repl/`](site/repl/); CI packages and tests it
+(`ci/build-repl-assets.sh`, `site/repl/tests/smoke.mjs`).
+
 ## Status
 
 Working end to end, still experimental. The build lives in
@@ -298,6 +306,7 @@ those components. They include:
 | [clif-to-wasm](https://github.com/ryancbuckley/clif-to-wasm) | Apache-2.0 WITH LLVM-exception |
 | [rust-playground-inbrowser](https://github.com/ryancbuckley/rust-playground-inbrowser) rustc-to-wasm patch series | Apache-2.0 |
 | [Wild](https://github.com/wild-linker/wild) | MIT OR Apache-2.0 |
+| [browser_wasi_shim](https://github.com/bjorn3/browser_wasi_shim) (vendored in `site/repl/vendor/` for the live REPL) | MIT OR Apache-2.0 |
 | [wasi-libc](https://github.com/WebAssembly/wasi-libc) (linked into wasm builds of `std`) | Apache-2.0 WITH LLVM-exception, MIT and others (see its LICENSE files) |
 | [LLVM](https://github.com/llvm/llvm-project), Clang and LLD (the LLVM-based build under `legacy/llvm/patches/`; build-time only for `compiler/`) | Apache-2.0 WITH LLVM-exception |
 
