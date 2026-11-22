@@ -201,6 +201,10 @@ runner, where the edit is 174 ms against the 100 ms target).
        went 18–53 → 2–5 ms locally (parallel compilation plus Wasmtime's
        incremental compilation cache, `incremental_cache.rs`); plugin-sized
        edits are 86–134 ms locally, almost all rustc's incremental rebuild.
+       Guest file calls were 100 µs–1 ms each through the single `/`
+       preopen; preopening the directories named in rustc's arguments (and
+       the serving guest's work root and sysroot) cut them 3–7× and took
+       `json` 150 → 97 ms on a loaded Mac.
 3. [x] Acceptance for the small edit: CI edit → result under 100 ms (53.6 ms,
        run 44978461782); difftest green. Plugin-sized edits are the next bar.
 

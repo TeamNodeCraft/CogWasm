@@ -16,3 +16,4 @@ wasmtime-wasi = { workspace = true, features = ["p1"] }
 # The guest-memory tests compile a tiny module; production users of this crate
 # are handed an already-compiled `Module` by `cogwasm-host`.
 wasmtime = { workspace = true, features = ["std", "runtime", "cranelift"] }
+tempfile = "3"

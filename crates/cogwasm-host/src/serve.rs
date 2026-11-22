@@ -17,7 +17,7 @@ use cogwasm_runtime::{
     encode_request, prepare_instance, ArgvRecorder, ServeEvent, ServeHooks, SpawnSummary,
     StoreOptions,
 };
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread::{self, JoinHandle};
@@ -52,18 +52,27 @@ impl ServeSession {
     ///
     /// The worker owns the store for the whole session; the caller only sees
     /// the channels. The engine and module are cloned handles to the already
-    /// loaded objects, so no module is compiled here.
+    /// loaded objects, so no module is compiled here. `preopens` are the
+    /// directories later requests will use (work root, sysroot); each is
+    /// preopened at its own path so the guest's file calls through it are
+    /// cheap.
     ///
     /// # Errors
     ///
     /// Returns an error when the worker cannot be spawned, the guest cannot be
     /// instantiated, or its `_start` exits before the first request.
-    pub fn new(engine: &Engine, module: &Module, linker: &Path) -> Result<Self> {
+    pub fn new(
+        engine: &Engine,
+        module: &Module,
+        linker: &Path,
+        preopens: &[PathBuf],
+    ) -> Result<Self> {
         let (request_tx, request_rx) = channel();
         let (event_tx, event_rx) = channel();
         let options = StoreOptions {
             env: vec![("COGWASM_SERVE".to_owned(), "1".to_owned())],
             serve: Some(ServeHooks::new(request_rx, event_tx.clone())),
+            preopens: preopens.to_vec(),
             ..StoreOptions::default()
         };
         let worker_engine = engine.clone();

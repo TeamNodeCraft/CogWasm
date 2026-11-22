@@ -10,7 +10,7 @@ use crate::Wt;
 use crate::serve::{ServeHooks, add_serve_imports};
 use crate::spawn::{SpawnRecorder, add_playground_spawn};
 use anyhow::Result;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 use wasmtime::{Engine, Linker, Module, ResourceLimiter, Store};
 use wasmtime_wasi::p1::{self, WasiP1Ctx};
 use wasmtime_wasi::p2::pipe::MemoryOutputPipe;
@@ -123,6 +123,51 @@ pub struct StoreOptions {
     /// `cogwasm.next_request` and `cogwasm.finish` around these channels;
     /// when unset, the imported functions report that there are no requests.
     pub serve: Option<ServeHooks>,
+    /// Extra directories to preopen at their own absolute paths, besides the
+    /// ones [`prepare_instance`] finds in the guest's arguments. A serving
+    /// guest needs these: its requests' arguments arrive after instantiation.
+    pub preopens: Vec<PathBuf>,
+}
+
+/// Most directories [`guest_preopens`] preopens; the rest go through `/`.
+const MAX_EXTRA_PREOPENS: usize = 32;
+
+/// The directories to preopen for a guest besides `/`: `extra`, then each
+/// absolute path in `args` (a whole argument, or the value after `=` as in
+/// `-Cincremental=/dir` or `--extern name=/lib.rlib`) that is a directory, or
+/// whose parent is, so an output file not written yet still counts. Each must
+/// be an existing directory, and only
+/// plain absolute paths (no `.` or `..`) qualify, since wasi-libc matches a
+/// preopen by its literal components.
+fn guest_preopens(args: &[String], extra: &[PathBuf]) -> Vec<PathBuf> {
+    let from_args = args.iter().filter_map(|arg| {
+        let value = match arg.find("=/") {
+            Some(index) if !arg.starts_with('/') => &arg[index + 1..],
+            _ => arg.as_str(),
+        };
+        let path = Path::new(value);
+        if path.is_dir() {
+            Some(path.to_path_buf())
+        } else {
+            path.parent()
+                .filter(|parent| parent.is_dir())
+                .map(Path::to_path_buf)
+        }
+    });
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    for dir in extra.iter().cloned().chain(from_args) {
+        let plain = dir.is_dir()
+            && dir.is_absolute()
+            && dir
+                .components()
+                .skip(1)
+                .all(|part| matches!(part, Component::Normal(_)))
+            && dir.components().count() > 1;
+        if plain && !dirs.contains(&dir) && dirs.len() < MAX_EXTRA_PREOPENS {
+            dirs.push(dir);
+        }
+    }
+    dirs
 }
 
 /// Wall-clock instant frozen for deterministic fuel runs:
@@ -229,6 +274,19 @@ pub fn prepare_instance<R: SpawnRecorder>(
     // Wild process can consume the linker arguments unchanged.
     wasi.preopened_dir(Path::new("/"), "/", FsPerms::ReadWrite)
         .wt("preopening the host root as WASI /")?;
+    // The same directories again, at the same paths, as their own preopens.
+    // wasi-libc resolves a path against the longest matching preopen, and
+    // Wasmtime's sandbox checks every component after it, so a file deep under
+    // `/` costs one check per directory on every call: on macOS a `stat` of a
+    // file 8 components deep took ≈ 150 µs through `/` and ≈ 20 µs through its
+    // own directory (docs/notes/warm-session.md).
+    for dir in guest_preopens(args, &options.preopens) {
+        let Some(name) = dir.to_str() else {
+            continue; // Not UTF-8, so not a guest path: `/` still covers it.
+        };
+        wasi.preopened_dir(&dir, name, FsPerms::ReadWrite)
+            .wt("preopening a directory named in the guest's arguments")?;
+    }
     // Both hosts call the guest synchronously, so WASI may block this thread.
     // Without this, every file `fd_read` allocates a zeroed host buffer the
     // size of the read, runs the read on a tokio blocking thread and copies the
@@ -269,6 +327,34 @@ pub fn prepare_instance<R: SpawnRecorder>(
 mod tests {
     use super::*;
     use crate::SummaryRecorder;
+
+    #[test]
+    fn preopens_come_from_absolute_argument_paths() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let base = root.path().canonicalize().expect("canonical temp dir");
+        let sysroot = base.join("sysroot");
+        let inc = base.join("inc");
+        let src = base.join("src");
+        for dir in [&sysroot, &inc, &src, &base.join("extra")] {
+            std::fs::create_dir(dir).expect("create dir");
+        }
+        let at = |path: &Path| path.display().to_string();
+        let args = vec![
+            "rustc".to_owned(),
+            at(&src.join("lib.rs")), // a file: its directory
+            "--sysroot".to_owned(),
+            at(&sysroot),                          // a directory
+            format!("-Cincremental={}", at(&inc)), // the value after `=`
+            "-o".to_owned(),
+            at(&base.join("missing").join("out.wasm")), // parent missing: skipped
+            "relative/dir".to_owned(),                  // not absolute: skipped
+            format!("{}/../sysroot", at(&src)),         // `..`: skipped
+            at(&sysroot),                               // duplicate: once
+        ];
+        let extra = vec![base.join("extra"), base.join("gone")]; // gone: skipped
+        let dirs = guest_preopens(&args, &extra);
+        assert_eq!(dirs, vec![base.join("extra"), src, sysroot, inc]);
+    }
 
     /// A one-page module whose `_start` calls `clock_time_get` for the wall
     /// clock (id 0) and the monotonic clock (id 1), leaving the two returned

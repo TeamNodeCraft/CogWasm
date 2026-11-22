@@ -178,10 +178,13 @@ impl ResidentCompiler {
         }
         if session.is_none() {
             *session = Some(
+                // The requests' arguments arrive after instantiation, so name
+                // the directories every compile reads and writes up front.
                 ServeSession::new(
                     self.compiler.engine(),
                     self.compiler.module(),
                     &self.config.linker,
+                    &[self.config.work_root.clone(), self.config.sysroot.clone()],
                 )
                 .map_err(|error| {
                     CompileError::Unavailable(format!(

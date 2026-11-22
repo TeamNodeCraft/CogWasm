@@ -621,6 +621,47 @@ compilation should help it less and the cache relatively more. A first
 attempt at this measurement ran while another build was using about ten
 cores (load 18) and was discarded.
 
+**CI runner** (run 45015354412, `90e0466`; all byte-identical, difftest
+green), serving guest edit → result: `collections` 323.1 → 182.7 ms,
+`json` 239.3 → 165.1, `scene` 199.6 → 151.0, `expr` 191.3 → 145.6 (−24 to
+−43%); the fixture 24.6 ms.
+
+### Guest file calls: preopen the directories rustc uses
+
+Profiling an incremental rebuild of `collections` (134 ms of rustc time
+locally) showed that only 1 of its 28 CGUs is recompiled per edit (the one
+holding the crate root's functions, 74 KB, about 30% of the code), yet
+reusing the other 27 takes real time: their objects are hard-linked or copied
+into the output directory, copied back into the new session directory
+(`copy_all_cgu_workproducts_to_incr_comp_cache_dir`, 11 ms), and deleted
+after the link. A probe in the guest found every file call expensive, and
+more so the deeper the path: rustc.wasm had one preopen, `/`, and Wasmtime's
+sandbox checks each path component after it (on macOS, cap-std walks them
+one by one).
+
+| guest call (µs, macOS, loaded machine) | via `/`, 8 components | via its own preopen |
+| --- | ---: | ---: |
+| `metadata` | 149 | 21 |
+| open + close | 83 | 22 |
+| read 4 KB | 85 | 29 |
+| remove | 124 | 46 |
+| rename | 272 | 92 |
+| hard link | 415 | 250 |
+
+`prepare_instance` now also preopens, at the same absolute paths, each
+existing directory named in the guest's arguments (a whole argument or the
+value after `=`; for a file, its directory), and `StoreOptions::preopens`
+lists more for a serving guest, whose requests arrive later: the resident
+compiler passes its work root and sysroot. wasi-libc picks the longest
+matching preopen, so `/` still covers everything else.
+
+Edit loop, A/B interleaved on a loaded machine (load ≈ 18), serving guest,
+edit → result: `collections` 147 → 117 ms, `json` 150 → 97 ms. With the
+change, on a machine at load ≈ 13: `expr` 75 ms, `scene` 81 ms, `json`
+94 ms, `collections` 154 ms (noisy), all byte-identical. The gain on the
+Linux CI runner may be smaller: cap-std can resolve a whole path with one
+`openat2` there.
+
 ## Recommendation
 
 1. E1, A0, E2 and E4 are done (above). E4 found the real CI cost: WASI file
