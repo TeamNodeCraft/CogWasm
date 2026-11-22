@@ -214,12 +214,30 @@ The cost-model inliner (patch `0006`) and the opt-in loop-field hoist
 (`0005`) are in. Next is the half that 5a measured as the win.
 
 1. [ ] Escape/alias analysis for locals whose address is passed to a callee
-       that the inliner has removed.
+       that the inliner has removed. Not built yet. Progress: the third
+       increment's diagnosis (`docs/notes/step-5b.md`) found the
+       hot escape is a callee taking `&mut`/`*mut` of the local. `InlineWasm`
+       now gives such callees 400 instead of 200, which inlines
+       `next_code_point` in `strings` and removes the address-taken
+       `SplitWhitespace`. `nbody` is explicitly not covered: its `Vec`s are
+       `#[inline(never)] grow_one` plus a drop, so a real alias analysis would
+       not help either.
 2. [ ] SROA of non-escaping aggregates, then mem2reg; iterate with the
-       inliner.
+       inliner. A plain second round was **measured as no win and not kept**: a second
+       `ReferencePropagation -> SROA -> GVN` round (after GVN and at the end
+       of the pipeline) left every hot address-taken local in place, because
+       `sroa`'s `excluded_locals` marks any local whose field address is
+       observed and `Vec`/`String` also need a drop. The remaining SROA work
+       is drop expansion and partial aggregate splitting, not another round.
 3. [ ] Make the loop-field hoist sound enough to be default-on, or drop it.
+       Composition with the inliner (0005 + 0006) is the next experiment: it
+       is what can move `nbody`'s 1.01G stack accesses, which this increment
+       does not.
 4. [ ] Acceptance: iterator-heavy benchmarks within 1.2× of LLVM `-O2`;
        difftest green; warm compile time within 5%.
+       Difftest is green with the inliner (49 handwritten + 24 generated).
+       Not met: `strings` is still about 4.4× LLVM `-O2`, and its warm compile
+       is +6.2% in the six-program A/B.
 
 ### G1.2. Bench table in the README updated by CI (M, in progress)
 

@@ -21,6 +21,9 @@ This pass reuses the inlining machinery and changes only the decision:
 
 - a call site in a cyclic block of the caller gets a 200 cost threshold
   (`-Zmir-inline-wasm-threshold`), against the normal 50/100;
+- a callee that takes a `&mut`/`*mut` argument gets 400, because the call
+  forces the caller local behind that pointer into linear memory and inlining
+  it is what lets reference propagation and SROA see the local again;
 - calls outside loops are left to rustc's inliner, so cold code does not pay
   the code-size and compile-time cost;
 - bodies without a back edge are skipped before the inliner runs;
@@ -31,43 +34,74 @@ Native MIR validation (stage-1 compiler, `--emit=obj`, wasm32 target):
 `strings::body` 1,676 -> 3,441 lines over 335 blocks and `json` 1,183 ->
 1,265; `scene`, `expr` and `collections` are unchanged at `body`.
 
-Measured through the product pipeline with the rebuilt `rustc.wasm` on the
-full suite (off against on, same compiler, 3 runs x 4 seeds; twelve of the
-twenty-one modules are byte-identical to the baseline):
+Measured through the product pipeline with the rebuilt `rustc.wasm` on a
+six-program subset (off against on, same compiler, 3 runs x 4 seeds; every
+output identical):
 
-| program | off | on | change | ours/LLVM-O2 | module | warm compile |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `strings` | 1.422 ms | 0.828 ms | -41.8% | 8.40x -> 4.74x | -4.1% | +0.2% |
-| `json` | 0.0266 ms | 0.0243 ms | -8.7% | 3.38x -> 2.72x | +0.3% | +0.6% |
-| `collections` | 0.0694 ms | 0.0634 ms | -8.6% | 5.74x -> 4.76x | -2.7% | +2.8% |
-| `sort` | 3.530 ms | 3.320 ms | -6.0% | 3.55x -> 3.34x | -0.3% | -0.8% |
-| `scene` | 0.0089 ms | 0.0085 ms | -4.5% | 1.86x -> 1.66x | -0.2% | +0.1% |
-| `smoke` | 0.0074 ms | 0.0072 ms | -3.6% | 2.38x -> 2.23x | +0.2% | +1.5% |
-| `nbody` | 72.31 ms | 71.88 ms | -0.6% | 5.06x -> 5.02x | 0.0% | +0.6% |
-| `float_sum` | 0.0048 ms | 0.0049 ms | +1.7% | 1.46x -> 1.56x | +2.0% | +1.1% |
+| program | off | on | change | module | warm compile |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `strings` | 107,244,701 | 66,008,021 | -38.4% | +2.07% | +6.2% |
+| `collections` | 5,061,326 | 4,772,355 | -5.7% | -2.24% | +1.6% |
+| `sort` | 321,207,695 | 299,459,431 | -6.8% | +0.05% | +3.6% |
+| `json` | 1,871,062 | 1,777,296 | -5.0% | +1.87% | -1.6% |
+| `nbody` | 6,204,745,840 | 6,204,745,840 | 0.0% | 0.0% | +2.3% |
+| `int_loops` | 213,915 | 213,915 | 0.0% | 0.0% | +3.8% |
 
-Execution geomean -4.4%, warm compile +0.45%, module size -0.2% over all 21
-programs, and every output identical. Every positive delta belongs to a
-program whose module is byte-identical, so those are run noise.
+The numbers are executed wasm instructions from `bench/gap`, not timings.
+`int_loops` is byte-identical and `nbody`'s module is byte-identical; their
+small warm-compile deltas are the shared machine. The full difftest corpus is
+green with the pass enabled.
 
-The threshold started at 300: that gave `strings` the same time but inlined
-more (5,072 rather than 3,441 MIR lines), grew modules, cost +3.3% warm
-compile, and changed `int_loops` enough to slow its 2-3 microsecond run by
-38.7% with 7.1% fewer instructions -- a hot-loop layout effect. At 200 those
-programs are untouched and the suite numbers above hold.
+The first revision of the patch used a 300 threshold for every loop call. It
+gave `strings` the same time but inlined more (5,072 rather than 3,441 MIR
+lines), grew modules (median +1.4%), cost +3.3% warm compile, and changed
+`int_loops` enough to slow its 2-3 microsecond run by 38.7% in wall-clock
+(despite 7.1% fewer instructions) -- a hot-loop layout effect. The 200 default
+avoids that. Raising the whole threshold to 400 buys `strings` only another
+-5% while growing `nbody`'s body from 144 to 264 blocks and its module by
+10.6% for no executed-instruction change, so the extra budget is spent only on
+callees that take a mutable pointer.
+
+Third increment: what still lives in memory after the inliner.
+
+Native final-MIR dumps of `strings`, `collections`, `sort`, `json` and
+`nbody::body` (stage-1 compiler, `-Copt-level=2 -Zmir-opt-level=2
+-Zmir-inline-wasm`) still showed 16, 36, 14, 23 and 16 address-taken locals.
+The hot ones were all calls that borrow a caller local: `next_code_point(&mut
+Iter<u8>)` in `strings` (cost 370, so declined at 200), `Zip`/`Chain`/
+`vec_deque::Iter`/`Take<Skip>`/`btree_map::Iter::next` and `String::push` /
+`VecDeque::push_back` / `BTreeSet::insert` in `collections`, and
+`RawVec::grow_one` (`#[inline(never)]`) behind every `Vec` in `nbody`. SROA
+cannot promote those locals: `rustc_mir_dataflow::value_analysis::
+excluded_locals` excludes any local whose field address is observed, and
+`Vec`/`String` also need a drop.
+
+A second round of `ReferencePropagation -> SROA -> GVN` after inlining was
+built and measured first, at two pipeline points. It left the hot locals in
+place (strings 16 -> 16, sort 14 -> 14, json 23 -> 23, nbody 16 -> 16;
+collections 36 -> 35) because the same `excluded_locals` rule still applies.
+It was not kept.
+
+The kept change is the mutable-pointer threshold above. On `strings` it
+removes the hot-loop `SplitWhitespace` local whose `slice::Iter` was passed to
+`next_code_point` (16 -> 15 address-taken locals; the call is inlined and the
+iterator fields are read directly). On `collections` it removes two
+address-taken locals (36 -> 34) from the inlined `BinaryHeap` and `BTreeSet`
+paths. `sort`, `json` and `nbody` are unchanged in MIR shape, module size and
+executed instructions, which is why this revision does not raise the whole
+threshold.
 
 The pass is opt-in through `-Zmir-inline-wasm`; the compiler, the sysroot and
-the default benchmark builds do not pass it. The full difftest corpus is green
-with it enabled. This is a local CogWasm experiment, not an upstream
-contribution; its code and comments are LLM-generated and a human must review
-and own it.
+the default benchmark builds do not pass it. This is a local CogWasm
+experiment, not an upstream contribution; its code and comments are
+LLM-generated and a human must review and own it.
 
 ---
 diff --git a/compiler/rustc_mir_transform/src/inline.rs b/compiler/rustc_mir_transform/src/inline.rs
-index 367e16d..eaa7010 100644
+index 367e16daa..eaa701004 100644
 --- a/compiler/rustc_mir_transform/src/inline.rs
 +++ b/compiler/rustc_mir_transform/src/inline.rs
-@@ -31,10 +31,10 @@ const HISTORY_DEPTH_LIMIT: usize = 20;
+@@ -31,10 +31,10 @@
  const TOP_DOWN_DEPTH_LIMIT: usize = 5;
  
  #[derive(Clone, Debug)]
@@ -81,7 +115,7 @@ index 367e16d..eaa7010 100644
      source_info: SourceInfo,
  }
  
-@@ -95,7 +95,7 @@ impl<'tcx> crate::MirPass<'tcx> for ForceInline {
+@@ -95,7 +95,7 @@ fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
      }
  }
  
@@ -90,7 +124,7 @@ index 367e16d..eaa7010 100644
      fn new(tcx: TyCtxt<'tcx>, def_id: DefId, body: &Body<'tcx>) -> Self;
  
      fn tcx(&self) -> TyCtxt<'tcx>;
-@@ -476,7 +476,7 @@ impl<'tcx> Inliner<'tcx> for NormalInliner<'tcx> {
+@@ -476,7 +476,7 @@ fn on_inline_success(
      fn on_inline_failure(&self, _: &CallSite<'tcx>, _: &'static str) {}
  }
  
@@ -110,10 +144,10 @@ index 367e16d..eaa7010 100644
      blocks: Range<BasicBlock>,
 diff --git a/compiler/rustc_mir_transform/src/inline_wasm.rs b/compiler/rustc_mir_transform/src/inline_wasm.rs
 new file mode 100644
-index 0000000..a29a70a
+index 000000000..035cc4585
 --- /dev/null
 +++ b/compiler/rustc_mir_transform/src/inline_wasm.rs
-@@ -0,0 +1,280 @@
+@@ -0,0 +1,319 @@
 +//! Inline loop-contained calls that rustc's cost model declines.
 +//!
 +//! Every call in the wasm we emit is expensive: arguments and results travel
@@ -131,6 +165,9 @@ index 0000000..a29a70a
 +//! - A call site inside a loop in the caller's CFG gets a much higher cost
 +//!   threshold. Calls outside loops are left to rustc's inliner, so cold code
 +//!   does not pay the code-size and compile-time cost.
++//! - A callee that takes a `&mut`/`*mut` argument gets 400 rather than 200:
++//!   the call forces the caller local behind that pointer into linear memory,
++//!   and inlining it is what lets the promotion passes see the local again.
 +//! - Inlining stops once the caller has grown past a fixed multiple of its
 +//!   original block count, so a chain of calls cannot blow up the body.
 +//!
@@ -172,6 +209,20 @@ index 0000000..a29a70a
 +/// smaller module there and in `collections`, and it avoids the `int_loops`
 +/// layout regression that the extra inlining at 300 causes.
 +const DEFAULT_LOOP_THRESHOLD: usize = 200;
++
++/// The threshold for a callee that borrows an argument mutably.
++///
++/// A call that takes `&mut` of a caller local forces that local into linear
++/// memory for the whole function: cg_clif keeps a local in an SSA variable
++/// only when no `Rvalue::Ref`/`RawPtr` roots at it, and `sroa` excludes the
++/// local too. Inlining the call is the only way to remove the borrow without
++/// new alias analysis. `next_code_point(&mut Iter<u8>)` costs 370, so 400
++/// admits it at the `split_whitespace` call site (native MIR A/B: the
++/// address-taken `SplitWhitespace` disappears, and the static count of
++/// accesses to address-taken locals over the body's loop blocks falls from
++/// 53 to 7) while leaving the shared/by-value helpers that grow `nbody`
++/// alone.
++const MUT_BORROW_THRESHOLD: usize = 400;
 +
 +pub(super) struct InlineWasm;
 +
@@ -351,11 +402,33 @@ index 0000000..a29a70a
 +        checker.add_function_level_costs();
 +        checker.visit_body(callee_body);
 +        let cost = checker.cost();
-+        let threshold = self.threshold();
++        let takes_mut_borrow = callee_body
++            .local_decls
++            .iter()
++            .skip(1)
++            .take(callee_body.arg_count)
++            .any(|decl| {
++                matches!(
++                    decl.ty.kind(),
++                    ty::Ref(_, _, ty::Mutability::Mut) | ty::RawPtr(_, ty::Mutability::Mut)
++                )
++            });
++        let threshold = if takes_mut_borrow {
++            self.threshold().max(MUT_BORROW_THRESHOLD)
++        } else {
++            self.threshold()
++        };
 +        if cost <= threshold {
-+            debug!("inlining {:?} [cost={cost} <= threshold={threshold}]", callsite.callee);
++            debug!(
++                "inlining {:?} [cost={cost} <= threshold={threshold}, inline={:?}]",
++                callsite.callee, callee_attrs.inline
++            );
 +            Ok(())
 +        } else {
++            debug!(
++                "not inlining {:?} [cost={cost} > threshold={threshold}, inline={:?}]",
++                callsite.callee, callee_attrs.inline
++            );
 +            Err("cost above the wasm inliner threshold")
 +        }
 +    }
@@ -395,10 +468,10 @@ index 0000000..a29a70a
 +    }
 +}
 diff --git a/compiler/rustc_mir_transform/src/lib.rs b/compiler/rustc_mir_transform/src/lib.rs
-index 2ad5db5..fd0965a 100644
+index 2ad5db511..fd0965a88 100644
 --- a/compiler/rustc_mir_transform/src/lib.rs
 +++ b/compiler/rustc_mir_transform/src/lib.rs
-@@ -157,6 +157,7 @@ declare_passes! {
+@@ -157,6 +157,7 @@ mod dead_store_elimination : DeadStoreElimination {
      // Made public so that `mir_drops_elaborated_and_const_checked` can be overridden
      // by custom rustc drivers, running all the steps by themselves. See #114628.
      pub mod inline : Inline, ForceInline;
@@ -406,7 +479,7 @@ index 2ad5db5..fd0965a 100644
      mod impossible_clauses : ImpossibleClauses;
      mod instsimplify : InstSimplify { BeforeInline, AfterSimplifyCfg };
      mod jump_threading : JumpThreading;
-@@ -719,6 +720,7 @@ pub(crate) fn run_optimization_passes<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'
+@@ -719,6 +720,7 @@ fn o1<T>(x: T) -> WithMinOptLevel<T> {
              &inline::ForceInline,
              // Perform inlining, which may add a lot of code.
              &inline::Inline,
@@ -415,17 +488,17 @@ index 2ad5db5..fd0965a 100644
              // Now, we need to shrink the generated MIR.
              // Code from other crates may have storage markers, so this needs to happen after
 diff --git a/compiler/rustc_session/src/options.rs b/compiler/rustc_session/src/options.rs
-index 6e00be0..71536b8 100644
+index 6e00be0b0..f910930ce 100644
 --- a/compiler/rustc_session/src/options.rs
 +++ b/compiler/rustc_session/src/options.rs
-@@ -2688,6 +2688,10 @@ options! {
+@@ -2688,6 +2688,10 @@ pub(crate) fn parse_rust_version(slot: &mut Option<RustcVersion>, v: Option<&str
           details about types, etc. (boolean for all passes, 'nll' to enable in NLL MIR only, default: 'nll')"),
      mir_hoist_loop_field_reads: bool = (false, parse_bool, [TRACKED],
          "hoist loop-invariant field reads out of loops; CogWasm step 5b experiment (default: no)"),
 +    mir_inline_wasm: bool = (false, parse_bool, [TRACKED],
 +        "inline loop-contained calls that the normal MIR inliner declined; CogWasm step 5b experiment (default: no)"),
 +    mir_inline_wasm_threshold: Option<usize> = (None, parse_opt_number, [TRACKED],
-+        "cost threshold for the CogWasm loop inliner (default: 400)"),
++        "cost threshold for the CogWasm loop inliner; callees taking a &mut or *mut argument use at least 400 (default: 200)"),
      mir_move_elimination: bool = (false, parse_bool, [TRACKED],
          "enable the experimental MIR move elimination pass (default: no)"),
      mir_opt_bisect_limit: Option<usize> = (None, parse_opt_number, [TRACKED],
