@@ -192,7 +192,12 @@ runner, where the edit is 174 ms against the 100 ms target).
        220, json 304, scene 232 ms per edit); found and fixed address-keyed hash caches leaking across
        sessions. Next for these sizes: per-source compile time (G1/G2.2) and
        the output module's native compile in the swap (≈ 57 ms for a 250 KB
-       module).
+       module). Profiling then found the Fast preset's incremental
+       directory was keyed by source contents, so no edit ever reused
+       rustc's incremental state; keyed by path instead
+       (`ArtifactStore::incremental_key_for`), plugin-sized edits locally
+       went 171–363 → 101–179 ms, still byte-identical. Next: the swap,
+       now 15–30% of these edits (Wasmtime's incremental compilation cache).
 3. [x] Acceptance for the small edit: CI edit → result under 100 ms (53.6 ms,
        run 44978461782); difftest green. Plugin-sized edits are the next bar.
 

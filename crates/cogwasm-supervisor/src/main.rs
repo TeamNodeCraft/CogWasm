@@ -587,7 +587,7 @@ fn matrix(
         for (text, options) in &specs {
             let mut job = JobSpec::new(source.clone(), options.clone());
             if options.incremental {
-                let key = ArtifactStore::key_for(&job, &config.compiler_id)?;
+                let key = ArtifactStore::incremental_key_for(&job, &config.compiler_id)?;
                 job.incremental_dir = Some(config.work_root.join("incremental").join(key));
             }
             let outcome = supervisor.build(&job)?;
@@ -680,7 +680,7 @@ fn demo(
     let make_job = |options: CompileOptions| -> Result<JobSpec> {
         let mut job = JobSpec::new(SourceSpec::new(source.to_path_buf(), name.clone()), options);
         if job.options.incremental {
-            let key = ArtifactStore::key_for(&job, &config.compiler_id)?;
+            let key = ArtifactStore::incremental_key_for(&job, &config.compiler_id)?;
             job.incremental_dir = Some(config.work_root.join("incremental").join(key));
         }
         Ok(job)
@@ -819,7 +819,7 @@ fn edit_loop(
     let make_job = |options: CompileOptions| -> Result<JobSpec> {
         let mut job = JobSpec::new(SourceSpec::new(copy.clone(), name.clone()), options);
         if job.options.incremental {
-            let key = ArtifactStore::key_for(&job, &config.compiler_id)?;
+            let key = ArtifactStore::incremental_key_for(&job, &config.compiler_id)?;
             job.incremental_dir = Some(config.work_root.join("incremental").join(key));
         }
         Ok(job)

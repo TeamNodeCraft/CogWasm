@@ -529,6 +529,55 @@ itself plus the swap's native compile of the output module. Those are the
 next levers for this size (Goal 1 compile-time work, G2.2, and precompiling
 the output in the background or caching its native code).
 
+### Profile: where a plugin-sized edit goes, and the incremental fix
+
+Splitting the local times above into edit-loop's phases (median of 8 edits,
+serving guest): the build (rustc plus Wild) was 84–89% of each edit, the swap
+11–16%, the call ≈ 0.1 ms, and Wild's link ≈ 7 ms of the build.
+
+| source | build | swap | edit → result |
+| --- | ---: | ---: | ---: |
+| `collections` | 306 ms | 57 ms | 363 ms |
+| `json` | 200 ms | 28 ms | 228 ms |
+| `scene` | 161 ms | 22 ms | 184 ms |
+| `expr` | 151 ms | 20 ms | 171 ms |
+
+`-Ztime-passes` with edit-loop's flags (`-Copt-level=2 -Zmir-opt-level=2`,
+Fast preset, so `-Cincremental`) put rustc's own total for a full compile at
+250 / 167 / 149 / 135 ms, but for an incremental rebuild after the probe edit
+only 134 / 120 / 102 / 99 ms: reusing the dep graph skips type and borrow
+checking and most of the monomorphization walk. edit-loop's build matched the
+full compile plus ≈ 15–40 ms of saving incremental state, because **the
+incremental directory was named after the artifact key, which hashes the
+source bytes**: every edit got a new, empty directory, so rustc never reused
+anything and the Fast preset's incremental mode was pure overhead. The same
+keying was used by `workspace.rs` and the `bench` subcommand.
+
+Fix: `ArtifactStore::incremental_key_for` is the artifact key without the
+source and extern contents (path, crate name, kind, options, compiler id), so
+successive edits of one source share a directory and rustc decides what
+changed. `--verify-cold`'s `-cold` directory is now cleared before every
+cold compile, so the check is still a from-scratch compile.
+
+After the fix, locally, 8 edits per run, every edit byte-identical to a cold
+compile:
+
+| source | serving before | serving after | build after | swap after |
+| --- | ---: | ---: | ---: | ---: |
+| `collections` | 363.3 ms | 178.8 ms | 125 ms | 53 ms |
+| `expr` | 173.3 ms | 101.1 ms | 83 ms | 18 ms |
+| `json` | 228.4 ms | 127.1 ms | 102 ms | 25 ms |
+| `scene` | 183.6 ms | 107.1 ms | 89 ms | 20 ms |
+
+The small fixture is unchanged (28.3 → 28.8 ms in back-to-back local runs):
+it is too small for incremental reuse to matter. What remains per edit is
+≈ 19 ms of macro expansion, re-codegen of the edited CGU (10–14 ms), the
+incremental save (≈ 10–30 ms), the link, and the swap, which is now 15–30%
+of a plugin-sized edit. Wasmtime's per-function incremental compilation
+cache is the obvious lever for the swap. `-Zself-profile` cannot split the
+backend further inside the guest: it panics asking for a process id, which
+wasip1 does not have.
+
 ## Recommendation
 
 1. E1, A0, E2 and E4 are done (above). E4 found the real CI cost: WASI file

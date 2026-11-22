@@ -83,6 +83,26 @@ impl ArtifactStore {
         Ok(hex(&Sha256::digest(encoded)))
     }
 
+    /// The name of `job`'s incremental directory: [`Self::key_for`] without
+    /// the source and extern contents, so successive edits of one source with
+    /// one set of options share rustc's incremental state instead of each
+    /// starting from an empty directory. rustc itself detects what changed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the key cannot be serialised.
+    pub fn incremental_key_for(job: &JobSpec, compiler: &str) -> Result<String> {
+        let externs = job
+            .externs
+            .iter()
+            .map(|item| (item.name.clone(), String::new()))
+            .collect();
+        let material = KeyMaterial::new(job, compiler, "", externs);
+        let mut encoded = b"incremental\0".to_vec();
+        encoded.extend(serde_json::to_vec(&material).context("serialising the incremental key")?);
+        Ok(hex(&Sha256::digest(encoded)))
+    }
+
     /// Build the artifact record for `bytes` produced for `job`.
     ///
     /// # Errors

@@ -121,10 +121,23 @@ impl ResidentCompiler {
         })?;
         let out = work.join("artifact.wasm");
 
-        // A cold compile must not read the warm compile's incremental state.
+        // A cold compile must not read any incremental state: not the warm
+        // compile's, and not an earlier cold compile's, since the directory
+        // is shared by every edit of one source.
         let mut job = job.clone();
         if cold && let Some(directory) = &job.incremental_dir {
-            job.incremental_dir = Some(cold_incremental(directory));
+            let directory = cold_incremental(directory);
+            match fs::remove_dir_all(&directory) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(CompileError::Unavailable(format!(
+                        "clearing {}: {error}",
+                        directory.display()
+                    )));
+                }
+            }
+            job.incremental_dir = Some(directory);
         }
 
         let mut args = vec!["rustc".to_owned()];

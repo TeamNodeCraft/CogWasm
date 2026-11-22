@@ -119,9 +119,11 @@ host buffer per read (45 MB for libcore's metadata), fixed by letting WASI
 block the calling thread; the pooling allocator saved another ≈ 31–36 ms per
 job, and one long-lived rustc guest that serves every request (patch 0007,
 metadata cached across requests) took the runner from 53.6 to 23.6 ms. Plugin-sized edits (the four 300–560-line medium benchmark programs) take
-220–465 ms on CI through the serving guest; at that size most of the time is
-compiling the source itself plus Wasmtime's native compile of the output
-module during the swap; see
+220–465 ms on CI through the serving guest; locally they then roughly
+halved (171–363 → 101–179 ms) once edits reused rustc's incremental state,
+which a cache-key bug had been discarding on every edit. What remains is the
+incremental rebuild plus Wasmtime's native compile of the output module during
+the swap; see
 [supervisor.md](../docs/notes/supervisor.md) and
 [warm-session.md](../docs/notes/warm-session.md).
 

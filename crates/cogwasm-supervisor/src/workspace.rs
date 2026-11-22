@@ -179,7 +179,7 @@ impl Workspace {
                 })
                 .collect::<Result<Vec<_>>>()?;
             if options.incremental {
-                let key = ArtifactStore::key_for(&job, supervisor.compiler().id())?;
+                let key = ArtifactStore::incremental_key_for(&job, supervisor.compiler().id())?;
                 job.incremental_dir = Some(work_root.join("incremental").join(key));
             }
             let outcome = supervisor.build(&job)?;
