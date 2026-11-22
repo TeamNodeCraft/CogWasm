@@ -41,9 +41,13 @@ print(parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"))
 
 tmp=$(mktemp -d)
 trap 'rm -rf "${tmp:?}"' EXIT
+# CI's edit-loop steps (ci/build-and-test.sh) leave their reports here.
+edit_loop_dir=${EDIT_LOOP_DIR:-toolchain/work/supervisor}
+edit_loop_args=()
+[ -d "$edit_loop_dir" ] && edit_loop_args=(--edit-loop "$edit_loop_dir")
 asset=$(python3 "$script_dir/history_point.py" "$json" \
     --run-id "$run_id" --date "$date" --repo "$repo" \
-    --output "$tmp/point.json")
+    --output "$tmp/point.json" ${edit_loop_args[@]+"${edit_loop_args[@]}"})
 cp "$tmp/point.json" "$tmp/$asset"
 
 if ! gh release view "$tag" >/dev/null 2>&1; then

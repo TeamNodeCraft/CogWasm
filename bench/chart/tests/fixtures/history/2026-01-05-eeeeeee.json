@@ -207,5 +207,23 @@
       }
     }
   },
-  "ok": true
+  "ok": true,
+  "edit_loop": {
+    "schema": 1,
+    "fixture_ms": 20.5,
+    "sources": {
+      "collections": {
+        "serve_ms": 146.0,
+        "job_ms": 177.0
+      },
+      "expr": {
+        "serve_ms": 114.0,
+        "job_ms": 146.0
+      },
+      "json": {
+        "serve_ms": 132.0,
+        "job_ms": 162.0
+      }
+    }
+  }
 }

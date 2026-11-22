@@ -27,7 +27,11 @@ Panel 1 "Against LLVM -O2 (lower is better, 1.0 = parity)"
 
 Panel 2 "Compile speed (ms, lower is better)"
   * median warm compile across the quick programs,
-  * median incremental (edit-to-result) compile, when the point has it,
+  * median incremental (edit-to-result) compile through the CLI, one guest
+    per edit, when the point has it,
+  * edit -> result through the resident supervisor (one serving guest,
+    incremental, cached swap): the small fixture, and the median of the
+    plugin-sized sources, when the point has an ``edit_loop`` block,
   * precompiled compiler load, when the point has it, and
   * median compiler instructions (Wasmtime fuel) on a right-hand axis, when
     the point has it.
@@ -115,11 +119,33 @@ SERIES: tuple[dict[str, Any], ...] = (
     {
         "key": "incremental_ms",
         "panel": 2,
-        "label": "Incremental",
+        "label": "Incremental (CLI)",
         "unit": "ms",
         "digits": 1,
         "color": "#CC79A7",
         "marker": "diamond",
+        "axis": "left",
+        "deterministic": False,
+    },
+    {
+        "key": "edit_fixture_ms",
+        "panel": 2,
+        "label": "Edit loop (small)",
+        "unit": "ms",
+        "digits": 1,
+        "color": "#6B6B6B",
+        "marker": "square",
+        "axis": "left",
+        "deterministic": False,
+    },
+    {
+        "key": "edit_plugin_ms",
+        "panel": 2,
+        "label": "Edit loop (plugin)",
+        "unit": "ms",
+        "digits": 1,
+        "color": "#1F1F1F",
+        "marker": "circle",
         "axis": "left",
         "deterministic": False,
     },
@@ -401,6 +427,7 @@ def point_from_json(raw: dict[str, Any], source: str) -> Point:
         precompiled_value = _number(
             _get(precompiled_mode, "module_load", "median_ms")
         )
+    fixture_value, plugin_value = edit_loop_values(raw.get("edit_loop"))
     return Point(
         sha=sha,
         subject=subject,
@@ -418,6 +445,8 @@ def point_from_json(raw: dict[str, Any], source: str) -> Point:
             "incremental_ms": median_metric(
                 programs, names, "clif", "compile_incremental", "median"
             ),
+            "edit_fixture_ms": fixture_value,
+            "edit_plugin_ms": plugin_value,
             "precompiled_load_ms": precompiled_value,
             "compiler_instructions": compiler_value,
         },
@@ -427,6 +456,31 @@ def point_from_json(raw: dict[str, Any], source: str) -> Point:
         compiler_programs=compiler_count,
         source=source,
     )
+
+
+def edit_loop_values(block: Any) -> tuple[float | None, float | None]:
+    """Resident edit -> result: (small fixture, median plugin-sized source).
+
+    The plugin-sized value is the median over sources of each source's
+    serving-guest time, so it needs every source to have one; a point from
+    before the block existed has neither value.
+    """
+    if not isinstance(block, dict):
+        return None, None
+    fixture = _number(block.get("fixture_ms"))
+    sources = block.get("sources")
+    serving = []
+    if isinstance(sources, dict):
+        serving = [
+            _number(entry.get("serve_ms")) if isinstance(entry, dict) else None
+            for entry in sources.values()
+        ]
+    plugin = (
+        statistics.median(serving)
+        if serving and all(value is not None for value in serving)
+        else None
+    )
+    return fixture, plugin
 
 
 def mark_subsets(points: list[Point]) -> None:
@@ -747,7 +801,7 @@ def render_svg(data: dict[str, Any], width: int = SVG_WIDTH, height: int = SVG_H
         "<title id=\"chart-title\">CogWasm benchmark trend by commit</title>",
         (
             '<desc id="chart-desc">Execution time, executed instructions and module '
-            'size against LLVM -O2, and compile speed plus compiler instructions, '
+            'size against LLVM -O2, and compile speed, edit to result and compiler instructions, '
             "one point per CI commit on main. Lower is better. Solid lines are "
             "deterministic instruction counts; dotted lines are wall-clock.</desc>"
         ),

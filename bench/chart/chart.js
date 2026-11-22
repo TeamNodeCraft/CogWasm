@@ -12,6 +12,8 @@
     size_ratio: "--s-size",
     warm_compile_ms: "--s-warm",
     incremental_ms: "--s-inc",
+    edit_fixture_ms: "--s-edit-small",
+    edit_plugin_ms: "--s-edit-plugin",
     precompiled_load_ms: "--s-pre",
     compiler_instructions: "--s-fuel"
   };
@@ -253,7 +255,7 @@
     var svg = svgEl("svg", {
       viewBox: "0 0 " + width + " " + height,
       role: "img",
-      "aria-label": "CogWasm benchmark trend by commit. Two panels: execution time, executed instructions and module size against LLVM -O2, and compile speed plus compiler instructions. Lower is better. Solid lines are deterministic instruction counts; dotted lines are wall-clock."
+      "aria-label": "CogWasm benchmark trend by commit. Two panels: execution time, executed instructions and module size against LLVM -O2, and compile speed, edit to result and compiler instructions. Lower is better. Solid lines are deterministic instruction counts; dotted lines are wall-clock."
     });
     state.data.panels.forEach(function (panel, panelIndex) {
       var panelX = stacked ? margin : margin + panelIndex * (panelWidth + gap);

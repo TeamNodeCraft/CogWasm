@@ -9,6 +9,11 @@ the commit date to UTC, and prints the bench-history asset name:
 
 It is shared by ``publish-history.sh`` (the current run) and
 ``backfill-history.sh`` (old ci-logs assets), so both write the same schema.
+
+With ``--edit-loop DIR`` (the supervisor work directory CI's edit-loop steps
+write, ``toolchain/work/supervisor``), the point also gets an ``edit_loop``
+block: the resident supervisor's edit -> result for the small fixture and for
+each plugin-sized source, serving guest and one guest per job.
 """
 
 from __future__ import annotations
@@ -16,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import statistics
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -66,6 +72,43 @@ def enrich(raw: dict[str, Any], run_id: str, date: str, repo: str) -> tuple[dict
     return point, f"{parsed_date:%Y-%m-%d}-{sha[:7]}.json"
 
 
+def _median_field(path: Path, field: str) -> float | None:
+    """One numeric field of an edit-loop report, or None if it is unusable."""
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    value = report.get(field) if isinstance(report, dict) else None
+    return float(value) if isinstance(value, (int, float)) and value > 0 else None
+
+
+def edit_loop_summary(directory: Path) -> dict[str, Any] | None:
+    """Summarise CI's edit-loop reports under ``directory``, or None if absent.
+
+    ``edit-loop.json`` is the small fixture (its ``median`` edit -> result in
+    ms). ``sources/<name>-<slot>-<mode>.json`` are the plugin-sized runs that
+    ``ci/edit-loop-sources.sh`` writes, two per mode; each source's value is
+    the median of its runs' medians, as that script's notice reports it.
+    """
+    summary: dict[str, Any] = {"schema": 1}
+    fixture = _median_field(directory / "edit-loop.json", "median")
+    if fixture is not None:
+        summary["fixture_ms"] = fixture
+    runs: dict[str, dict[str, list[float]]] = {}
+    for path in sorted((directory / "sources").glob("*-*-*.json")):
+        name, _slot, mode = path.stem.split("-", 2)
+        value = _median_field(path, "median")
+        if value is not None and mode in ("serve", "job"):
+            runs.setdefault(name, {}).setdefault(mode, []).append(value)
+    sources = {
+        name: {f"{mode}_ms": statistics.median(values) for mode, values in modes.items()}
+        for name, modes in runs.items()
+    }
+    if sources:
+        summary["sources"] = sources
+    return summary if len(summary) > 1 else None
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("quick_json", type=Path)
@@ -73,12 +116,21 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--date", required=True, help="commit date in ISO-8601")
     parser.add_argument("--repo", required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--edit-loop",
+        type=Path,
+        help="supervisor work directory with CI's edit-loop reports",
+    )
     args = parser.parse_args(argv)
     try:
         raw = json.loads(args.quick_json.read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
             raise PointError("quick result is not a JSON object")
         point, asset_name = enrich(raw, args.run_id, args.date, args.repo)
+        if args.edit_loop is not None:
+            edit_loop = edit_loop_summary(args.edit_loop)
+            if edit_loop is not None:
+                point["edit_loop"] = edit_loop
     except (OSError, json.JSONDecodeError, PointError) as error:
         print(f"error: {args.quick_json}: {error}", file=sys.stderr)
         return 1

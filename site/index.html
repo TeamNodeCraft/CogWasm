@@ -147,12 +147,12 @@
           </tr>
           <tr>
             <th scope="row">Compile time</th>
-            <td>About 79&nbsp;ms to compile a small <code>no_std</code> program inside <code>rustc.wasm</code>, about 96&nbsp;ms from edit to result with the compiler kept loaded. Apple M-series; about 2&ndash;3&times; that on a CI runner.</td>
+            <td>About 79&nbsp;ms to compile a small <code>no_std</code> program inside <code>rustc.wasm</code> from a fresh guest (Apple M-series). Edit to result through the resident supervisor: 20.8&nbsp;ms for a small edit and 113&ndash;146&nbsp;ms for a 300&ndash;560-line program on a 4-core CI runner.</td>
             <td><a href="https://github.com/TeamNodeCraft/CogWasm/blob/main/README.md#status">README</a></td>
           </tr>
           <tr>
             <th scope="row">Incremental</th>
-            <td>One-line edits reuse rustc's incremental cache: about 12&ndash;14% faster edit to result, for 12&ndash;18% larger output. Opt-in (<code>--incremental</code>), off by default.</td>
+            <td>The supervisor's edit loop is incremental: one rustc guest stays running, each edit reuses rustc's incremental cache for that source (only the codegen units the edit touches are rebuilt), and the swap reuses Wasmtime's compiled code for unchanged functions. Every CI edit is checked byte-identical to a fresh compile. In the <code>cogwasm-host</code> CLI, <code>--incremental</code> is opt-in: about 12&ndash;14% faster, for 12&ndash;18% larger output.</td>
             <td><a href="https://github.com/TeamNodeCraft/CogWasm/blob/main/README.md#status">README</a></td>
           </tr>
           <tr>
@@ -193,11 +193,11 @@
     </div>
 
     <div class="bench-trend">
-      <p class="bench-trend-intro">One point per CI commit on <code>main</code>, in commit order; lower is better. Solid lines are deterministic executed-instruction counts; dotted lines are wall-clock. Hover or tap a point for its values and commit; click a legend item to hide or show a line. A dashed vertical rule marks a commit that changed the quick program subset.</p>
+      <p class="bench-trend-intro">One point per CI commit on <code>main</code>, in commit order; lower is better. Solid lines are deterministic executed-instruction counts; dotted lines are wall-clock. &ldquo;Edit loop&rdquo; lines are the resident supervisor's edit to result: the small fixture, and the median of four 300&ndash;560-line programs. Hover or tap a point for its values and commit; click a legend item to hide or show a line. A dashed vertical rule marks a commit that changed the quick program subset.</p>
       <div id="bench-legend" class="legend" role="group" aria-label="Toggle chart lines"></div>
       <div id="bench-chart" class="chart" data-src="bench/data.json" aria-live="polite">
         <div class="message loading">Loading benchmark data&hellip;</div>
-        <noscript><img src="bench/chart.svg" width="800" height="420" alt="Benchmark trend by commit: execution time, executed instructions and module size against LLVM -O2, plus compile speed and compiler instructions. Solid lines are deterministic counts; dotted lines are wall-clock. Lower is better."></noscript>
+        <noscript><img src="bench/chart.svg" width="800" height="420" alt="Benchmark trend by commit: execution time, executed instructions and module size against LLVM -O2, plus compile speed, edit to result and compiler instructions. Solid lines are deterministic counts; dotted lines are wall-clock. Lower is better."></noscript>
       </div>
       <p id="bench-footnote" class="footnote"></p>
       <div id="bench-tooltip" class="tooltip" role="status" hidden></div>

@@ -47,6 +47,8 @@
   --s-size: light-dark(#d55e00, #ff8c5a);
   --s-warm: light-dark(#009e73, #34d399);
   --s-inc: light-dark(#cc79a7, #f0a6d0);
+  --s-edit-small: light-dark(#6b6b6b, #b8b8b8);
+  --s-edit-plugin: light-dark(#1f1f1f, #f2f2f2);
   --s-pre: light-dark(#e69f00, #f5c542);
   --s-fuel: light-dark(#5b3a8e, #c4a7f7);
 }

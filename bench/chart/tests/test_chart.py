@@ -245,6 +245,15 @@ class FixtureTest(unittest.TestCase):
         self.assertEqual(missing.size_programs, 2)
         self.assertEqual(self.points[4].metrics["precompiled_load_ms"], 16.0)
 
+    def test_edit_loop_values_need_the_block(self) -> None:
+        for older in self.points[:4]:
+            self.assertIsNone(older.metrics["edit_fixture_ms"])
+            self.assertIsNone(older.metrics["edit_plugin_ms"])
+        latest = self.points[4]
+        self.assertEqual(latest.metrics["edit_fixture_ms"], 20.5)
+        # The median over sources of the serving-guest time.
+        self.assertEqual(latest.metrics["edit_plugin_ms"], 132.0)
+
     def test_instruction_ratio_and_compiler_median(self) -> None:
         old = self.points[0]
         self.assertIsNone(old.metrics["exec_instructions_ratio"])
@@ -275,6 +284,8 @@ class FixtureTest(unittest.TestCase):
                 "size_ratio",
                 "warm_compile_ms",
                 "incremental_ms",
+                "edit_fixture_ms",
+                "edit_plugin_ms",
                 "precompiled_load_ms",
                 "compiler_instructions",
             ],
@@ -309,6 +320,19 @@ class FixtureTest(unittest.TestCase):
             self.assertTrue(svg_path.read_text(encoding="utf-8").startswith("<svg"))
             parsed = json.loads(data_path.read_text(encoding="utf-8"))
             self.assertEqual(len(parsed["points"]), 5)
+
+
+class EditLoopValuesTest(unittest.TestCase):
+    def test_a_source_without_a_serving_time_drops_the_plugin_value(self) -> None:
+        block = {
+            "fixture_ms": 21.0,
+            "sources": {"json": {"serve_ms": 130.0}, "expr": {"job_ms": 150.0}},
+        }
+        self.assertEqual(chart.edit_loop_values(block), (21.0, None))
+
+    def test_missing_or_malformed_block_has_no_values(self) -> None:
+        self.assertEqual(chart.edit_loop_values(None), (None, None))
+        self.assertEqual(chart.edit_loop_values({"sources": []}), (None, None))
 
 
 class PanelScaleTest(unittest.TestCase):

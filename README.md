@@ -53,8 +53,8 @@ for the interactive chart.
 | Runtime | Plain WASI preview 1 on Wasmtime 50; no threads support needed |
 | Standard library | `core`, `alloc` and `compiler_builtins` for `wasm32-unknown-unknown`, built by `rustc.wasm` itself |
 | No LLVM inside | Audited on every CI run: no LLVM imports, no `rustc_codegen_llvm` or `rustc_llvm` code |
-| Compile time | About 79 ms to compile a small `no_std` program inside `rustc.wasm`, about 96 ms from edit to result with the compiler kept loaded (Apple M-series; about 2–3× that on a CI runner) |
-| Incremental | One-line edits reuse rustc's incremental cache in the resident compiler: about 12–14% faster edit to result for 12–18% larger output; opt-in (`--incremental`), off by default |
+| Compile time | About 79 ms to compile a small `no_std` program inside `rustc.wasm` from a fresh guest (Apple M-series). Edit to result through the resident supervisor: 20.8 ms for a small edit and 113–146 ms for a 300–560-line program on a 4-core CI runner (run 45019526253) |
+| Incremental | The supervisor's edit loop is incremental: one rustc guest stays running, each edit reuses rustc's incremental cache for that source (only the codegen units the edit touches are rebuilt), and the swap reuses Wasmtime's compiled code for unchanged functions. Every CI edit is checked byte-identical to a fresh compile. In the `cogwasm-host` CLI, `--incremental` is opt-in: about 12–14% faster, for 12–18% larger output |
 | First load | 37.6 s to compile the 137 MiB `rustc.wasm`, 0.46 s from Wasmtime's cache, **18.7 ms** from a per-host precompiled `.cwasm` (282 MiB); the release bundle ships one per host |
 | Output | A small module of about 18 KB for a typical program (46 KB median over the suite, down from 64 KB), with a growable heap |
 | Performance suite | [`bench/run.sh --quick`](bench/README.md) in CI on every compiler change; the full suite is published from the `bench-results` release |
