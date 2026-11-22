@@ -121,9 +121,10 @@ job, and one long-lived rustc guest that serves every request (patch 0007,
 metadata cached across requests) took the runner from 53.6 to 23.6 ms. Plugin-sized edits (the four 300–560-line medium benchmark programs) take
 220–465 ms on CI through the serving guest; locally they then roughly
 halved (171–363 → 101–179 ms; CI 191–323 ms) once edits reused rustc's incremental state,
-which a cache-key bug had been discarding on every edit. What remains is the
-incremental rebuild plus Wasmtime's native compile of the output module during
-the swap; see
+which a cache-key bug had been discarding on every edit. The swap's native
+compile of the output then went from 18–53 to 2–5 ms (parallel compilation
+plus Wasmtime's incremental cache), so these edits are now 86–134 ms locally
+and almost all rustc's incremental rebuild; see
 [supervisor.md](../docs/notes/supervisor.md) and
 [warm-session.md](../docs/notes/warm-session.md).
 
