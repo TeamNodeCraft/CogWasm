@@ -10,8 +10,8 @@
 #       memmove of the measured peak (~143 MiB) into an already-resident
 #       buffer, and into a freshly allocated one.
 #
-# A measurement, not a gate. Prints tables and ::notice lines. Temporary in
-# CI; kept for manual reruns.
+# A measurement, not a gate. Prints tables and ::notice lines. CI ran it for
+# runs 44975284082 and 44978461782; kept for manual reruns, not run by CI.
 set -euo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 TOOL="$REPO/toolchain"

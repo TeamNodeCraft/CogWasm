@@ -322,12 +322,66 @@ remaining fixed cost (crate loading, session set-up, link) is still the
 lever, and on `json` the per-source work is large too. Next: E2/E4, then
 option A.
 
+## E2 and E4 on the CI runner, and the WASI read fix (2026-11-22)
+
+`ci/profile-fixed-cost.sh` ran on ubuntu-latest (x86_64) in run 44975284082.
+
+**E4 (rustc passes, median of five, ms):**
+
+| pass | macOS | runner, before | runner, after fix (run 44978461782) |
+| --- | ---: | ---: | ---: |
+| `macro_expand_crate` | 10.2 | 74.3 | **20.3** |
+| `resolve_crate` (of which late resolution) | 10.5 | 71.9 (67.8) | **20.3** (19.2) |
+| type check, borrowck, mono, codegen | ≈ 5 | ≈ 5–8 | ≈ 5–9 |
+| `link` | 8.0 | 6.6 | 4.6 |
+| **total, empty crate** | 39.5 | **166.2** | **54.7** |
+
+The runner was not uniformly 4.2× slower: the compiler's own work ran at
+macOS speed, and expansion plus resolution were 88% of the time. **E1 on the
+runner** pinned it on I/O: reading libcore + compiler_builtins rmeta took
+70.8 ms in a fresh guest and 44.7 ms with memory already grown (≈ 1 GB/s).
+
+**Cause.** `wasmtime-wasi` serves a file `fd_read` either directly into wasm
+memory or, unless the context allows blocking the current thread, by
+allocating a zeroed host `Vec` the size of the read, running the read on a
+tokio blocking thread and copying the result in (`p1.rs`, `fd_read`;
+wasmtime issue 7973). Our hosts never set `allow_blocking_current_thread`,
+so every 45 MB rmeta read paid a fresh 45 MB allocation, which on Linux costs
+about as much as E2's fresh-memory figure. **Fix** (`833d995`, in
+`cogwasm-runtime`'s `prepare_instance`): `allow_blocking_current_thread(true)`.
+Both hosts are synchronous and rustc.wasm's memory is not shared, so reads go
+straight into guest memory. Compiler fuel is unchanged.
+
+**E1 after the fix:** 20.6 ms fresh, 7.0 ms with memory grown (runner).
+
+**E2 (restore cost):** a compile peaks at about 143 MiB of guest memory
+whatever the program (bench history: 149.4–151.8 MB). Copying that on the
+runner: 7.7–18.5 ms into resident memory (two runs, different machines),
+60–140 ms into fresh memory. A snapshot restore (option C) is only viable
+into a resident slot, which the pooling allocator provides; at ≈ 8–19 ms it
+costs about as much as the ≈ 40 ms of crate loading and session set-up it
+would skip, minus a margin, so C is not attractive yet.
+
+**Effect on edit → result (CI runner):**
+
+| measurement | before (run 44975284082) | after (run 44978461782) |
+| --- | ---: | ---: |
+| resident `edit-loop`, fixture | 134.9 ms | **53.6 ms** (47.4–55.6) |
+| `cogwasm-host incremental`, plugin (c) | ≈ 290–330 ms | **119–132 ms** |
+
+What is left on the runner for a small edit: ≈ 20 ms expansion and ≈ 20 ms
+resolution (still mostly crate loading: the read is ≈ 7–20 ms of it), ≈ 5 ms
+link, ≈ 10 ms of the rest. Option A (a long-lived guest that keeps the
+metadata) now targets that ≈ 40 ms, which matters for plugin-sized programs
+(plugin (c) is still above 100 ms) more than for the fixture.
+
 ## Recommendation
 
-1. E1 and A0 are done (above): the read is ≈ 7 ms; pooling gives nothing on
-   macOS but −27% on the Linux CI runner (131 → 96.5 ms, under target).
-   A0 was confirmed on CI and is now the resident default (≈ 31–36 ms per
-   job saved). Next: E2 and E4, then option A.
+1. E1, A0, E2 and E4 are done (above). E4 found the real CI cost: WASI file
+   reads going through tokio's blocking pool. With
+   `allow_blocking_current_thread` the runner's edit → result is 53.6 ms,
+   under target. Option A and D are now about margin and larger programs, not
+   about reaching 100 ms on a small edit.
 2. Implement **A** (guest request loop plus metadata cache) and
    **D**'s in-process link, then measure with `edit-loop`. Together they
    plausibly bring the runner to about 110–120 ms.

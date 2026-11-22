@@ -201,12 +201,6 @@ step "edit → result through the resident supervisor"
 python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); load=r["module_load_ms"]; print("::notice title=edit to result::median %.1f ms (target %.0f ms: %s), module load %s ms" % (r["median"], r["target_ms"], "MET" if r["met"] else "MISSED", "unknown" if load is None else "%.1f" % load))' "$TOOL/work/supervisor/edit-loop.json"
 
 
-# G2.3 experiments E1, E2, E4 (docs/notes/warm-session.md): rustc's per-pass
-# times, the guest metadata read, and a snapshot-restore memmove, measured on
-# this runner. Temporary; remove once recorded.
-step "G2.3 fixed-cost profile (E1, E2, E4)"
-"$CI_DIR/profile-fixed-cost.sh"
-
 # Differential test: the same 48 no_std+alloc corpus programs plus 24 seeded
 # random programs are compiled by LLVM rustc and by rustc.wasm+cg_clif, run in
 # Wasmtime, and compared bit-for-bit (u64 return + output buffer). A trap in

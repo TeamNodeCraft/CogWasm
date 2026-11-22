@@ -112,10 +112,14 @@ Tier 2's host side is planned in [supervisor.md](../docs/notes/supervisor.md): t
 Today: the first load compiles the 137 MB `rustc.wasm` to native code (about
 38 s); later loads come from Wasmtime's cache in about 0.46 s, or in about
 19 ms from a per-host precompiled `.cwasm`. With `rustc.wasm` kept loaded,
-a one-line edit of a small program reaches a running result in 41 ms on
-macOS arm64 and **174 ms on the CI runner** (target 100 ms). About 90% of that
-is fixed per-invocation work inside rustc (≈ 19 ms loading sysroot crate
-metadata, ≈ 8 ms session set-up, ≈ 8 ms linking, macOS figures); see
+a one-line edit of a small program reaches a running result in about 41 ms on
+macOS arm64 and **53.6 ms on the CI runner** (was 174 ms; target 100 ms). The
+CI gap was WASI file reads going through tokio's blocking pool with a fresh
+host buffer per read (45 MB for libcore's metadata), fixed by letting WASI
+block the calling thread; the pooling allocator saved another ≈ 31–36 ms per
+job. A plugin-sized edit (plugin (c)) is about 120–130 ms on CI; most of what
+remains is fixed per-invocation work inside rustc (crate loading, session
+set-up, link); see
 [supervisor.md](../docs/notes/supervisor.md) and
 [warm-session.md](../docs/notes/warm-session.md).
 
@@ -125,7 +129,7 @@ metadata, ≈ 8 ms session set-up, ≈ 8 ms linking, macOS figures); see
 | **done** | Incremental compilation kept across edits (opt-in; 12–14% faster edit-to-result, +12–18% output) | One-line edits measurably faster than a cold compile |
 | **in progress** | Snapshot an already-initialised compiler, so starting skips set-up; copy-on-write memory instantiation. Profiling showed the set-up worth skipping lives inside a rustc session (crate metadata, session state), not in guest start-up (≈ 3 ms), so the work is now "a warm rustc across compiles": design note with options and experiments in [warm-session.md](../docs/notes/warm-session.md). E1 done (reading the 45 MB `libcore.rmeta` costs ≈ 7 ms per compile); the resident backend now uses Wasmtime's pooling allocator with 256 MiB kept resident, which saves ≈ 31–36 ms per job on the CI runner (small fixture 125 → 93 ms; plugin-sized `json` 539 → 503 ms) and nothing on macOS | Instantiation in about 10 ms |
 | **open** | A smaller `rustc.wasm` (drop Clippy, rustfmt and unused targets from the build) | Size and load time measured before/after |
-| **in progress** | A resident compiler service in the host (keep `rustc.wasm` loaded, reuse its caches). Done: the compile path is a library (`cogwasm_host::compile`), the supervisor has a resident backend (`--backend resident`, one engine and module, fresh guest per job), and CI measures edit → result with `cogwasm-supervisor edit-loop` on every push. Instantiation, swap and call cost about 1 ms; the rest is rustc. **CI runner: 174 ms, target not met yet** (macOS 41 ms); closing the gap is the warm-session work above | Edit → result under 100 ms on a CI runner |
+| **done** | A resident compiler service in the host (keep `rustc.wasm` loaded, reuse its caches): the compile path is a library (`cogwasm_host::compile`), the supervisor has a resident backend (`--backend resident`: one engine and module, pooled memory, a fresh guest per job), WASI reads go straight into guest memory, and CI measures edit → result with `cogwasm-supervisor edit-loop` on every push. **CI runner: 53.6 ms** for a small edit (run 44978461782; was 174 ms). Plugin-sized edits (≈ 120–130 ms on CI) are the warm-session item's next target | Edit → result under 100 ms on a CI runner |
 
 The resident service and tier 2 share the supervisor planned in [supervisor.md](../docs/notes/supervisor.md).
 

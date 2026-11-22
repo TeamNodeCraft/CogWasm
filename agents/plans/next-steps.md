@@ -174,9 +174,17 @@ runner, where the edit is 174 ms against the 100 ms target).
         `json` 539 → 503 ms); pooling with nothing resident saves nothing.
         Now the resident backend's default (`Allocation::RESIDENT_DEFAULT`);
         temporary CI step removed, `ci/edit-loop-ab.sh` kept for reruns.
-1c. [ ] E2 (guest memory size / restore cost), E4 (per-pass ratio on CI).
-2. [ ] Prototype the cheapest variant and measure with `edit-loop`.
-3. [ ] Acceptance: CI edit → result under 100 ms; difftest green.
+1c. [x] E2 and E4 on the runner. E4: expansion + resolution were 146 of
+        166 ms; E1 on the runner: the rmeta read 71 ms. Cause: WASI reads
+        through tokio's blocking pool with a fresh host buffer per read.
+        Fixed by `allow_blocking_current_thread` (`833d995`): **CI edit →
+        result 134.9 → 53.6 ms**, plugin (c) incremental ≈ 300 → 120–130 ms.
+        E2: 143 MiB peak guest memory; restore 8–19 ms into resident memory.
+2. [ ] Option A (long-lived guest keeping sysroot metadata) for the
+       remaining ≈ 40 ms of crate loading and session set-up; measure on a
+       plugin-sized source (plugin (c), `json`), where CI is still over 100 ms.
+3. [x] Acceptance for the small edit: CI edit → result under 100 ms (53.6 ms,
+       run 44978461782); difftest green. Plugin-sized edits are the next bar.
 
 ### G1.1. Finish step 5b: SROA / mem2reg after the inliner (L)
 
