@@ -569,7 +569,22 @@ compile:
 | `json` | 228.4 ms | 127.1 ms | 102 ms | 25 ms |
 | `scene` | 183.6 ms | 107.1 ms | 89 ms | 20 ms |
 
-The small fixture is unchanged (28.3 → 28.8 ms in back-to-back local runs):
+**CI runner** (run 45010327232, `f35c2cd`; 5 edits per run, all
+byte-identical; difftest green), serving guest:
+
+| source | before (run 45000755486) | after | change |
+| --- | ---: | ---: | ---: |
+| `collections` | 464.4 ms | 323.1 ms | −30% |
+| `json` | 304.4 ms | 239.3 ms | −21% |
+| `scene` | 232.4 ms | 199.6 ms | −14% |
+| `expr` | 219.7 ms | 191.3 ms | −13% |
+
+The runner gains less than the Mac (−13 to −30% against −41 to −51%): its
+non-rustc share (swap, guest set-up) is larger. Serving now saves 35–40 ms
+per edit on the runner against one guest per job.
+
+The small fixture is unchanged (28.3 → 28.8 ms in back-to-back local runs;
+25.7 ms on CI in the same run):
 it is too small for incremental reuse to matter. What remains per edit is
 ≈ 19 ms of macro expansion, re-codegen of the edited CGU (10–14 ms), the
 incremental save (≈ 10–30 ms), the link, and the swap, which is now 15–30%
