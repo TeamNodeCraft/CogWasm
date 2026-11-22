@@ -564,9 +564,7 @@
       "one point per successful quick run on main, from the append-only " +
       "<code>bench-history</code> release. Instruction lines are exact counts " +
       "from basic-block instrumentation; compiler work is Wasmtime fuel. " +
-      "Static image for the README: " +
-      "<a href=\"https://github.com/" + escapeHtml(repo) +
-      "/releases/download/bench-history/chart.svg\">chart.svg</a>.";
+      "Static image for the README: <a href=\"bench/chart.svg\">chart.svg</a>.";
   }
 
   function fail(message) {

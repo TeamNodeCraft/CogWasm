@@ -49,11 +49,15 @@ The permanent compile-time and execution suite lives in [`bench/`](bench/README.
 it reports compiler start, compile phases, execution against LLVM `-O0`/`-O2`
 and output size, and checks every result bit-for-bit before reporting a timing.
 
-[![CogWasm benchmark trend: execution time and module size against LLVM -O2, plus compile speed, one point per commit](https://github.com/TeamNodeCraft/CogWasm/releases/download/bench-history/chart.svg)](https://teamnodecraft.github.io/CogWasm/#benchmarks)
+[![CogWasm benchmark trend: execution time and module size against LLVM -O2, plus compile speed and edit to result, one point per commit](https://teamnodecraft.github.io/CogWasm/bench/chart.svg)](https://teamnodecraft.github.io/CogWasm/#benchmarks)
+
+<!-- The image is the GitHub Pages copy: the bench-history release serves
+     chart.svg as application/octet-stream, which GitHub will not show as an
+     image. Each Pages deploy after a CI run refreshes it. -->
 
 Each point is one CI commit: execution and module size relative to LLVM -O2
-(lower is better), plus warm, incremental and precompiled compile time — click
-for the interactive chart.
+(lower is better), plus warm, incremental and precompiled compile time and the
+resident edit loop's edit to result — click for the interactive chart.
 
 | | |
 | --- | --- |
