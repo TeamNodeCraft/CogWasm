@@ -478,6 +478,39 @@ the host session, then the supervisor and the CI checks.
   literal and stopped compiling when the new fields were added (fixed in
   `9692fb0`; the whole workspace is now checked, not only touched crates).
 
+**Plugin-sized sources (2026-11-22).** `ci/edit-loop-sources.sh` runs the
+four `bench/programs/medium` programs (309–562 lines plus the prelude, all
+using `alloc`) through the resident supervisor, serving and one guest per
+job, in the order serve, job, job, serve, with `--verify-cold`. Plugin (c)
+cannot go through `edit-loop`: it exports `eval(params, len, out)`, not
+`run(u64)`.
+
+The first run found a second cross-session bug: `collections` failed on its
+fourth serving edit in `verify_query_key_hashes` (two query keys with one
+stable hash). rustc caches the stable hashes of interned lists
+(`ty/impls_ty.rs`) and of `AdtDefData` (`ty/adt.rs`) in thread-locals keyed by
+arena address; a fresh thread starts with them empty, but on the reused thread
+a later session could get a stale fingerprint for a different value at the
+same address. They are now cleared when a wasm session ends
+(`ty::clear_thread_stable_hash_caches`, in `0007`). An audit of every compiler
+thread-local found no other address-keyed state; the attribute parsers' state
+objects are taken by each finalizer (a fatal error between an attribute's
+accept and finalize is the one case not reset).
+
+After the fix, locally (macOS arm64), 10 edits per run, all byte-identical:
+
+| source | serving | one guest per job | saving |
+| --- | ---: | ---: | ---: |
+| `collections` (309 lines) | 363.3 ms | 379.9 ms | −16.7 ms (−4%) |
+| `expr` (475) | 173.3 ms | 190.3 ms | −17.1 ms (−9%) |
+| `json` (562) | 228.4 ms | 243.9 ms | −15.4 ms (−6%) |
+| `scene` (499) | 183.6 ms | 199.2 ms | −15.7 ms (−8%) |
+
+The saving is the same fixed ≈ 15–17 ms; per-source work dominates these
+programs. For `collections` the swap (Wasmtime compiling the 250 KB output to
+native code) is ≈ 57 ms of its edit → result, a cost the small fixture does not
+show. CI numbers: the step runs on every push.
+
 ## Recommendation
 
 1. E1, A0, E2 and E4 are done (above). E4 found the real CI cost: WASI file

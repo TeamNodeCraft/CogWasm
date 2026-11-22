@@ -37,15 +37,29 @@ registry"). `Registry`'s thread-local is now a `RefCell<Option<_>>` with
 `Registry::unregister_current_thread`, and the wasm path of
 `run_in_thread_with_globals` detaches the thread when a session ends,
 including when a fatal error unwinds.
+
+The same reasoning applies to two stable-hash caches in rustc_middle that are
+thread-locals keyed by arena addresses (interned lists in ty/impls_ty.rs and
+AdtDefData in ty/adt.rs). A fresh thread starts with them empty; on the
+reused thread a later session could get a previous session's fingerprint for
+a different value at the same address, which `verify_query_key_hashes`
+caught as two query keys with one hash. They are now module-level
+thread-locals cleared by `ty::clear_thread_stable_hash_caches`, called next
+to the registry detach when a wasm session ends. No other compiler
+thread-local is keyed by address; the attribute parsers' state objects are
+taken by each finalizer.
 ---
  .../rustc_codegen_ssa/src/back/metadata.rs    | 16 ++--
  .../src/sync/worker_local.rs                  | 30 +++++--
  compiler/rustc_driver_impl/src/lib.rs         | 88 +++++++++++++++++++
- compiler/rustc_interface/src/util.rs          |  5 ++
+ compiler/rustc_interface/src/util.rs          |  8 ++
  compiler/rustc_metadata/src/cache.rs          | 72 +++++++++++++++
  compiler/rustc_metadata/src/lib.rs            |  2 +
  compiler/rustc_metadata/src/locator.rs        | 35 ++++----
- 7 files changed, 220 insertions(+), 28 deletions(-)
+ compiler/rustc_middle/src/ty/adt.rs           | 17 ++--
+ compiler/rustc_middle/src/ty/impls_ty.rs      | 27 ++++--
+ compiler/rustc_middle/src/ty/mod.rs           |  1 +
+ 10 files changed, 257 insertions(+), 39 deletions(-)
 
 diff --git a/compiler/rustc_codegen_ssa/src/back/metadata.rs b/compiler/rustc_codegen_ssa/src/back/metadata.rs
 index 45dcde58d..69bb55893 100644
@@ -250,18 +264,21 @@ index 8b5d38184..01ebd370d 100644
          catch_with_exit_code(|| compiler_entrypoint(&args::raw_args(&early_dcx), &mut callbacks));
  
 diff --git a/compiler/rustc_interface/src/util.rs b/compiler/rustc_interface/src/util.rs
-index 6b5e1731b..b751be3ad 100644
+index 6b5e1731b..469cf146b 100644
 --- a/compiler/rustc_interface/src/util.rs
 +++ b/compiler/rustc_interface/src/util.rs
-@@ -196,6 +196,11 @@ fn run_in_thread_with_globals<F: FnOnce(CurrentGcx) -> R + Send, R: Send>(
+@@ -196,6 +196,14 @@ fn run_in_thread_with_globals<F: FnOnce(CurrentGcx) -> R + Send, R: Send>(
      #[cfg(target_arch = "wasm32")]
      {
          let _ = thread_stack_size;
-+        // A spawned thread would start every session with no registry; this
-+        // one thread must look the same to the next session, including after
-+        // a fatal error unwinds out of `run` (a serving rustc, COGWASM_SERVE,
-+        // runs many sessions here).
-+        let _detach = rustc_data_structures::defer(sync::Registry::unregister_current_thread);
++        // A spawned thread would start every session with no registry and
++        // empty address-keyed hash caches; this one thread must look the same
++        // to the next session, including after a fatal error unwinds out of
++        // `run` (a serving rustc, COGWASM_SERVE, runs many sessions here).
++        let _fresh_thread = rustc_data_structures::defer(|| {
++            sync::Registry::unregister_current_thread();
++            rustc_middle::ty::clear_thread_stable_hash_caches();
++        });
          run()
      }
  
@@ -409,3 +426,90 @@ index 3097de335..2194c1167 100644
  }
  
  /// A diagnostic function for dumping crate metadata to an output stream.
+diff --git a/compiler/rustc_middle/src/ty/adt.rs b/compiler/rustc_middle/src/ty/adt.rs
+index 5b57f802c..72ad3e3cf 100644
+--- a/compiler/rustc_middle/src/ty/adt.rs
++++ b/compiler/rustc_middle/src/ty/adt.rs
+@@ -156,13 +156,20 @@ fn hash<H: Hasher>(&self, s: &mut H) {
+     }
+ }
+ 
++thread_local! {
++    /// Stable hashes of `AdtDefData`, keyed by its address; only meaningful
++    /// within one compiler session (see `clear_thread_stable_hash_caches`).
++    static ADT_HASH_CACHE: RefCell<FxHashMap<(usize, StableHashControls), Fingerprint>> =
++        Default::default();
++}
++
++pub(super) fn clear_adt_hash_cache() {
++    ADT_HASH_CACHE.with_borrow_mut(|cache| cache.clear());
++}
++
+ impl StableHash for AdtDefData {
+     fn stable_hash<Hcx: StableHashCtxt>(&self, hcx: &mut Hcx, hasher: &mut StableHasher) {
+-        thread_local! {
+-            static CACHE: RefCell<FxHashMap<(usize, StableHashControls), Fingerprint>> = Default::default();
+-        }
+-
+-        let hash: Fingerprint = CACHE.with(|cache| {
++        let hash: Fingerprint = ADT_HASH_CACHE.with(|cache| {
+             let addr = self as *const AdtDefData as usize;
+             let stable_hash_controls = hcx.stable_hash_controls();
+             *cache.borrow_mut().entry((addr, stable_hash_controls)).or_insert_with(|| {
+diff --git a/compiler/rustc_middle/src/ty/impls_ty.rs b/compiler/rustc_middle/src/ty/impls_ty.rs
+index a40404872..daa794457 100644
+--- a/compiler/rustc_middle/src/ty/impls_ty.rs
++++ b/compiler/rustc_middle/src/ty/impls_ty.rs
+@@ -13,6 +13,26 @@
+ 
+ use crate::{mir, ty};
+ 
++thread_local! {
++    /// Stable hashes of interned lists, keyed by the list's address. The
++    /// address is only meaningful within one compiler session: see
++    /// [`clear_thread_stable_hash_caches`].
++    static LIST_HASH_CACHE: RefCell<FxHashMap<(*const (), StableHashControls), Fingerprint>> =
++        RefCell::new(Default::default());
++}
++
++/// Forget the stable-hash caches that are keyed by arena addresses.
++///
++/// rustc normally runs each compiler session on a freshly spawned thread, so
++/// these thread-locals start empty. A wasm rustc runs every session on its
++/// only thread, and one that serves many requests (`COGWASM_SERVE`) would
++/// otherwise reuse a previous session's fingerprint for a different list or
++/// ADT that the new session's arena placed at the same address.
++pub fn clear_thread_stable_hash_caches() {
++    LIST_HASH_CACHE.with_borrow_mut(|cache| cache.clear());
++    super::adt::clear_adt_hash_cache();
++}
++
+ impl<'tcx, H, T> StableHash for &'tcx ty::list::RawList<H, T>
+ where
+     T: StableHash,
+@@ -21,12 +41,7 @@ fn stable_hash<Hcx: StableHashCtxt>(&self, hcx: &mut Hcx, hasher: &mut StableHas
+         // Note: this cache makes an *enormous* performance difference on certain benchmarks. E.g.
+         // without it, compiling `diesel-2.2.10` can be 74% slower, and compiling
+         // `deeply-nested-multi` can be ~4,000x slower(!)
+-        thread_local! {
+-            static CACHE: RefCell<FxHashMap<(*const (), StableHashControls), Fingerprint>> =
+-                RefCell::new(Default::default());
+-        }
+-
+-        let hash = CACHE.with(|cache| {
++        let hash = LIST_HASH_CACHE.with(|cache| {
+             let key = (ptr::from_ref(*self).cast::<()>(), hcx.stable_hash_controls());
+             if let Some(&hash) = cache.borrow().get(&key) {
+                 return hash;
+diff --git a/compiler/rustc_middle/src/ty/mod.rs b/compiler/rustc_middle/src/ty/mod.rs
+index a4d22ea99..4ce4604ba 100644
+--- a/compiler/rustc_middle/src/ty/mod.rs
++++ b/compiler/rustc_middle/src/ty/mod.rs
+@@ -21,6 +21,7 @@
+ use std::{assert_matches, fmt, iter, str};
+ 
+ pub use adt::*;
++pub use impls_ty::clear_thread_stable_hash_caches;
+ pub use assoc::*;
+ pub use generic_args::{GenericArgKind, TermKind, *};
+ pub use generics::*;

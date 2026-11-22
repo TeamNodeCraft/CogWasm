@@ -186,8 +186,12 @@ runner, where the edit is 174 ms against the 100 ms target).
        Phase 1 done (`0007-wasm-serve-loop.patch`, `ServeSession`,
        `--verify-cold`): **CI edit → result 53.6 → 23.6 ms** (run
        44997648351), byte-identical to cold compiles; locally −11 to −14 ms
-       per job. Next: measure plugin (c) and `json` through the serving path
-       on CI, where the fixed saving matters less than per-source work.
+       per job. Plugin-sized sources (`ci/edit-loop-sources.sh`, four
+       medium programs, in CI): serving saves a fixed ≈ 15–17 ms locally
+       (−4 to −9%); found and fixed address-keyed hash caches leaking across
+       sessions. Next for these sizes: per-source compile time (G1/G2.2) and
+       the output module's native compile in the swap (≈ 57 ms for a 250 KB
+       module).
 3. [x] Acceptance for the small edit: CI edit → result under 100 ms (53.6 ms,
        run 44978461782); difftest green. Plugin-sized edits are the next bar.
 

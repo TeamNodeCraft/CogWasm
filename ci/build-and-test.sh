@@ -202,6 +202,13 @@ step "edit → result through the resident supervisor"
 python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); load=r["module_load_ms"]; print("::notice title=edit to result::median %.1f ms (target %.0f ms: %s), module load %s ms" % (r["median"], r["target_ms"], "MET" if r["met"] else "MISSED", "unknown" if load is None else "%.1f" % load))' "$TOOL/work/supervisor/edit-loop.json"
 
 
+# Plugin-sized sources (the four bench/programs/medium programs) through the
+# same resident supervisor: serving vs one guest per job, every edit checked
+# byte-identical to a cold compile. Larger programs exercise more of the
+# compiler's per-thread state than the fixture above.
+step "edit -> result, plugin-sized sources (serving vs per job)"
+"$CI_DIR/edit-loop-sources.sh"
+
 # Differential test: the same 48 no_std+alloc corpus programs plus 24 seeded
 # random programs are compiled by LLVM rustc and by rustc.wasm+cg_clif, run in
 # Wasmtime, and compared bit-for-bit (u64 return + output buffer). A trap in
