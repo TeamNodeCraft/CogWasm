@@ -87,7 +87,7 @@ jobs:
       - name: free space
         uses: jlumbroso/free-disk-space@main
         with:
-          tool-cache: true
+          preinstalled-runtimes: true
 
           android: true
           dotnet: true
@@ -243,7 +243,7 @@ jobs:
       - name: free space
         uses: jlumbroso/free-disk-space@main
         with:
-          tool-cache: true
+          preinstalled-runtimes: true
 
           android: true
           dotnet: true
