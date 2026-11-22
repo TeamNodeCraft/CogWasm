@@ -257,10 +257,44 @@ so `ci/build-and-test.sh` runs one pooling `edit-loop` beside the default one
 and reports it as a separate notice (temporary). If Linux shows no gain
 either, A0 is dropped and the opt-in removed.
 
+### A0 on Linux (CI run 44969263935, `b29b814`, ubuntu-latest x86_64)
+
+The same job ran `edit-loop` twice back to back: the default allocator, then
+pooling with `COGWASM_POOLING_KEEP_RESIDENT_MB=1024`.
+
+| allocator | per-edit edit → result (10 edits) | median | cold build |
+| --- | --- | ---: | ---: |
+| default (on demand) | 130.4–136.5 ms | **131.3 ms** | 150 ms |
+| pooling, keep resident 1 GiB | 93.0–104.1 ms | **96.5 ms** | 162 ms |
+
+**On Linux pooling cuts edit → result by about 35 ms (−27%) and meets the
+100 ms target**, where macOS showed nothing. All of the difference is in the
+build (swap 0.8 ms and link 4 ms are the same in both), i.e. in rustc's run
+inside the guest: on Linux, mapping fresh linear memory for every job and
+faulting in its pages is expensive, and reusing a resident, in-place-zeroed
+slot avoids it. The default loop shows no warm-up trend over its ten edits,
+so running second does not explain the gap.
+
+Caveats:
+
+- One run, one order. Runner hardware varies between runs (the default
+  allocator measured 174 ms on run 44912655095 and 131 ms here), so the
+  comparison is only valid within a job. It should be repeated with the order
+  swapped and with other keep-resident sizes (0, 256 MiB) before the
+  setting is fixed.
+- The first build is slower with pooling (162 vs 150 ms), the cost of setting
+  up the slot.
+- With `keep_resident` at 1 GiB, each job zeroes up to 1 GiB in place, so on a
+  job that touches more memory the saving could shrink. Plugin-sized sources
+  should be measured too.
+
 ## Recommendation
 
 1. E1 and A0 are done (above): the read is ≈ 7 ms; pooling gives nothing on
-   macOS (Linux pending in CI). Next, run E2 and E4.
+   macOS but −27% on the Linux CI runner (131 → 96.5 ms, under target).
+   Next: confirm A0 on CI (swapped order, keep-resident sizes, a plugin-sized
+   source), make it the resident backend's default if it holds, then run E2
+   and E4 for the rest of the margin.
 2. Implement **A** (guest request loop plus metadata cache) and
    **D**'s in-process link, then measure with `edit-loop`. Together they
    plausibly bring the runner to about 110–120 ms.

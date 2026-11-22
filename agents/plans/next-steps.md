@@ -165,9 +165,14 @@ runner, where the edit is 174 ms against the 100 ms target).
 1a. [x] E1: the rmeta read is ≈ 7 ms of ≈ 19 ms crate loading (≈ 80% of
         `core`'s expansion cost); half of it, and an estimated ~10 ms over the
         whole compile, is first-touch of fresh guest memory.
-1b. [ ] A0: Wasmtime pooling allocator (host-only), opt-in `COGWASM_POOLING=1`.
-        macOS: no gain (40 ms default vs 41–45 ms pooled). Linux comparison
-        runs in CI; drop the opt-in and the CI step if it shows none either.
+1b. [x] A0: Wasmtime pooling allocator (host-only), opt-in `COGWASM_POOLING=1`.
+        macOS: no gain (40 ms default vs 41–45 ms pooled). **Linux CI: 131.3 →
+        96.5 ms median (−27%), under the 100 ms target** (run 44969263935,
+        keep resident 1 GiB).
+1d. [ ] Confirm A0 on CI: swapped order, keep-resident 0 / 256 MiB / 1 GiB,
+        and a plugin-sized source; then make pooling the resident backend's
+        default (engine config only for the supervisor's resident path; the
+        `.cwasm` stays compatible) and drop the temporary CI step.
 1c. [ ] E2 (guest memory size / restore cost), E4 (per-pass ratio on CI).
 2. [ ] Prototype the cheapest variant and measure with `edit-loop`.
 3. [ ] Acceptance: CI edit → result under 100 ms; difftest green.
