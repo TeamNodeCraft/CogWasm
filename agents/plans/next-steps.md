@@ -126,10 +126,15 @@ paying the module load each time; the in-process path
 3. [x] Golden test: two jobs in one process load the module once.
        Lives in `crates/cogwasm-supervisor/tests/resident.rs`
        (`two_jobs_share_one_loaded_module_and_survive_a_rejection`).
-4. [ ] Measure edit → result on the CI runner (`bench` gains a resident
+4. [x] Measure edit → result on the CI runner (`bench` gains a resident
        mode); record against the 100 ms target.
-       Measured by `cogwasm-supervisor edit-loop` (CI step in `ci/build-and-test.sh`; results in `docs/notes/supervisor.md`; CI number pending).
-5. [ ] If instantiation dominates, this hands over to G2.2.
+       `cogwasm-supervisor edit-loop`, run by `ci/build-and-test.sh` on every
+       push. CI run 44912655095: median 174.1 ms, **target missed**; local
+       macOS arm64 41 ms. Breakdown in `docs/notes/supervisor.md`.
+5. [x] If instantiation dominates, this hands over to G2.2.
+       It does not: instantiation 0.2 ms, swap 0.8 ms, link 4 ms; ~170 ms is
+       rustc inside the guest. Next for Goal 2 is cutting rustc.wasm's
+       per-invocation set-up (snapshot after session/prelude load), not G2.2.
 
 ### G1.1. Finish step 5b: SROA / mem2reg after the inliner (L)
 

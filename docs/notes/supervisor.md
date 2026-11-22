@@ -275,7 +275,7 @@ cargo run --release -p cogwasm-supervisor -- edit-loop \
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | local, macOS arm64 (2026-11-22) | resident | 10 | 41.3 ms | 42.0 ms | 40.3 ms | 43.2 ms | 264.4 ms |
 | local, macOS arm64 (2026-11-22) | host | 10 | 72.8 ms | 78.8 ms | 67.3 ms | 80.0 ms | per job (not measured) |
-| CI runner (ubuntu-latest) | resident | 10 | pending | pending | pending | pending | pending |
+| CI runner (ubuntu-latest, x86_64, 4 jobs; run 44912655095, `6934ed5`) | resident | 10 | 174.1 ms | 183.4 ms | 168.6 ms | 183.4 ms | 18.7 ms |
 
 Both local runs met the 100 ms target. The fixture is deliberately small (one
 `no_std` function, no dependencies, no incremental cache), so these numbers are
@@ -286,6 +286,23 @@ plugin-sized `edit-loop` fixture is the next refinement. The CI step "edit → r
 resident supervisor" in `ci/build-and-test.sh` prints the median and module
 load as a GitHub notice. It is a measurement, not a gate: it exits non-zero
 only when the build or call correctness assertions fail.
+
+### Where the CI time goes
+
+On the runner the target is **missed** (174 ms against 100 ms), and almost all
+of it is rustc itself running inside the guest: per edit, build ≈ 170 ms
+(of which the Wild link is 4 ms), swap 0.8 ms, call 0 ms, guest
+instantiation 0.2 ms (from the host's `incremental` step in the same run).
+The resident machinery is therefore not the bottleneck; the runner executes
+rustc.wasm about 4× slower than the M-series Mac. The same run's plugin (c)
+incremental edit-to-result is about 300 ms (`compile` ≈ 255–330 ms).
+
+So G2.1 step 5's hand-over condition ("instantiation dominates") does not
+hold. Closing the gap is front-end and codegen time inside rustc.wasm: the
+fixed per-invocation set-up (session creation, `expand_crate`'s ~22 ms of
+prelude/std loading measured earlier), which the Goal 2 snapshot work
+targets, and the compile itself (G1.1 and a smaller rustc.wasm, G2.2, help
+less directly).
 
 ## State across a swap (M4)
 
