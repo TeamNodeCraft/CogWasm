@@ -22,6 +22,7 @@
 
 pub mod compiler;
 pub mod edit;
+pub mod incremental_cache;
 pub mod job;
 pub mod real;
 pub mod resident;

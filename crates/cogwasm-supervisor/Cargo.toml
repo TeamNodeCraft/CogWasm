@@ -21,7 +21,15 @@ serde_json = "1"
 sha2 = { workspace = true }
 # The real runtime for the M3 swap demo; `wat` lets tests build an instance
 # without a toolchain.
-wasmtime = { workspace = true, features = ["cranelift", "runtime", "std", "anyhow", "wat"] }
+wasmtime = { workspace = true, features = [
+    "cranelift",
+    "runtime",
+    "std",
+    "anyhow",
+    "wat",
+    "parallel-compilation",
+    "incremental-cache",
+] }
 
 [dev-dependencies]
 tempfile = "3"

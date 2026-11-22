@@ -593,6 +593,34 @@ cache is the obvious lever for the swap. `-Zself-profile` cannot split the
 backend further inside the guest: it panics asking for a process id, which
 wasip1 does not have.
 
+### The swap: parallel compilation and Wasmtime's incremental cache
+
+The supervisor's `WasmtimeRuntime` compiled each output with
+`Engine::default()` and without Wasmtime's `parallel-compilation` or
+`incremental-cache` features, so every swap compiled every function on one
+thread. It now builds its engine with both: functions compile in parallel,
+and Cranelift's per-function results go to an in-memory `CacheStore`
+(`incremental_cache.rs`, 256 MiB cap, oldest first), so functions an edit did
+not change reuse their machine code. `COGWASM_SWAP_PARALLEL=0` and
+`COGWASM_SWAP_INCREMENTAL=0` turn each off.
+
+Locally (macOS arm64, quiet machine), serving guest, 8 edits per run, every
+edit byte-identical to a cold compile, median swap / edit → result:
+
+| source | neither | parallel | incremental | both |
+| --- | ---: | ---: | ---: | ---: |
+| `collections` | 52.8 / 179.7 ms | 9.0 / 136.1 | 20.2 / 152.6 | 4.8 / 133.6 |
+| `json` | 25.7 / 126.2 | 4.8 / 106.4 | 10.0 / 113.8 | 2.8 / 106.5 |
+| `scene` | 19.8 / 104.4 | 4.2 / 94.0 | 7.9 / 93.6 | 2.8 / 91.9 |
+| `expr` | 18.2 / 103.1 | 3.9 / 87.0 | 6.8 / 92.0 | 2.2 / 85.6 |
+
+rustc's build time is unchanged within noise (the rayon pool does not slow
+the guest). The swap is now 2–5 ms, so a plugin-sized edit is almost all
+rustc's incremental rebuild. The CI runner has fewer cores, so parallel
+compilation should help it less and the cache relatively more. A first
+attempt at this measurement ran while another build was using about ten
+cores (load 18) and was discarded.
+
 ## Recommendation
 
 1. E1, A0, E2 and E4 are done (above). E4 found the real CI cost: WASI file

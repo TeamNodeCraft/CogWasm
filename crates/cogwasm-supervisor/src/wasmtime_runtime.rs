@@ -14,8 +14,10 @@
 //! one exists and has accepted the state.
 
 use anyhow::{Result, anyhow, bail};
-use wasmtime::{Engine, Instance as WasmInstance, Memory, Module, Store, TypedFunc};
+use std::sync::Arc;
+use wasmtime::{Config, Engine, Instance as WasmInstance, Memory, Module, Store, TypedFunc};
 
+use crate::incremental_cache::InMemoryCacheStore;
 use crate::runtime::{Instance, Runtime};
 use crate::store::{Artifact, ArtifactMeta};
 
@@ -35,10 +37,39 @@ pub struct WasmtimeRuntime {
     modules: std::sync::Mutex<std::collections::HashMap<String, Module>>,
 }
 
+/// Builds the engine that compiles swaps.
+///
+/// The configuration otherwise matches [`Engine::default`]: the same Cranelift
+/// compiler and optimisation level. Two environment variables make the swap
+/// optimisations switchable for A/B measurement; both are enabled unless they
+/// are set to `0`:
+///
+/// - `COGWASM_SWAP_PARALLEL=0` compiles the module's functions on one thread
+///   instead of using [`Config::parallel_compilation`].
+/// - `COGWASM_SWAP_INCREMENTAL=0` disables the in-memory
+///   [`InMemoryCacheStore`] behind
+///   [`Config::enable_incremental_compilation`], so every function is compiled
+///   again on every swap.
+fn build_engine() -> Engine {
+    let mut config = Config::new();
+    config.parallel_compilation(env_enabled("COGWASM_SWAP_PARALLEL"));
+    if env_enabled("COGWASM_SWAP_INCREMENTAL") {
+        config
+            .enable_incremental_compilation(Arc::new(InMemoryCacheStore::default()))
+            .expect("the supervisor's incremental cache configuration is valid");
+    }
+    Engine::new(&config).expect("the supervisor's Wasmtime engine configuration is valid")
+}
+
+/// Whether an opt-out environment variable is unset or anything but `0`.
+fn env_enabled(name: &str) -> bool {
+    std::env::var_os(name).is_none_or(|value| value != "0")
+}
+
 impl Default for WasmtimeRuntime {
     fn default() -> Self {
         Self {
-            engine: Engine::default(),
+            engine: build_engine(),
             modules: std::sync::Mutex::new(std::collections::HashMap::new()),
         }
     }
