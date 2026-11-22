@@ -208,6 +208,8 @@ fn store_options(fuel: Option<u64>, deterministic_random: bool) -> StoreOptions 
         fuel,
         limits: Some(Limits::default()),
         deterministic_clock: fuel.is_some(),
+        // One guest per measured compile: no extra environment, no serving.
+        ..StoreOptions::default()
     }
 }
 
