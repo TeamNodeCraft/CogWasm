@@ -149,8 +149,11 @@ runner, where the edit is 174 ms against the 100 ms target).
        Drafted in `docs/notes/warm-session.md`: options A (long-lived guest +
        metadata cache), C (warm session template), D (cheaper fixed work,
        in-process Wild); experiments E1–E4 decide between them.
-1a. [ ] Run E1 (is crate loading mostly the 45 MB `libcore.rmeta` read?),
-        E2 (memory size / restore cost), E4 (per-pass ratio on CI).
+1a. [x] E1: the rmeta read is ≈ 7 ms of ≈ 19 ms crate loading (≈ 80% of
+        `core`'s expansion cost); half of it, and an estimated ~10 ms over the
+        whole compile, is first-touch of fresh guest memory.
+1b. [ ] A0: Wasmtime pooling allocator (host-only) measured with `edit-loop`.
+1c. [ ] E2 (guest memory size / restore cost), E4 (per-pass ratio on CI).
 2. [ ] Prototype the cheapest variant and measure with `edit-loop`.
 3. [ ] Acceptance: CI edit → result under 100 ms; difftest green.
 

@@ -179,10 +179,62 @@ Each takes under a day and decides a branch:
   is not concentrated in I/O. If I/O dominates on the runner, A is worth more
   there than on the Mac.
 
+## E1 result: the metadata read (2026-11-22, macOS arm64)
+
+Probe: [`warm-session-e1-probe.rs`](warm-session-e1-probe.rs), built for
+`wasm32-wasip1` with the pinned stable toolchain and run through
+`cogwasm-host raw --rustc probe.wasm -- 3 <libcore.rmeta> <libcompiler_builtins.rmeta>`,
+so it gets the same engine configuration, WASI context and `/` preopen as
+rustc.wasm. It does exactly what rustc's wasm32 `Mmap::map` does
+(`File::open` + `read_to_end` into a `Vec`) and keeps the blobs alive. Five
+fresh instances, three rounds each:
+
+| | core + compiler_builtins (47.8 MB) | core alone |
+| --- | ---: | ---: |
+| first read in a fresh instance | 7.1 ms (one 11.8 ms outlier) | 6.5 ms |
+| re-read in the same instance (memory already grown) | 3.6–3.9 ms | — |
+
+Reading: **H1 partly holds.**
+
+- The `core` read is about 6.5 ms of the 8.2 ms that loading `core` adds to
+  expansion (≈ 80%), and the two reads are about 7 ms of the ≈ 19 ms
+  crate-loading cost (≈ 37%). The rest is decoding and resolution against the
+  loaded metadata, which a byte cache does not remove.
+- About half of the fresh-instance read is not the copy: it is growing the
+  linear memory by 46 MiB and touching those pages for the first time.
+
+That second point applies to the whole compile, not just the read. The engine
+uses Wasmtime's default on-demand allocator, so each per-job instance starts
+with freshly mapped memory. Host RSS grows by about 150 MB between
+`rustc --version` (206 MB) and compiling the empty crate (355 MB), so a
+compile touches on the order of 150 MB of new memory. At the rate measured
+above (≈ 3.5 ms per 46 MiB), that is very roughly 10 ms of first-touch cost
+per compile. This is an estimate; E2 should measure the guest memory size
+directly.
+
+What this changes:
+
+- **Option A is worth more than the read alone.** A long-lived guest skips
+  the read (≈ 7 ms), the guest start-up (≈ 3 ms) and most of the first-touch
+  cost, because rustc's allocator reuses memory it already grew. Estimated
+  saving: 10–17 ms of 41, which projects to roughly 105–130 ms on the runner.
+  With D's in-process Wild link, getting under 100 ms on CI becomes
+  plausible without option C.
+- **A host-only variant (A0) is worth one experiment first:** Wasmtime's
+  pooling allocator, which reuses linear-memory slots between instances
+  (optionally keeping pages resident and zeroing them in place). It needs no
+  rustc patch. Zeroing 150 MB in place has its own cost, so whether it beats
+  fresh mappings is something to measure, not assume. Note that a precompiled
+  `.cwasm` is tied to the engine config, so switching allocators changes the
+  compatibility hash and forces a re-precompile.
+- C's restore cost (E2) also grows: a snapshot to restore is at least the
+  46 MiB of metadata plus the session state.
+
 ## Recommendation
 
-1. Run E1, E2 and E4 first; they are cheap and decide between A and C.
-2. If H1 holds: implement **A** (guest request loop plus metadata cache) and
+1. E1 is done (above): the read is ≈ 7 ms and fresh memory adds more. Next,
+   try **A0** (pooling allocator, host-only), then run E2 and E4.
+2. Implement **A** (guest request loop plus metadata cache) and
    **D**'s in-process link, then measure with `edit-loop`. Together they
    plausibly bring the runner to about 110–120 ms.
 3. Take on **C** only if A plus D leaves the target clearly missed and E2
