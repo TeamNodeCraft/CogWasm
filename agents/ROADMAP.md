@@ -118,9 +118,10 @@ CI gap was WASI file reads going through tokio's blocking pool with a fresh
 host buffer per read (45 MB for libcore's metadata), fixed by letting WASI
 block the calling thread; the pooling allocator saved another ≈ 31–36 ms per
 job, and one long-lived rustc guest that serves every request (patch 0007,
-metadata cached across requests) took the runner from 53.6 to 23.6 ms. A plugin-sized edit (plugin (c)) is about 120–130 ms on CI; most of what
-remains is fixed per-invocation work inside rustc (crate loading, session
-set-up, link); see
+metadata cached across requests) took the runner from 53.6 to 23.6 ms. Plugin-sized edits (the four 300–560-line medium benchmark programs) take
+220–465 ms on CI through the serving guest; at that size most of the time is
+compiling the source itself plus Wasmtime's native compile of the output
+module during the swap; see
 [supervisor.md](../docs/notes/supervisor.md) and
 [warm-session.md](../docs/notes/warm-session.md).
 

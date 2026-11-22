@@ -188,7 +188,8 @@ runner, where the edit is 174 ms against the 100 ms target).
        44997648351), byte-identical to cold compiles; locally −11 to −14 ms
        per job. Plugin-sized sources (`ci/edit-loop-sources.sh`, four
        medium programs, in CI): serving saves a fixed ≈ 15–17 ms locally
-       (−4 to −9%); found and fixed address-keyed hash caches leaking across
+       (−4 to −9%), 10–27 ms on CI (run 45000755486: collections 464, expr
+       220, json 304, scene 232 ms per edit); found and fixed address-keyed hash caches leaking across
        sessions. Next for these sizes: per-source compile time (G1/G2.2) and
        the output module's native compile in the swap (≈ 57 ms for a 250 KB
        module).

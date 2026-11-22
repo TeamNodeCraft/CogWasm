@@ -509,7 +509,25 @@ After the fix, locally (macOS arm64), 10 edits per run, all byte-identical:
 The saving is the same fixed ≈ 15–17 ms; per-source work dominates these
 programs. For `collections` the swap (Wasmtime compiling the 250 KB output to
 native code) is ≈ 57 ms of its edit → result, a cost the small fixture does not
-show. CI numbers: the step runs on every push.
+show.
+
+**CI runner** (run 45000755486, `b8d784c`, cold rustc.wasm rebuild with the
+fix; 5 edits per run, all byte-identical; difftest green):
+
+| source | serving | one guest per job | saving |
+| --- | ---: | ---: | ---: |
+| `collections` | 464.4 ms | 474.3 ms | −9.9 ms (−2%) |
+| `expr` | 219.7 ms | 246.2 ms | −26.5 ms (−11%) |
+| `json` | 304.4 ms | 319.4 ms | −15.0 ms (−5%) |
+| `scene` | 232.4 ms | 253.3 ms | −20.9 ms (−8%) |
+
+The small fixture in the same run: 22.3 ms. For comparison, `json` one guest
+per job was 539 ms on CI before the WASI read fix and pooling (A0 run
+44972190861). Plugin-sized edits are now 220–465 ms on the runner: the fixed
+per-invocation cost is mostly gone, and what remains is compiling the source
+itself plus the swap's native compile of the output module. Those are the
+next levers for this size (Goal 1 compile-time work, G2.2, and precompiling
+the output in the background or caching its native code).
 
 ## Recommendation
 
