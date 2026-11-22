@@ -45,4 +45,4 @@ while IFS= read -r name; do
     fi
 done < <(gh release view "$tag" --repo "$repo" --json assets --jq '.assets[].name')
 
-python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); print(f"::notice title=REPL compiler published::{m[\"download_bytes\"]/1e6:.1f} MB for commit {m[\"commit\"][:7]}")' "$DIR/manifest.json"
+python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); print("::notice title=REPL compiler published::%.1f MB for commit %s" % (m["download_bytes"]/1e6, m["commit"][:7]))' "$DIR/manifest.json"
