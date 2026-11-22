@@ -209,6 +209,14 @@ pub fn prepare_instance<R: SpawnRecorder>(
     // Wild process can consume the linker arguments unchanged.
     wasi.preopened_dir(Path::new("/"), "/", FsPerms::ReadWrite)
         .wt("preopening the host root as WASI /")?;
+    // Both hosts call the guest synchronously, so WASI may block this thread.
+    // Without this, every file `fd_read` allocates a zeroed host buffer the
+    // size of the read, runs the read on a tokio blocking thread and copies the
+    // result into guest memory; with it, the read goes straight into wasm
+    // memory. rustc reads each sysroot rmeta whole (45 MB for libcore), and on
+    // the Linux CI runner that detour was ~45-70 ms per compile
+    // (docs/notes/warm-session.md, E1/E4; wasmtime issue 7973).
+    wasi.allow_blocking_current_thread(true);
 
     let limits = options.limits.unwrap_or_default();
     let mut store = Store::new(engine, HostState::new(wasi.build_p1(), limits, recorder));
