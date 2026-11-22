@@ -21,6 +21,7 @@ LIB="$TOOL/sysroot/lib/rustlib/wasm32-unknown-unknown/lib"
 export RUSTUP_HOME="$TOOL/rustup" CARGO_HOME="$TOOL/cargo"
 
 [ -f "$TOOL/artifacts/rustc.wasm" ] || { echo "missing $TOOL/artifacts/rustc.wasm" >&2; exit 1; }
+[ -d "$TOOL/wild/.git" ] || { echo "missing Wild checkout at $TOOL/wild; run ci/setup-toolchain.sh" >&2; exit 1; }
 [ -x "$WASI_SDK/bin/clang" ] || { echo "missing wasi-sdk at $WASI_SDK" >&2; exit 1; }
 
 echo "== building wild.wasm (wasm32-wasip1, $STABLE)"

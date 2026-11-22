@@ -109,15 +109,19 @@ if [ "$REUSE_COMPILER" = true ]; then
             exit 1
         }
     done
-    # The Wild binary is cached with the compiler because setup-toolchain.sh
-    # builds it from the same pinned sources. If only it is missing, the cheap
-    # fix is a setup run rather than failing a run that can still be correct.
-    # The isolated rustup/cargo are cached separately and saved only when a run
-    # succeeds, so a compiler cache hit can come with no toolchain (the compiler
-    # cache is saved right after the build; a later step can still fail). Later
-    # steps call $TOOL/cargo/bin/cargo directly, so set up in that case too.
-    if [ ! -x "$WILD" ] || [ ! -x "$TOOL/cargo/bin/cargo" ]; then
-        step "Wild or the isolated toolchain missing from the caches; running setup"
+    # A compiler cache hit carries rustc.wasm, the sysroot, stage1 and the
+    # native Wild binary, but not everything the later steps need: the REPL
+    # step below rebuilds wild.wasm from Wild's source checkout, and the
+    # isolated rustup/cargo and wasi-sdk have their own caches, saved only by a
+    # run that finished. Name what is missing and set up instead of failing on
+    # a bare `cd`.
+    reuse_missing=()
+    [ -x "$WILD" ] || reuse_missing+=("the Wild binary")
+    [ -d "$TOOL/wild/.git" ] || reuse_missing+=("the Wild checkout")
+    [ -x "$TOOL/cargo/bin/cargo" ] || reuse_missing+=("the isolated cargo")
+    [ -x "$TOOL/wasi-sdk/bin/clang" ] || reuse_missing+=("wasi-sdk")
+    if [ "${#reuse_missing[@]}" -gt 0 ]; then
+        step "cached compiler is missing ${reuse_missing[*]}; running setup"
         "$CI_DIR/setup-toolchain.sh"
     fi
     mkdir -p "$TOOL/cache"
