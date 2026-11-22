@@ -200,30 +200,11 @@ step "edit → result through the resident supervisor"
 )
 python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); load=r["module_load_ms"]; print("::notice title=edit to result::median %.1f ms (target %.0f ms: %s), module load %s ms" % (r["median"], r["target_ms"], "MET" if r["met"] else "MISSED", "unknown" if load is None else "%.1f" % load))' "$TOOL/work/supervisor/edit-loop.json"
 
-# G2.3 experiment A0 (docs/notes/warm-session.md): the same loop with
-# Wasmtime's pooling allocator, which made no difference on macOS. Linux
-# decommits and refaults pages differently, so record one comparison per run.
-# Temporary: remove once the CI numbers are recorded.
-(
-    export RUSTUP_HOME="$TOOL/rustup" CARGO_HOME="$TOOL/cargo"
-    export CARGO_TARGET_DIR="$TOOL/target/cogwasm-host"
-    export COGWASM_POOLING=1 COGWASM_POOLING_KEEP_RESIDENT_MB=1024
-    "$TOOL/target/cogwasm-host/release/cogwasm-supervisor" edit-loop \
-        --backend resident \
-        --host "$HOST_BIN" \
-        --rustc "$RUSTC_WASM" \
-        --sysroot "$SYSROOT" \
-        --linker "$WILD" \
-        --precompiled "$TOOL/work/precompiled/rustc.cwasm" \
-        --cache-dir "$TOOL/cache" \
-        --work "$TOOL/work/supervisor" \
-        --store "$TOOL/work/supervisor/store-pooling" \
-        --compiler-id "resident-ci-pooling" \
-        --source "$REPO/crates/cogwasm-supervisor/tests/fixtures/edit_loop.rs" \
-        --edits 10 \
-        --json "$TOOL/work/supervisor/edit-loop-pooling.json"
-)
-python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print("::notice title=edit to result (pooling, A0)::median %.1f ms, module load %s ms" % (r["median"], r["module_load_ms"]))' "$TOOL/work/supervisor/edit-loop-pooling.json"
+# G2.3 experiment A0 (docs/notes/warm-session.md): default vs pooling
+# allocator, interleaved, on the fixture and a plugin-sized source.
+# Temporary; remove once the decision is recorded.
+step "A0: allocator comparison for edit -> result"
+"$CI_DIR/edit-loop-ab.sh"
 
 # Differential test: the same 48 no_std+alloc corpus programs plus 24 seeded
 # random programs are compiled by LLVM rustc and by rustc.wasm+cg_clif, run in
