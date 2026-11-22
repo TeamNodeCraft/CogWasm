@@ -2,7 +2,8 @@
 
 Written 2026-11-21, after the layout migration landed on `main` (`81e1049`).
 Last updated 2026-11-23: N1 and M1–M3 done, G2.1 done, G2.3 in progress,
-G1.1's fourth increment measured and the hoist dropped.
+G1.1's fifth increment built the capture analysis and brought the hoist back
+(opt-in; `nbody` -10.55%).
 Ordered by priority. Each task has a size (S under a day, M a few days, L a
 week or more), what it depends on, and when it is done. Goal numbers refer to
 [`ROADMAP.md`](../ROADMAP.md); the migration record is in
@@ -212,45 +213,44 @@ runner, where the edit is 174 ms against the 100 ms target).
 ### G1.1. Finish step 5b: SROA / mem2reg after the inliner (L)
 
 The cost-model inliner (patch `0006`) is in and measured on the full 21-program
-suite. The loop-field hoist (patch `0005`) was dropped in the fourth increment.
-The SROA/mem2reg half, which 5a measured as the win, is still not built.
+suite. The loop-field hoist is back as patch `0008` behind
+`-Zmir-capture-hoist`, with an interprocedural non-capture summary. The
+SROA/mem2reg half, which 5a measured as the win, is still not built.
 
-1. [ ] Escape/alias analysis for locals whose address reaches a callee
-       (including pointers returned by calls). **Not built.** The fourth
-       increment implemented the only cheap sound rule it could find -- treat
-       a local as escaped once it is mutably borrowed anywhere in the function
-       -- and it hoists zero reads on `strings`, `collections`, `sort`, `json`,
-       `expr`, `scene` and `nbody`. The useful `nbody` win comes from `Vec`
-       locals passed as `&mut` to the `#[inline(never)]` `RawVec::grow_one`;
-       proving that safe needs an interprocedural escape analysis of the
-       callee, not a local rule.
+1. [x] Escape/alias analysis for locals whose address reaches a callee
+       (including pointers returned by calls). **Built in the fifth increment**
+       (`capture.rs`, patch `0008`): a per-argument "not captured" summary over
+       pointer taint, with unknown callees, cycles, returns, pointer-to-integer
+       casts, statics, unions, closures/coroutines, drop types and inline asm
+       treated as capturing. The `nbody` `Vec` locals are admitted because
+       `RawVec::grow_one` (and its generic helpers) resolve to non-capturing.
 2. [ ] SROA of non-escaping aggregates, then mem2reg; iterate with the
-       inliner. **Not built.** A plain second round was measured as no win and
-       not kept: a second `ReferencePropagation -> SROA -> GVN` round left every
-       hot address-taken local in place, because `sroa`'s `excluded_locals`
-       marks any local whose field address is observed and `Vec`/`String` also
-       need a drop. The full-suite measurement adds that the remaining locals
-       are kept in memory by calls the inliner deliberately does not remove
-       (`grow_one`, recursive `walk`, `fmt`), so partial splitting would have
-       to rewrite those calls. That is the same interprocedural problem.
+       inliner. **Not built.** The summary now answers the interprocedural half,
+       but `sroa` still excludes any local whose field address is observed and
+       `Vec`/`String` need drop expansion; partial splitting would have to
+       rewrite the calls that take `&mut` of the aggregate. No cheap version
+       was found. A plain second `ReferencePropagation -> SROA -> GVN` round was
+       measured as no win in the fourth increment.
 3. [x] Make the loop-field hoist sound enough to be default-on, or drop it.
-       **Dropped** in the fourth increment: the patch, flag, test/bench
-       plumbing and workflow input are gone. The cheap sound variant hoists
-       nothing, and the useful variant cannot be proved safe without
-       interprocedural alias analysis. The composition measurement (`nbody`
-       6.20G -> 5.55G executed instructions, 1.01G -> 0.87G stack accesses) is
-       kept in `docs/notes/step-5b.md` as the target for that analysis.
+       **Implemented and evidenced in the fifth increment**: the hoist is
+       `-Zmir-capture-hoist` (patch `0008`), the sysroot built with both passes
+       on changes zero `core`/`alloc` functions under the hoist, and seven
+       adversarial corpus programs pass. It stays flag-gated because the task
+       keeps new passes out of the default pipeline; an optimising tier can now
+       decide to turn it on.
 4. [ ] Acceptance: iterator-heavy benchmarks within 1.2× of LLVM `-O2`;
        difftest green; warm compile time within 5%.
-       **A not met:** after the inliner, `strings` is 2.98×, `collections`
-       4.50×, `sort` 1.99× and `json` 3.68× of LLVM `-O2` in executed
-       instructions (`nbody` 3.45×, or 3.08× with the dropped hoist).
-       **B met:** full difftest green with the pass off and on (49 handwritten
-       + 24 generated, 0 mismatches).
-       **C met:** suite-median warm compile +1.29% over three interleaved
-       pairs, geomean +2.03%, total +2.01%; the caveat is `strings` +9.97%,
-       `json` +5.70% and `sort` +5.17% individually.
-       **D met** by dropping `0005`.
+       **A not met:** after the inliner plus the hoist, `strings` is 2.98×,
+       `collections` 4.50×, `sort` 1.99× and `json` 3.68× of LLVM `-O2` in
+       executed instructions (`nbody` 3.45×, or 3.08× with the hoist).
+       **B met:** full difftest green on the default sysroot (56 handwritten +
+       24 generated, flags off and on) and on the sysroot built with both
+       passes on (flags off and on), 0 mismatches.
+       **C met:** suite-median warm compile -1.54% (both/off) and -0.59%
+       (both/inline) in this increment's full-suite pair, inside 5%; the
+       fourth increment measured +1.29% for the inliner over three pairs.
+       **D met** by the summary/sysroot/adversarial evidence; the hoist remains
+       opt-in by design, not because it is unsound.
 
 ### G1.2. Bench table in the README updated by CI (M, in progress)
 

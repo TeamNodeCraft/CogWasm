@@ -30,7 +30,10 @@ unset COGWASM_SYSROOT STAGE_C_SYSROOT || true
 rm -rf "$SYS"
 mkdir -p "$SYS/lib/rustlib/wasm32-unknown-unknown/lib"
 cd "$REPO/guests/c_plugin"
-RUSTFLAGS="-Cpanic=abort" CARGO_TARGET_DIR="$TARGET" \
+# The default build is unchanged. An experiment may pass extra unstable flags
+# here (for example `-Zmir-inline-wasm -Zmir-capture-hoist`) without editing
+# the script or the default sysroot.
+RUSTFLAGS="-Cpanic=abort ${PURE_SYSROOT_RUSTFLAGS:-}" CARGO_TARGET_DIR="$TARGET" \
     cargo build --release --target wasm32-unknown-unknown \
         -Zbuild-std=core,alloc,compiler_builtins
 for crate in core alloc compiler_builtins; do

@@ -26,7 +26,7 @@ difftest/
 ├── corpus/
 │   ├── prelude.rs            # shared ABI, allocator, panic handler, output
 │   ├── expect_trap.txt       # programs expected to trap in both backends
-│   └── *.rs                  # 49 handwritten programs (one category each)
+│   └── *.rs                  # 56 handwritten programs (one category each)
 ├── results/                  # run.log + details.log (gitignored)
 ├── FINDINGS.md               # mismatches, non-guarantees, triage
 └── FEASIBILITY.md            # running cg_clif/rustc tests through this path
@@ -89,7 +89,7 @@ Compile flags are the same for both paths:
 -Zcodegen-backend=cranelift -Clinker=<wild> -Clinker-flavor=wasm-ld   # Cranelift only
 ```
 
-## Handwritten corpus (49 programs)
+## Handwritten corpus (56 programs)
 
 | Category | Programs |
 |---|---|
@@ -98,7 +98,8 @@ Compile flags are the same for both paths:
 | Bits and shifts | `int_bits`, `int_shifts` |
 | Floats | `float_bits`, `float_arith`, `float_convert`, `float_round`, `float_sqrt`, `float_nan_props`, `float_sum` |
 | Slices, arrays, memory | `slices`, `arrays`, `memcpy_large`, `ptr_ops`, `struct_layout` |
-| In-memory field loops | `loop_field_reads` (step 5b's loop hoist) |
+| In-memory field loops | `loop_field_reads` (step 5b's capture-aware loop hoist) |
+| Capture/escape guards | `capture_static`, `capture_field`, `capture_return`, `capture_usize`, `capture_closure`, `capture_reassign`, `capture_call_dest` |
 | Allocation | `alloc_growth`, `alloc_patterns`, `box_rc` |
 | Collections and strings | `vec_ops`, `string_ops`, `format_specs`, `btreemap`, `collections_extra` |
 | Algorithms | `sort_impl`, `hash_fnv`, `matrix`, `checksum`, `fixed_point` |
@@ -165,7 +166,7 @@ printed to stdout, so the CI log contains the full record.
 ```sh
 cd CogWasm
 
-# Default: 48 handwritten + 24 generated, 4 run seeds (288 calls)
+# Default: 56 handwritten + 24 generated, 4 run seeds (320 calls)
 difftest/run.sh
 
 # More/fewer generated programs
@@ -214,6 +215,8 @@ difftest/incremental-check.sh
 | `DIFFTEST_CARGO` | isolated `toolchain/cargo/bin/cargo`, else `cargo` |
 | `DIFFTEST_HOST_TOOLCHAIN` | `1.99.1` (same as the CogWasm host build; falls back to the LLVM nightly) |
 | `DIFFTEST_GEN_START` | `1` |
+| `DIFFTEST_INLINE_WASM` | unset; `1` adds `-Zmir-inline-wasm` to the Cranelift compile |
+| `DIFFTEST_CAPTURE_HOIST` | unset; `1` adds `-Zmir-capture-hoist` to the Cranelift compile |
 
 Host discovery is derived from the isolated rustup toolchain directory names, so
 macOS arm64 and Linux x86_64 both work without editing the script.
@@ -228,7 +231,7 @@ Local macOS arm64 (Apple silicon, 14 CPUs), 2026-11-19, existing artifacts:
 | default (24 generated, 4 run seeds) | 72 | 288 | **56.6 s** |
 | `--seeds 32` (32 generated, 4 run seeds) | 80 | 320 | **62 s** |
 
-Breakdown for the default run: 49 handwritten programs compiled in 36–38 s,
+Breakdown for the default run: 56 handwritten programs compiled in 36–38 s,
 24 generated in 18 s, the Wasmtime comparison itself ~1 s; the rest is the
 tiny runner build (Wasmtime was already compiled for the CogWasm host).
 All runs above were green: `value_matches` + `trap_matches` = `calls`,

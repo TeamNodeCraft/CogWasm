@@ -183,7 +183,10 @@ compile_clif() {
     # inliner. The LLVM reference compiler has no such pass.
     local extra=()
     if [ "${DIFFTEST_INLINE_WASM:-0}" = "1" ]; then
-        extra=(-Zmir-inline-wasm)
+        extra+=(-Zmir-inline-wasm)
+    fi
+    if [ "${DIFFTEST_CAPTURE_HOIST:-0}" = "1" ]; then
+        extra+=(-Zmir-capture-hoist)
     fi
     if ! "$COMPILER_HOST" raw \
         --rustc "$RUSTC_WASM" --sysroot "$SYSROOT" --linker "$WILD" \

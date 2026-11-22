@@ -1,13 +1,15 @@
 # Goal 1 step 5b: a MIR optimiser
 
 Status: **in progress**. The cost-model inliner and the third increment's
-mutable-borrow rule are landed. A fourth increment
-measures the inliner on the full 21-program suite, composes it with the
-loop-field hoist, and drops the hoist: the only cheap sound rule hoists nothing
-and the useful rule needs interprocedural escape/alias analysis. The inliner
-stays opt-in. B, C and D are met; A is not (`strings` 2.98x, `collections`
-4.50x, `sort` 1.99x, `json` 3.68x of LLVM `-O2`). The default, fast and pure
-sysroot builds are unchanged.
+mutable-borrow rule are landed. The fourth increment measured the inliner on
+the full 21-program suite and dropped the loop-field hoist. The fifth increment
+builds the missing interprocedural non-capture summary, brings the hoist back
+as patch `0008` behind `-Zmir-capture-hoist`, and recovers the `nbody` win
+(6,204,745,840 -> 5,550,101,348 executed instructions, -10.55%) while the full
+diff test stays green against a sysroot built with both passes on. The inliner
+and the hoist stay opt-in. B, C and D are met; A is not (`strings` 2.98x,
+`collections` 4.50x, `sort` 1.99x, `json` 3.68x of LLVM `-O2`). The default,
+fast and pure sysroot builds are unchanged.
 
 > The pass code, patch header and this note are LLM-generated under the Rust
 > project's personal-use exemption. This is a local CogWasm experiment, not an
@@ -752,6 +754,325 @@ BENCH_INLINE_WASM=1 bench/run.sh --full --runs 5 --cold-runs 1 \
 DIFFTEST_INLINE_WASM=1 difftest/run.sh
 ```
 
+## Fifth increment: interprocedural non-capture summaries, and the hoist returns
+
+Status: **implemented and measured, opt-in only**. Patch
+`0008-capture-aware-loop-field-hoist.patch` adds `CaptureHoist` behind
+`-Zmir-capture-hoist`. It computes a per-argument "not captured" summary from
+callee MIR and uses it to decide whether a borrow of a local before a loop can
+be ignored for the loop-field hoist. The default compiler, the default sysroot
+and the default benchmark compiles do not pass the flag.
+
+### What "not captured" means
+
+For argument `i` of a function, the summary says **not captured** when the
+callee does not keep the argument's address, or an address derived from it by a
+pointer operation, anywhere that outlives the call. Concretely, the callee must
+not:
+
+- store the address in memory (through a pointer, into a static, into a union,
+  or into a local whose drop can run code that observes it);
+- return the address;
+- pass it to a callee that captures it (an unknown callee is capturing);
+- convert it to an integer;
+- put it in a closure or coroutine that can run later;
+- use it as an inline-asm operand.
+
+"Derived" means a field projection behind the pointer, a reference or
+raw-pointer cast, a reborrow, pointer arithmetic, or a transmute that preserves
+the pointer. A value **loaded** through the pointer is data, not a derived
+address. This is the important boundary for `RawVec::grow_one`: it reads
+`self.ptr` and hands that heap pointer to the allocator, but it never keeps the
+`&mut RawVec` itself. The caller's `Vec` fields cannot be reached through the
+heap pointer unless something stored an address of the `Vec` local into it
+first, and that first store is itself a capture and is rejected where it is
+created (see "values loaded through the argument" below).
+
+### How the summary is computed
+
+`compiler/rustc_mir_transform/src/capture.rs` runs a may-analysis over pointer
+taint. Each pointer-typed argument seeds one taint bit in its argument local.
+The walker transfers taint through `Use`/`Move`, `Ref`/`RawPtr`/`Reborrow`,
+pointer casts, pointer `Offset`, aggregate construction and `RawPtr` aggregates.
+A transfer that stores taint into a local records containment; a transfer that
+stores it through a pointer, into the return place, into a union, or into a
+type that needs a drop marks the source argument captured. Each call argument
+is checked against the callee's summary, recursively. The analysis uses
+`tcx.optimized_mir` for both local and external callees (external bodies are
+already optimised and cached); a thread-local stack of definitions being
+summarised or optimised turns a recursive query into "capturing" instead of a
+query cycle.
+
+Only reference- and raw-pointer-shaped arguments get a meaningful summary.
+Aggregate arguments are conservatively capturing: a per-field summary would be
+needed to admit them, and the hoist only asks about borrows.
+
+`const_eval_select((a, b, ..), const_fn, runtime_fn)` is classified as a call
+to `runtime_fn` with the tuple's fields as positional arguments. Every other
+intrinsic, shim, virtual call, function pointer and foreign item is unknown and
+therefore capturing. `RawVec::grow_one`, its `grow_amortized`/`finish_grow`
+helpers, the `Global` allocator methods and the `const_eval_select` runtime
+branches all resolve to non-capturing for the receiver/borrow argument on the
+suite's wasm builds.
+
+### The hoist rule
+
+`compiler/rustc_mir_transform/src/capture_hoist.rs` restores the fourth
+increment's pass shape: natural loops, a unique `Goto` preheader, only loops in
+a nest, a `Freeze` base, no in-loop write to the base, no in-loop borrow of it,
+no inline asm, and a base initialized in a block that dominates the preheader.
+The old whole-function raw-pointer bail-out is replaced by the summary: a base
+is admitted only when **every** `Ref`/`RawPtr` rooted at it is either a call
+argument whose summary marks that argument non-capturing or is otherwise
+consumed locally without an escape sink, and no tainted pointer is used inside
+the loop. A use inside the loop rejects the base, so a borrow that is live in
+the loop cannot be hoisted past.
+
+The preheader read is a new temporary; the original assignment remains in the
+loop and copies from the temporary, so a zero-trip loop leaves the destination
+untouched.
+
+### Soundness argument
+
+The walker is a may-analysis: every store of a tainted pointer to a sink marks
+the source argument captured, and taint is never killed. Over-approximation is
+sound; the interesting cases are the constructs where a pointer can leave.
+
+**Assignments.** An assignment of a tainted pointer to a local records
+containment in that local; it is not an escape by itself because the local dies
+with the function. The escape cases are: a destination with a `Deref` in its
+projection (a store through a pointer, including `Box`, `&mut` and raw
+pointers), the return place, a union-typed place (another field can later be
+read as the pointer), and a local whose type needs a drop (the drop can run
+arbitrary code while the pointer is in it). A move is treated like a copy for
+taint, which over-approximates.
+
+**Returns.** A tainted pointer in `_0` at a `Return`, or an assignment to
+`_0`, marks the argument captured. This covers a returned reference, a raw
+pointer, a struct or tuple carrying either, and a `Box`/`Vec` whose element
+points at the argument.
+
+**Calls.** The function operand is checked first: calling through a tainted
+function pointer invokes unknown code that has the address. Each tainted
+argument is then checked against the callee's summary at that position. A
+missing summary (foreign, no MIR, shim, virtual, unclassified intrinsic) and a
+recursive occurrence are capturing. There is no result-taint rule for a
+non-capturing callee: by definition it does not return the argument, so its
+result cannot carry the argument's address. A capturing callee already marks
+the corresponding argument.
+
+**Pointer-to-integer casts.** `PointerExposeProvenance` from a tainted pointer
+marks the argument captured. A pointer-width integer can be turned back into a
+pointer and stored, and the analysis does not track provenance through integer
+arithmetic. `PointerWithExposedProvenance` starts from an integer with no
+taint, so it cannot reintroduce a tracked argument by itself.
+
+**Inline asm.** Any tainted input or output operand marks the argument
+captured; the assembly can store it anywhere. A loop containing inline asm is
+rejected by the hoist regardless.
+
+**Unions.** A store of a tainted pointer into a union marks the argument
+captured because the pointer can be read back through another field. An
+aggregate whose `AggregateKind::Adt` names a union field is treated the same
+way.
+
+**Transmute.** `CastKind::Transmute`, `BoxDerefTransmute`, `Subtype`,
+`PtrToPtr`, `FnPtrToPtr` and pointer coercions keep the taint when the target is
+a pointer type and mark the argument captured when the target is not. A
+`transmute` from a pointer to a struct or integer is therefore a capture.
+
+**Statics.** MIR reaches a mutable static through a pointer, so the store is a
+`Deref` store and is covered by the assignment rule. A `static` that is only
+read cannot receive the address. `Rvalue::ThreadLocalRef` is not a pointer to
+the argument.
+
+**Box and raw-pointer stores.** They are `Deref` stores to the analysis and are
+capturing. A `Box` constructed from a tainted aggregate is an aggregate, not a
+raw pointer store; it is captured when the boxed value is returned, stored, or
+put in a type that needs a drop.
+
+**Closures and coroutines.** Constructing a closure, coroutine or coroutine
+closure with a tainted capture marks the argument captured immediately: the
+closure can outlive the call and run later. A closure that is only called
+inside the callee still gets this treatment, which is conservative.
+
+**Drops.** A `Drop` terminator on a tainted local whose type needs a drop (or is
+a union) marks the argument captured, because drop glue is arbitrary code and
+can read the local. Storing a tainted pointer into a type that needs a drop is
+also a capture even if the drop is not visible in this body, for the same
+reason.
+
+**Panics and unwinding.** A panic or unwind is not a capture by itself: the
+function does not return, so the caller does not resume at the call. If a
+cleanup path stores the address (through a pointer, into a static, into a
+drop-typed local, or by calling a capturing callee), the cleanup blocks are
+ordinary reachable MIR and the same sinks fire there. The blanket "any unwind
+edge captures" rule was deliberately not used: pre-optimisation MIR still has
+cleanup edges under `panic=abort`, and that rule rejected every body and made
+the summary useless. The recursive walker visits unwind-reachable blocks from
+the entry, including cleanup chains.
+
+**Recursion and cycles.** The thread-local stack marks a definition that is
+already being summarised or optimised. A call back into it is treated as
+capturing for that occurrence. The resulting summary is an over-approximation
+of a fixpoint (arguments not involved in the cycle can still come out
+non-capturing), which is the sound direction. Query cycles are prevented
+because the check happens before `optimized_mir` is requested.
+
+**Values loaded through the argument.** A load through a `Deref` does not carry
+the pointer's address; it carries data. The analysis therefore does not taint
+`(*self).field`. If a callee stores such a loaded pointer into a location that
+outlives the call, the stored value can only alias the caller local if some
+earlier code put the local's address into that memory. Creating that
+self-reference requires a store of an address derived from the local, and every
+such store is a capture in the function that performs it (a raw-pointer
+creation plus a `Deref` store, a pointer-to-integer cast, or a call to a
+capturing callee). A callee that merely relays a pre-existing pointer field
+does not create a new alias; this is the one place where the summary relies on
+the creation site, not on the load. It is stated here explicitly so the
+boundary is reviewable.
+
+**What is not modelled.** There is no points-to analysis, no integer provenance
+tracking beyond "pointer-to-integer is capturing", no per-field summary for
+aggregate arguments, and no attempt to prove a recursive function's fixpoint.
+All of those are conservative in the summary direction.
+
+### Two write bugs the sysroot run found
+
+The first version of the restored hoist passed the suite's program-local
+difftest but miscompiled `vec_ops` when the pure sysroot had been built with
+the pass enabled. Dumping `CaptureHoist` before/after for `core` and `alloc`
+found exactly one changed function, `core::slice::sort::stable::drift::sort`:
+
+- the loop reassigns the whole `DriftsortRun` local (`_29 = move _79`) between
+  reads of `_29.0`, but the old `loop_effects` recorded a local as written only
+  when the assignment had a non-empty projection, so the direct assignment did
+  not invalidate the hoist;
+- a call inside a loop writes its result into a destination place, and the old
+  rule did not record the destination local as written either.
+
+Both are fixed: every assignment destination local is in `written`, and a call
+destination and `Yield` resume place are recorded as writes. Two new corpus
+programs (`capture_reassign`, `capture_call_dest`) pin the two cases. After the
+fix, the same dump comparison shows **zero** changed functions in `core` and
+`alloc` with both flags on, and the full difftest against the passes-on sysroot
+is green.
+
+### Adversarial difftest corpus
+
+Seven new handwritten programs would miscompile under a hoist without the
+summary or without the write rules. `loop_field_reads` is the positive case:
+`blend(&mut p)` only reads and writes through the borrow, its summary is
+non-capturing, and the hoist applies to the nested loop.
+
+| program | what would go wrong under a naive hoist |
+| --- | --- |
+| `capture_static` | callee stores `&mut local` in a `static mut`; the loop writes the field through it |
+| `capture_field` | callee stores the address in a field of another borrowed struct |
+| `capture_return` | callee returns a pointer to a field of its argument |
+| `capture_usize` | address is converted to `usize` and back |
+| `capture_closure` | a closure captures a raw pointer derived from the local |
+| `capture_reassign` | the loop reassigns the whole aggregate between field reads |
+| `capture_call_dest` | a call in the loop writes its result into the whole aggregate |
+
+All seven pass with LLVM, with our pipeline flag-off and with
+`-Zmir-inline-wasm -Zmir-capture-hoist`; the complete corpus (56 handwritten +
+24 generated) is green in all four configurations below.
+
+### Measurements
+
+One full-suite run per configuration: 21 programs, executed wasm instructions
+from `bench/gap` over the suite seeds, module bytes and warm compile (median of
+5) from `bench/run.sh --full --runs 5 --cold-runs 1`. "off" is the default
+pipeline, "inline" is `-Zmir-inline-wasm`, "both" adds `-Zmir-capture-hoist`.
+
+| program | instructions off | inline | both | both/off | both/LLVM-O2 |
+|---|---:|---:|---:|---:|---:|
+| `a_add` | 804 | 804 | 804 | 1.000 | 3.045 |
+| `b_alloc` | 1,634,448 | 1,634,448 | 1,606,154 | 0.983 | 4.617 |
+| `c_plugin` | 4,124 | 4,124 | 4,124 | 1.000 | 12.274 |
+| `smoke` | 405,976 | 406,016 | 406,016 | 1.000 | 5.045 |
+| `int_loops` | 213,915 | 213,915 | 213,915 | 1.000 | 1.735 |
+| `float_sum` | 243,236 | 222,388 | 222,388 | 0.914 | 3.129 |
+| `expr` | 2,700,640 | 2,647,871 | 2,647,871 | 0.981 | 3.958 |
+| `json` | 1,871,062 | 1,777,296 | 1,777,296 | 0.950 | 3.677 |
+| `collections` | 5,061,326 | 4,772,355 | 4,772,355 | 0.943 | 4.498 |
+| `scene` | 415,667 | 409,913 | 409,421 | 0.985 | 3.597 |
+| `nbody` | 6,204,745,840 | 6,204,745,840 | 5,550,101,348 | **0.895** | 3.082 |
+| `mandelbrot` | 611,294,724 | 611,294,724 | 611,294,724 | 1.000 | 1.439 |
+| `sha256` | 70,417,340 | 70,417,340 | 70,417,340 | 1.000 | 1.663 |
+| `sort` | 321,207,695 | 299,459,431 | 299,459,431 | 0.932 | 1.988 |
+| `matmul` | 380,350,388 | 380,352,296 | 380,155,700 | 1.000 | 1.096 |
+| `strings` | 107,244,701 | 66,008,021 | 66,008,021 | 0.615 | 2.978 |
+| `math_e` | 774,674,908 | 773,874,908 | 773,874,908 | 0.999 | 2.207 |
+| `hostcall_f` | 10,881,056 | 10,881,056 | 10,881,056 | 1.000 | 1.546 |
+| `libm_driver` | 302,693,800 | 302,693,800 | 302,693,800 | 1.000 | 2.461 |
+| `miniz_driver` | 216,101,124 | 216,101,124 | 216,101,124 | 1.000 | 2.295 |
+| `generated_stress` | 671,468 | 671,468 | 671,468 | 1.000 | 1.913 |
+
+Suite totals: executed instructions 9,012,834,242 -> 8,948,589,138 with the
+inliner (-0.71%) and 8,293,719,264 with both (-7.98%); the per-program
+instruction geomean ratio to LLVM `-O2` is 2.894 -> 2.787 (inline) -> 2.770
+(both). `nbody` is the whole of the extra total: 6,204,745,840 ->
+5,550,101,348 (-10.55%), with stack loads/stores 1,012,060,384 -> 873,395,276
+(-13.7%). That is exactly the number the dropped `0005` composition reported.
+`b_alloc` moves -1.73%, `matmul` -0.05%, `scene` -1.50%; the other programs are
+unchanged by the hoist (`collections`, `strings`, `sort`, `json` are identical
+to the inliner-only modules).
+
+Module size: median change both/off 0.00%, geomean +0.12%; `nbody` -0.98%,
+`strings` +2.07% and `json` +1.87% are the inliner's, not the hoist's. The hoist
+alone changes `nbody` 41,858 -> 41,450 bytes and `b_alloc` 63,757 -> 63,745.
+
+Warm compile: median both/off **-1.54%**, geomean -1.51%; inline/off median
+-0.90%, geomean +0.18%; hoist-only relative to inline median -0.59%, geomean
+-1.68%. The single-pair numbers have the same per-program noise the fourth
+increment measured (median across-run range 3.07%); what they establish is that
+the hoist adds no measurable compile cost of its own and that C is inside the
+5% bound.
+
+### Criteria with this increment
+
+- **A: still not met.** The required benchmarks are `strings` 2.978x,
+  `collections` 4.498x, `sort` 1.988x and `json` 3.677x of LLVM `-O2`;
+  `nbody` is 3.082x with the hoist. Recovering the 10.55% `nbody` win does not
+  change the four iterator-heavy programs. A needs a representation change,
+  not another threshold or hoist.
+- **B: met.** Full corpus, 56 handwritten + 24 generated, four run seeds:
+  default sysroot flags off and on are both green (320 calls, 304 value + 16
+  trap matches, 0 mismatches), and the pure sysroot built with
+  `-Zmir-inline-wasm -Zmir-capture-hoist` is green both with the program flags
+  off and with them on.
+- **C: met.** Suite-median warm compile is -1.54% (both/off) and -0.59%
+  (both/inline), inside the 5% bound.
+- **D: sound for the optimising build, still flag-gated.** The sysroot built
+  with both passes on changes zero `core`/`alloc` functions under the hoist
+  after the write-rule fix (the earlier build changed `drift::sort` and
+  miscompiled `vec_ops`; see above), and the seven adversarial programs pass.
+  The pass is not made default-on because the task keeps every new pass behind
+  `-Z` until a tier decides to ship it; the evidence is that an optimising tier
+  could turn it on without the old unsound guard.
+
+### Reproduce
+
+```sh
+compiler/scripts/build-rustc-wasm.sh
+BENCH_INLINE_WASM=1 BENCH_CAPTURE_HOIST=1 bench/gap/run.sh --no-mir
+BENCH_INLINE_WASM=1 BENCH_CAPTURE_HOIST=1 bench/run.sh --full --runs 5 --cold-runs 1
+DIFFTEST_INLINE_WASM=1 DIFFTEST_CAPTURE_HOIST=1 difftest/run.sh --seeds 24
+```
+
+For the sysroot check, back up `toolchain/sysroot`, then
+
+```sh
+PURE_SYSROOT_RUSTFLAGS="-Zmir-inline-wasm -Zmir-capture-hoist" \
+    compiler/scripts/build-pure-sysroot.sh
+DIFFTEST_INLINE_WASM=1 DIFFTEST_CAPTURE_HOIST=1 difftest/run.sh --seeds 24
+```
+
+and restore the default sysroot afterwards. The script appends
+`PURE_SYSROOT_RUSTFLAGS` to `-Cpanic=abort`; its default build is unchanged.
+
 ## What remains for step 5b
 
 Step 5b is still **in progress**. Of its four acceptance criteria, B (difftest),
@@ -761,35 +1082,37 @@ that was supposed to deliver it is not built.
 
 1. **A: not met.** `strings` is 2.98x, `collections` 4.50x, `sort` 1.99x and
    `json` 3.68x of LLVM `-O2` in executed instructions after the inliner
-   (`nbody` 3.45x, or 3.08x with the dropped hoist). The gap is 40-73% of the
-   remaining instructions, not a threshold. The measured options are exhausted:
-   300 inlines more but makes `strings`/`collections` worse and costs +11%
-   median warm compile; the hoist only helps `nbody` and is unsound. The next
-   work is a real representation change, not a knob.
+   (`nbody` 3.45x, or 3.08x with the capture-aware hoist). The gap is 40-73% of
+   the remaining instructions, not a threshold. The measured options are
+   exhausted: 300 inlines more but makes `strings`/`collections` worse and costs
+   +11% median warm compile; the hoist now recovers `nbody` but is not the four
+   iterator-heavy programs. The next work is a real representation change, not
+   a knob.
 2. **SROA beyond rustc's: not built.** `sroa`'s `excluded_locals` still excludes
    any local whose field address is observed, and `Vec`/`String` need drop
    expansion. Partial aggregate splitting would have to rewrite the calls that
    take `&mut` of the aggregate (`RawVec::grow_one`, `String::push`, recursive
-   `walk`), which is interprocedural. That is the same analysis as item 3, at a
-   larger scale; no cheap version was found.
-3. **The hoist stays dropped.** A sound version needs an interprocedural
-   escape/alias analysis for pointers that reach a callee (including pointers
-   returned by calls). The cheap sound rule -- reject a local as soon as it is
-   mutably borrowed anywhere in the function -- hoists zero reads on every hot
-   program and loses the 10.55% `nbody` win. The composition numbers are the
-   target for that analysis if it is ever built.
+   `walk`). The capture summary now answers the "does the callee keep the
+   address" half for those calls, but `sroa` still needs a drop story and a
+   rewrite of the call to operate on split fields; no cheap version was found.
+3. **The hoist is back, opt-in.** Patch `0008` and `-Zmir-capture-hoist`; the
+   `nbody` win is recovered and the sysroot/adversarial evidence is in this
+   note. It stays behind the flag because the task keeps new passes out of the
+   default pipeline; turning it on in an optimising tier is a policy decision
+   with this soundness evidence, not a missing analysis.
 4. **The inliner stays opt-in.** The default, fast and pure-sysroot builds are
-   unchanged. The suite-median compile cost is +1.3% (C met), but `strings`
-   +10.0%, `json` +5.7%, `sort` +5.2%; before it becomes default in an
-   optimising tier, either fix the `strings` body or decide that a per-program
-   >5% cost is acceptable there. Tier 2 itself is still not built.
-5. **Fuel determinism is restored.** With `0005` gone, one quick-suite run with
-   `-Zmir-inline-wasm --fuel` passed the two-sample agreement (12 programs,
-   compiler-fuel median 662,387,630). The intermittent 5-unit `sha256`
-   difference from the first experiment was a property of the hoist, which is
-   no longer in the tree, so the experiment workflow uses `--fuel` again.
-6. **The full suite remains the measurement unit.** The tables above are 21
-   programs x 3 runs x 4 seeds for instructions and 3 interleaved pairs x 5
-   warm samples for compile time. The per-program compile noise is large
-   (median across-run range 3.07%, max 7.85%), so a single pair is not enough
-   to judge a future change.
+   unchanged. The suite-median compile cost in this increment's single pair was
+   -0.90% (inline/off) and -0.59% (both/inline); the fourth increment's three
+   interleaved pairs measured +1.29% for the inliner, with `strings` +10.0%,
+   `json` +5.7% and `sort` +5.2%. Before it becomes default in an optimising
+   tier, either fix the `strings` body or decide that a per-program >5% cost is
+   acceptable there. Tier 2 itself is still not built.
+5. **Fuel was not re-measured this increment.** The hoist changes MIR shape, so
+   a later experiment that reports compiler fuel should re-run the two-sample
+   determinism check rather than inherit the fourth increment's numbers.
+6. **The full suite remains the measurement unit.** The instruction table above
+   is 21 programs x 4 seeds with exact basic-block instrumentation; module size
+   and warm compile come from `bench/run.sh --full --runs 5 --cold-runs 1`.
+   The per-program compile noise is large (median across-run range 3.07%, max
+   7.85%), so the -1.5% / -0.6% compile deltas are evidence of "well inside
+   5%", not of a speed-up.

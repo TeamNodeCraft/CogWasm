@@ -26,6 +26,7 @@ patches = [
     "0004-wasm-sync-cached-cgus.patch",
     "0006-wasm-cost-model-inliner.patch",
     "0007-wasm-serve-loop.patch",
+    "0008-capture-aware-loop-field-hoist.patch",
 ]
 
 [upstream.playground]

@@ -419,6 +419,10 @@ def compile_clif(
         threshold = os.environ.get("BENCH_INLINE_WASM_THRESHOLD")
         if threshold:
             command.extend(["--rustc-arg", f"-Zmir-inline-wasm-threshold={threshold}"])
+    if os.environ.get("BENCH_CAPTURE_HOIST") == "1":
+        # Goal 1 step 5b experiment: opt the clif compile into the capture-aware
+        # loop-field hoist. The LLVM reference compiler has no such pass.
+        command.extend(["--rustc-arg", "-Zmir-capture-hoist"])
     if fuel:
         # Two samples per program: the host fails if they disagree, so a
         # non-deterministic compiler work count stops the run.

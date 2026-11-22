@@ -1,0 +1,1314 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Stage C <stage-c@example.invalid>
+Date: Sun, 23 Nov 2026 06:30:00 +1030
+Subject: [PATCH] hoist loop-invariant field reads with a capture summary
+
+The fourth increment dropped the loop-field hoist because a local borrowed
+before the loop was treated as escaped for the whole function. The useful
+borrows are the ones a callee does not retain: `RawVec::grow_one(&mut self)`
+is generic, so its MIR is available, and it changes the vector but does not
+keep the address. This patch adds an interprocedural non-capture summary and
+uses it to admit those borrows to the hoist.
+
+The summary is per function argument. An argument is *not captured* when the
+callee does not store its address (or an address derived from it by a
+projection, reference/raw-pointer cast, reborrow or pointer arithmetic) in
+anything that outlives the call, does not return it, does not pass it to a
+capturing callee, and does not turn it into an integer. Values loaded through
+the pointer are data, not derived addresses; the first store of a pointer
+that aliases the caller local is itself a capture and is rejected where it is
+created. Unknown callees, shims, virtual calls, unclassified intrinsics,
+pointer-to-integer casts, inline asm operands, unions, closure/coroutine
+captures, drop types and recursive cycles are capturing. `const_eval_select`
+is classified as a call to its runtime branch.
+
+The hoist keeps its earlier local rules (nested loop only, unique preheader,
+Freeze base, no in-loop write or borrow, initialized before the preheader)
+and replaces the old whole-function raw-pointer bail-out: a base is admitted
+only when every borrow of it reaches a call whose summary marks that argument
+non-capturing and no borrow of it is used inside the loop.
+
+The pass is opt-in through `-Zmir-capture-hoist`; the compiler, the sysroot
+and the default benchmark builds do not pass it. It is a local CogWasm
+experiment, not an upstream contribution; the code, comments and this message
+are LLM-generated under the Rust project's personal-use exemption, and a human
+must review and own it before it goes anywhere else.
+
+---
+diff --git a/compiler/rustc_mir_transform/src/lib.rs b/compiler/rustc_mir_transform/src/lib.rs
+--- a/compiler/rustc_mir_transform/src/lib.rs
++++ b/compiler/rustc_mir_transform/src/lib.rs
+@@ -38,6 +38,7 @@
+ use pass_manager::{self as pm, Lint, MirLint, MirPass, PassCtx, PassPolicy, WithMinOptLevel};
+ 
+ mod canonicalization;
++mod capture;
+ mod check_pointers;
+ mod cost_checker;
+ mod cross_crate_inline;
+@@ -125,6 +126,7 @@
+     mod add_call_guards : AddCallGuards { AllCallEdges, CriticalCallEdges };
+     mod add_moves_for_packed_drops : AddMovesForPackedDrops;
+     mod add_subtyping_projections : Subtyper;
++    mod capture_hoist : CaptureHoist;
+     mod check_inline : CheckForceInline;
+     mod check_call_recursion : CheckCallRecursion, CheckDropRecursion;
+     mod check_alignment : CheckAlignment;
+@@ -752,6 +754,7 @@
+             &simplify::SimplifyLocals::BeforeConstProp,
+             &dead_store_elimination::DeadStoreElimination::Initial,
+             &gvn::GVN,
++            &capture_hoist::CaptureHoist,
+             &simplify::SimplifyLocals::AfterGVN,
+             // This pass does attempt to track assignments.
+             // Keep it close to GVN which merges identical values into the same local.
+diff --git a/compiler/rustc_session/src/options.rs b/compiler/rustc_session/src/options.rs
+--- a/compiler/rustc_session/src/options.rs
++++ b/compiler/rustc_session/src/options.rs
+@@ -2683,6 +2683,8 @@
+         specified passes to be enabled, overriding all other checks. In particular, this will \
+         enable unsound (known-buggy and hence usually disabled) passes without further warning! \
+         Passes that are not specified are enabled or disabled by other flags as usual."),
++    mir_capture_hoist: bool = (false, parse_bool, [TRACKED],
++        "hoist loop-invariant field reads when every borrow of the base reaches only non-capturing callees; CogWasm step 5b experiment (default: no)"),
+     mir_include_spans: MirIncludeSpans = (MirIncludeSpans::default(), parse_mir_include_spans, [UNTRACKED],
+         "include extra comments in mir pretty printing, like line numbers and statement indices, \
+          details about types, etc. (boolean for all passes, 'nll' to enable in NLL MIR only, default: 'nll')"),
+diff --git a/compiler/rustc_mir_transform/src/capture.rs b/compiler/rustc_mir_transform/src/capture.rs
+new file mode 100644
+--- /dev/null
++++ b/compiler/rustc_mir_transform/src/capture.rs
+@@ -0,0 +1,816 @@
++//! Interprocedural non-capture summaries for pointer arguments.
++//!
++//! A call that receives a pointer or a reference is the reason a caller local
++//! stays in linear memory: the callee may keep the address after it returns.
++//! Most callees do not. A summary answers, per argument, whether the callee
++//! stores the argument's address (or an address derived from it by a pointer
++//! operation) anywhere that outlives the call, returns it, passes it to a
++//! callee that captures it, or converts it to an integer.
++//!
++//! "Derived" means address arithmetic, a field projection behind the pointer,
++//! a reference or raw-pointer cast, and reborrows. Values *loaded* through the
++//! pointer are data, not derived addresses: a callee that reads `self.ptr` from
++//! a `&mut Vec` and gives that heap pointer to the allocator has not kept the
++//! `&mut Vec`, and the caller local's own fields cannot be reached through that
++//! loaded value unless something stored an address of the local there first.
++//! The first such store is itself a capture and is rejected here (it stores a
++//! tainted address through a pointer), so a pre-existing self-reference is
++//! covered when it is created.
++//!
++//! The analysis is a may-analysis over pointer taint. It is deliberately
++//! conservative:
++//!
++//! - an unknown callee (no MIR, a shim, a virtual call, a function pointer, or
++//!   an intrinsic that is not classified) captures every argument;
++//! - a recursive cycle is treated as capturing for the recursive call (the
++//!   summary of a function can still be non-capturing for an argument that is
++//!   not involved in the cycle);
++//! - storing a tainted pointer into a local that needs a drop, into a union,
++//!   into the return place, through a pointer, or into a closure/coroutine
++//!   aggregate captures it;
++//! - inline asm with a tainted operand, pointer-to-integer casts, yields and
++//!   unwind edges capture it.
++//!
++//! This is a local CogWasm experiment, not an upstream contribution. The code
++//! is LLM-generated under the Rust project's personal-use exemption and a
++//! human must review and own it.
++
++use std::cell::RefCell;
++
++use rustc_data_structures::fx::FxHashMap;
++use rustc_hir::def_id::DefId;
++use rustc_index::bit_set::DenseBitSet;
++use rustc_index::{IndexVec, newtype_index};
++use rustc_middle::mir::*;
++use rustc_middle::ty::{self, Instance, InstanceKind, TyCtxt, Unnormalized};
++use rustc_span::{Spanned, sym};
++use tracing::debug;
++
++thread_local! {
++    /// Definitions whose `optimized_mir` the summary computation is allowed
++    /// to query right now. A recursive query would be a cycle; the guard turns
++    /// it into "capturing" instead. The stack is shared by nested pass runs
++    /// because `optimized_mir(callee)` invokes this pass on the callee.
++    static SUMMARY_STACK: RefCell<Vec<DefId>> = const { RefCell::new(Vec::new()) };
++}
++
++/// Pushes the definition for as long as the guard lives, unless it is already
++/// on the stack.
++pub(super) struct DefGuard {
++    def: DefId,
++}
++
++impl Drop for DefGuard {
++    fn drop(&mut self) {
++        SUMMARY_STACK.with(|stack| {
++            let popped = stack.borrow_mut().pop();
++            debug_assert_eq!(popped, Some(self.def));
++        });
++    }
++}
++
++fn enter_def(def: DefId) -> Option<DefGuard> {
++    SUMMARY_STACK.with(|stack| {
++        let mut stack = stack.borrow_mut();
++        if stack.contains(&def) {
++            return None;
++        }
++        stack.push(def);
++        Some(DefGuard { def })
++    })
++}
++
++/// Marks the body being optimised as in progress, so a summary that would
++/// query `optimized_mir` for it is treated as capturing instead of cycling.
++pub(super) fn enter_pass(def: DefId) -> Option<DefGuard> {
++    enter_def(def)
++}
++
++fn def_in_progress(def: DefId) -> bool {
++    SUMMARY_STACK.with(|stack| stack.borrow().contains(&def))
++}
++
++newtype_index! {
++    /// One argument position of a callee.
++    #[debug_format = "arg{}"]
++    struct ArgIdx {}
++}
++
++/// Per-argument result. Bit `i` set means argument `i` is not captured.
++#[derive(Clone, Debug)]
++pub(super) struct ArgSummary {
++    not_captured: DenseBitSet<ArgIdx>,
++}
++
++impl ArgSummary {
++    fn none() -> Self {
++        Self { not_captured: DenseBitSet::new_empty(0) }
++    }
++
++    fn capturing(arg_count: usize) -> Self {
++        Self { not_captured: DenseBitSet::new_empty(arg_count) }
++    }
++
++    fn not_captured(&self, index: usize) -> bool {
++        index < self.not_captured.domain_size()
++            && self.not_captured.contains(ArgIdx::from_usize(index))
++    }
++}
++
++/// Summaries for one MIR pass run. The cache and the recursion stack are local
++/// to the pass: a query cache would need its own cycle handling and this keeps
++/// the analysis independent of the optimisation pipeline.
++pub(super) struct CaptureAnalysis<'tcx> {
++    tcx: TyCtxt<'tcx>,
++    typing_env: ty::TypingEnv<'tcx>,
++    cache: FxHashMap<Instance<'tcx>, ArgSummary>,
++}
++
++impl<'tcx> CaptureAnalysis<'tcx> {
++    pub(super) fn new(tcx: TyCtxt<'tcx>, typing_env: ty::TypingEnv<'tcx>) -> Self {
++        Self { tcx, typing_env, cache: FxHashMap::default() }
++    }
++
++    fn summary(&mut self, instance: Instance<'tcx>) -> ArgSummary {
++        if let Some(summary) = self.cache.get(&instance) {
++            return summary.clone();
++        }
++        // A recursive call, or a definition whose optimisation is already on
++        // the stack: assume the worst for this occurrence. The caller's summary
++        // is then an over-approximation, which is the sound direction.
++        if def_in_progress(instance.def.def_id()) {
++            debug!("capture-summary: {:?} is recursive; capturing", instance);
++            return ArgSummary::none();
++        }
++        let _guard = enter_def(instance.def.def_id());
++        let Some(body) = self.callee_body(instance) else {
++            debug!("capture-summary: {:?} has no MIR; capturing", instance);
++            return ArgSummary::none();
++        };
++        let summary = self.analyze(&body);
++        debug!("capture-summary: {:?} = {:?}", instance, summary);
++        self.cache.insert(instance, summary.clone());
++        summary
++    }
++
++    /// MIR for a monomorphic instance. `optimized_mir` has already run for
++    /// external functions and is cached. For a local callee this starts the
++    /// normal optimisation query if it has not run yet; the thread-local guard
++    /// keeps a call chain back to a definition currently being summarised or
++    /// optimised from becoming a query cycle.
++    fn callee_body(&self, instance: Instance<'tcx>) -> Option<Body<'tcx>> {
++        let body = match instance.def {
++            InstanceKind::Item(def_id) => {
++                if !self.tcx.is_mir_available(def_id) {
++                    return None;
++                }
++                self.tcx.optimized_mir(def_id).clone()
++            }
++            // Shims, virtual calls, intrinsics and foreign items are unknown.
++            InstanceKind::Shim(_)
++            | InstanceKind::Intrinsic(_)
++            | InstanceKind::LlvmIntrinsic(..)
++            | InstanceKind::Virtual(..) => return None,
++        };
++        // `optimized_mir` returns the definition's generic body; substitute
++        // this instance's arguments before looking at its calls.
++        instance
++            .try_instantiate_mir_and_normalize_erasing_regions(
++                self.tcx,
++                self.typing_env,
++                ty::EarlyBinder::bind(self.tcx, body),
++            )
++            .ok()
++    }
++
++    fn analyze(&mut self, body: &Body<'tcx>) -> ArgSummary {
++        let arg_count = body.arg_count;
++        // Only pointer-shaped arguments can have a meaningful summary. An
++        // aggregate argument is conservatively capturing: the caller only asks
++        // about a borrow, and pretending an aggregate is non-capturing would
++        // need per-field summaries.
++        let mut summary = ArgSummary::capturing(arg_count);
++        if body.spread_arg.is_some() || body.coroutine.is_some() {
++            return summary;
++        }
++        let mut taint =
++            IndexVec::from_elem_n(DenseBitSet::new_empty(arg_count), body.local_decls.len());
++        for (index, local) in body.args_iter().enumerate() {
++            let ty = body.local_decls[local].ty;
++            if ty.is_ref() || ty.is_raw_ptr() {
++                let arg = ArgIdx::from_usize(index);
++                summary.not_captured.insert(arg);
++                taint[local].insert(arg);
++            }
++        }
++
++        let mut captured = DenseBitSet::new_empty(arg_count);
++        {
++            let mut walker = TaintWalker {
++                cx: self,
++                body,
++                taint: &mut taint,
++                captured: &mut captured,
++                arg_count,
++                seed: None,
++                in_loop: None,
++            };
++            walker.fixpoint();
++        }
++        for arg in captured.iter() {
++            summary.not_captured.remove(arg);
++        }
++        summary
++    }
++}
++
++/// The taint walker is shared by callee summaries (`seed = None`) and by the
++/// caller-side "did a borrow of this local escape?" query (`seed = Some(local)`,
++/// one pseudo-argument, and `in_loop = Some(..)`).
++struct TaintWalker<'a, 'tcx> {
++    cx: &'a mut CaptureAnalysis<'tcx>,
++    body: &'a Body<'tcx>,
++    taint: &'a mut IndexVec<Local, DenseBitSet<ArgIdx>>,
++    captured: &'a mut DenseBitSet<ArgIdx>,
++    arg_count: usize,
++    /// Caller-side: a `Ref`/`RawPtr` rooted at this local seeds taint.
++    seed: Option<Local>,
++    /// Caller-side: blocks of the loop being considered. A tainted pointer
++    /// used here is live in the loop and rejects the hoist.
++    in_loop: Option<&'a DenseBitSet<BasicBlock>>,
++}
++
++impl<'tcx> TaintWalker<'_, 'tcx> {
++    fn fixpoint(&mut self) {
++        loop {
++            let mut changed = false;
++            for bb in self.body.basic_blocks.reverse_postorder() {
++                let bb = *bb;
++                for statement in &self.body[bb].statements {
++                    if self.visit_statement(bb, statement) {
++                        changed = true;
++                    }
++                }
++                if self.visit_terminator(bb) {
++                    changed = true;
++                }
++            }
++            if !changed {
++                break;
++            }
++        }
++    }
++
++    fn in_loop(&self, bb: BasicBlock) -> bool {
++        self.in_loop.is_some_and(|blocks| blocks.contains(bb))
++    }
++
++    fn empty(&self) -> DenseBitSet<ArgIdx> {
++        DenseBitSet::new_empty(self.arg_count)
++    }
++
++    fn capture(&mut self, set: &DenseBitSet<ArgIdx>) -> bool {
++        let mut changed = false;
++        for arg in set.iter() {
++            changed |= self.captured.insert(arg);
++        }
++        changed
++    }
++
++    fn taint_local(&mut self, local: Local, set: &DenseBitSet<ArgIdx>) -> bool {
++        if set.is_empty() {
++            return false;
++        }
++        self.taint[local].union(set)
++    }
++
++    /// The pointer value stored in a place. A projection through `Deref` loads
++    /// data from memory and does not carry the address that reached it.
++    fn value_taint(&self, place: Place<'tcx>) -> DenseBitSet<ArgIdx> {
++        if place.projection.iter().any(|elem| matches!(elem, PlaceElem::Deref)) {
++            return self.empty();
++        }
++        self.taint[place.local].clone()
++    }
++
++    /// The address produced by `&place` or `&raw place`. The base pointer is
++    /// the local's taint (any field projection still lives in that local), and
++    /// a borrow of the seeded local is the caller-side source.
++    fn address_taint(&self, place: Place<'tcx>) -> DenseBitSet<ArgIdx> {
++        if self.seed == Some(place.local) {
++            let mut set = self.empty();
++            set.insert(ArgIdx::from_usize(0));
++            return set;
++        }
++        self.taint[place.local].clone()
++    }
++
++    fn operand_taint(&self, operand: &Operand<'tcx>) -> DenseBitSet<ArgIdx> {
++        match operand {
++            Operand::Copy(place) | Operand::Move(place) => self.value_taint(*place),
++            Operand::Constant(_) | Operand::RuntimeChecks(_) => self.empty(),
++        }
++    }
++
++    /// Taint in the operands of an rvalue. Used for the in-loop liveness rule
++    /// and by the rvalue transfer function.
++    fn rvalue_taint(&self, rvalue: &Rvalue<'tcx>) -> DenseBitSet<ArgIdx> {
++        let mut set = self.empty();
++        match rvalue {
++            Rvalue::Use(operand, _)
++            | Rvalue::Repeat(operand, _)
++            | Rvalue::UnaryOp(_, operand)
++            | Rvalue::WrapUnsafeBinder(operand, _) => {
++                set.union(&self.operand_taint(operand));
++            }
++            Rvalue::Ref(_, _, place) | Rvalue::RawPtr(_, place) | Rvalue::Reborrow(_, _, place) => {
++                set.union(&self.address_taint(*place));
++            }
++            Rvalue::Cast(_, operand, _) => {
++                set.union(&self.operand_taint(operand));
++            }
++            Rvalue::BinaryOp(_, operands) => {
++                set.union(&self.operand_taint(&operands.0));
++                set.union(&self.operand_taint(&operands.1));
++            }
++            Rvalue::Aggregate(_, operands) => {
++                for operand in operands.iter() {
++                    set.union(&self.operand_taint(operand));
++                }
++            }
++            Rvalue::Discriminant(place) => {
++                set.union(&self.value_taint(*place));
++            }
++            Rvalue::CopyForDeref(place) => {
++                set.union(&self.value_taint(*place));
++            }
++            Rvalue::ThreadLocalRef(_) => {}
++        }
++        set
++    }
++
++    fn visit_statement(&mut self, bb: BasicBlock, statement: &Statement<'tcx>) -> bool {
++        let mut changed = false;
++        match &statement.kind {
++            StatementKind::Assign(assign) => {
++                let (destination, rvalue) = &**assign;
++                if self.in_loop(bb) {
++                    let used = self.rvalue_taint(rvalue);
++                    if !used.is_empty() {
++                        changed |= self.capture(&used);
++                    }
++                    if destination.projection.iter().any(|elem| matches!(elem, PlaceElem::Deref))
++                        && !self.taint[destination.local].is_empty()
++                    {
++                        let taint = self.taint[destination.local].clone();
++                        changed |= self.capture(&taint);
++                    }
++                }
++                let rvalue_taint = self.eval_rvalue(rvalue);
++                changed |= self.store(destination, &rvalue_taint, bb);
++            }
++            StatementKind::SetDiscriminant { place, .. } => {
++                if self.in_loop(bb) && !self.taint[place.local].is_empty() {
++                    let taint = self.taint[place.local].clone();
++                    changed |= self.capture(&taint);
++                }
++            }
++            StatementKind::StorageLive(local) | StatementKind::StorageDead(local) => {
++                if self.in_loop(bb) && !self.taint[*local].is_empty() {
++                    let taint = self.taint[*local].clone();
++                    changed |= self.capture(&taint);
++                }
++            }
++            StatementKind::PlaceMention(place) => {
++                if self.in_loop(bb) {
++                    let taint = self.value_taint(**place);
++                    if !taint.is_empty() {
++                        changed |= self.capture(&taint);
++                    }
++                }
++            }
++            StatementKind::FakeRead(read) => {
++                if self.in_loop(bb) {
++                    let taint = self.value_taint(read.1);
++                    if !taint.is_empty() {
++                        changed |= self.capture(&taint);
++                    }
++                }
++            }
++            StatementKind::AscribeUserType(ascribe, _) => {
++                if self.in_loop(bb) {
++                    let taint = self.value_taint(ascribe.0);
++                    if !taint.is_empty() {
++                        changed |= self.capture(&taint);
++                    }
++                }
++            }
++            _ => {}
++        }
++        changed
++    }
++
++    /// Transfer for the right-hand side. It returns the pointer value the
++    /// assignment writes; `store` decides whether writing it is an escape.
++    fn eval_rvalue(&mut self, rvalue: &Rvalue<'tcx>) -> DenseBitSet<ArgIdx> {
++        let mut set = self.empty();
++        match rvalue {
++            Rvalue::Use(operand, _) | Rvalue::Repeat(operand, _) => {
++                set.union(&self.operand_taint(operand));
++            }
++            Rvalue::Ref(_, _, place) | Rvalue::RawPtr(_, place) => {
++                set.union(&self.address_taint(*place));
++            }
++            Rvalue::Reborrow(_, _, place) => {
++                set.union(&self.address_taint(*place));
++            }
++            Rvalue::Cast(kind, operand, target) => {
++                let source = self.operand_taint(operand);
++                if source.is_empty() {
++                    return set;
++                }
++                match kind {
++                    // Exposing the address as an integer loses the pointer
++                    // type; the integer can be turned back into a pointer and
++                    // stored, so this is a capture.
++                    CastKind::PointerExposeProvenance => {
++                        self.capture(&source);
++                    }
++                    CastKind::PtrToPtr
++                    | CastKind::FnPtrToPtr
++                    | CastKind::PointerCoercion(..)
++                    | CastKind::BoxDerefTransmute
++                    | CastKind::Transmute
++                    | CastKind::Subtype => {
++                        if target.is_any_ptr() {
++                            set.union(&source);
++                        } else {
++                            // A pointer-width integer or anything else hides
++                            // the address.
++                            self.capture(&source);
++                        }
++                    }
++                    // Integer/float casts cannot come from a tainted pointer
++                    // in this analysis: pointer-to-integer is a separate cast.
++                    CastKind::IntToInt
++                    | CastKind::FloatToInt
++                    | CastKind::FloatToFloat
++                    | CastKind::IntToFloat => {}
++                    CastKind::PointerWithExposedProvenance => {
++                        // The input is an integer; it has no provenance here.
++                    }
++                }
++            }
++            Rvalue::BinaryOp(_binop, operands) => {
++                // The only pointer-valued binary op is `Offset`.
++                set.union(&self.operand_taint(&operands.0));
++                set.union(&self.operand_taint(&operands.1));
++            }
++            Rvalue::UnaryOp(_, operand) => {
++                // `PtrMetadata` yields metadata, not the data address.
++                let _ = operand;
++            }
++            Rvalue::Aggregate(kind, operands) => {
++                for operand in operands.iter() {
++                    set.union(&self.operand_taint(operand));
++                }
++                if set.is_empty() {
++                    return set;
++                }
++                match kind {
++                    AggregateKind::Closure(..)
++                    | AggregateKind::Coroutine(..)
++                    | AggregateKind::CoroutineClosure(..) => {
++                        // A closure can outlive the call and run later; its
++                        // captures are retained.
++                        self.capture(&set);
++                        return self.empty();
++                    }
++                    AggregateKind::Adt(_, _, _, _, Some(_)) => {
++                        // A union can hide a pointer under another field.
++                        self.capture(&set);
++                        return self.empty();
++                    }
++                    _ => {}
++                }
++            }
++            Rvalue::WrapUnsafeBinder(operand, _) => {
++                set.union(&self.operand_taint(operand));
++            }
++            Rvalue::CopyForDeref(place) => {
++                set.union(&self.value_taint(*place));
++            }
++            Rvalue::Discriminant(_) | Rvalue::ThreadLocalRef(_) => {}
++        }
++        set
++    }
++
++    fn store(
++        &mut self,
++        destination: &Place<'tcx>,
++        set: &DenseBitSet<ArgIdx>,
++        bb: BasicBlock,
++    ) -> bool {
++        if set.is_empty() {
++            return false;
++        }
++        if self.in_loop(bb) {
++            // Storing a derived pointer in a local inside the loop creates a
++            // borrow that is live across iterations.
++            let mut changed = self.capture(set);
++            changed |= self.taint_local(destination.local, set);
++            return changed;
++        }
++        if destination.projection.iter().any(|elem| matches!(elem, PlaceElem::Deref)) {
++            // The pointer is written into memory behind another pointer, which
++            // outlives this call.
++            debug!("capture: store through a pointer captures {:?}", set);
++            return self.capture(set);
++        }
++        if destination.local == RETURN_PLACE {
++            debug!("capture: returning captures {:?}", set);
++            return self.capture(set);
++        }
++        let ty = self.body.local_decls[destination.local].ty;
++        if ty.is_union() {
++            debug!("capture: union store captures {:?}", set);
++            return self.capture(set);
++        }
++        // A drop can run arbitrary code that reads the stored pointer. This is
++        // conservative: a plain `&T` local does not need a drop, so the common
++        // borrow cases are unaffected.
++        if ty.needs_drop(self.cx.tcx, self.cx.typing_env) {
++            debug!("capture: store into a drop type {:?} captures {:?}", ty, set);
++            return self.capture(set);
++        }
++        self.taint_local(destination.local, set)
++    }
++
++    fn visit_terminator(&mut self, bb: BasicBlock) -> bool {
++        let terminator = self.body[bb].terminator();
++        let mut changed = false;
++        match &terminator.kind {
++            TerminatorKind::Call { func, args, unwind, .. } => {
++                changed |= self.visit_call(bb, func, args);
++                changed |= self.visit_unwind(*unwind);
++            }
++            TerminatorKind::TailCall { func, args, .. } => {
++                changed |= self.visit_call(bb, func, args);
++            }
++            TerminatorKind::Drop { place, .. } => {
++                let taint = self.taint[place.local].clone();
++                if !taint.is_empty() {
++                    let ty = place.ty(&self.body.local_decls, self.cx.tcx).ty;
++                    if self.in_loop(bb)
++                        || ty.needs_drop(self.cx.tcx, self.cx.typing_env)
++                        || ty.is_union()
++                    {
++                        changed |= self.capture(&taint);
++                    }
++                }
++            }
++            TerminatorKind::InlineAsm { operands, .. } => {
++                for operand in operands.iter() {
++                    let taint = match operand {
++                        InlineAsmOperand::In { value, .. }
++                        | InlineAsmOperand::InOut { in_value: value, .. } => {
++                            self.operand_taint(value)
++                        }
++                        InlineAsmOperand::Out { place: Some(place), .. }
++                        | InlineAsmOperand::InOut { out_place: Some(place), .. } => {
++                            self.taint[place.local].clone()
++                        }
++                        _ => self.empty(),
++                    };
++                    if !taint.is_empty() {
++                        changed |= self.capture(&taint);
++                    }
++                }
++            }
++            TerminatorKind::Assert { cond, unwind, .. } => {
++                let taint = self.operand_taint(cond);
++                if !taint.is_empty() {
++                    changed |= self.capture(&taint);
++                }
++                changed |= self.visit_unwind(*unwind);
++            }
++            TerminatorKind::Yield { value, resume_arg, .. } => {
++                let taint = self.operand_taint(value);
++                if !taint.is_empty() {
++                    changed |= self.capture(&taint);
++                }
++                if self.in_loop(bb) && !self.taint[resume_arg.local].is_empty() {
++                    let taint = self.taint[resume_arg.local].clone();
++                    changed |= self.capture(&taint);
++                }
++            }
++            TerminatorKind::Return => {
++                let taint = self.taint[RETURN_PLACE].clone();
++                if !taint.is_empty() {
++                    changed |= self.capture(&taint);
++                }
++            }
++            TerminatorKind::SwitchInt { discr, .. } => {
++                let taint = self.operand_taint(discr);
++                if self.in_loop(bb) && !taint.is_empty() {
++                    changed |= self.capture(&taint);
++                }
++            }
++            TerminatorKind::Goto { .. }
++            | TerminatorKind::UnwindResume
++            | TerminatorKind::UnwindTerminate(_)
++            | TerminatorKind::Unreachable
++            | TerminatorKind::CoroutineDrop
++            | TerminatorKind::FalseEdge { .. }
++            | TerminatorKind::FalseUnwind { .. } => {}
++        }
++        changed
++    }
++
++    fn visit_unwind(&mut self, _unwind: UnwindAction) -> bool {
++        // Unwinding is not a capture by itself: the function does not return,
++        // and every way the address can outlive the call (a store through a
++        // pointer, a store into a drop type, a call in a cleanup block) is a
++        // sink the walker visits in those cleanup blocks anyway. A blanket
++        // "any unwind edge captures" would reject every pre-optimisation body,
++        // where `-C panic=abort` has not yet removed the cleanup edges.
++        false
++    }
++
++    fn visit_call(
++        &mut self,
++        bb: BasicBlock,
++        func: &Operand<'tcx>,
++        args: &[Spanned<Operand<'tcx>>],
++    ) -> bool {
++        let mut changed = false;
++        // Calling through a tainted function pointer invokes unknown code that
++        // has the address.
++        let func_taint = self.operand_taint(func);
++        if !func_taint.is_empty() {
++            debug!("capture: call through a tainted function pointer");
++            changed |= self.capture(&func_taint);
++        }
++
++        if let Some(instance) = self.resolve_callee(func)
++            && self.is_const_eval_select(instance)
++        {
++            return changed | self.visit_const_eval_select(bb, args);
++        }
++
++        let callee = self.resolve_callee(func);
++        if callee.is_none() {
++            debug!("capture: unresolved callee for {:?}", func.ty(self.body, self.cx.tcx));
++        }
++        for (index, argument) in args.iter().enumerate() {
++            let taint = self.operand_taint(&argument.node);
++            if taint.is_empty() {
++                continue;
++            }
++            if self.in_loop(bb) {
++                debug!("capture: tainted arg {index} used inside the loop");
++                changed |= self.capture(&taint);
++                continue;
++            }
++            let non_capturing =
++                callee.is_some_and(|callee| self.cx.summary(callee).not_captured(index));
++            if !non_capturing {
++                debug!("capture: arg {index} of {:?} captures {:?}", callee, taint);
++                changed |= self.capture(&taint);
++            }
++        }
++        changed
++    }
++
++    fn visit_const_eval_select(&mut self, bb: BasicBlock, args: &[Spanned<Operand<'tcx>>]) -> bool {
++        // `const_eval_select((a, b, ..), const_fn, runtime_fn)` calls
++        // `runtime_fn(a, b, ..)` at run time. Treat it as that call rather than
++        // as an unknown intrinsic. The tuple's fields are matched positionally
++        // to the callee's arguments.
++        let (Some(tuple), Some(runtime)) = (args.first(), args.get(2)) else {
++            let mut changed = false;
++            for argument in args {
++                let taint = self.operand_taint(&argument.node);
++                changed |= self.capture(&taint);
++            }
++            return changed;
++        };
++        let Some(elements) = self.tuple_elements(&tuple.node) else {
++            // The tuple is not a simple aggregate; be conservative about the
++            // whole argument.
++            let taint = self.operand_taint(&tuple.node);
++            return self.capture(&taint);
++        };
++        let callee = self.resolve_callee(&runtime.node);
++        let mut changed = false;
++        for (index, element) in elements.iter().enumerate() {
++            let taint = self.operand_taint(element);
++            if taint.is_empty() {
++                continue;
++            }
++            if self.in_loop(bb) {
++                changed |= self.capture(&taint);
++                continue;
++            }
++            let non_capturing =
++                callee.is_some_and(|callee| self.cx.summary(callee).not_captured(index));
++            if !non_capturing {
++                changed |= self.capture(&taint);
++            }
++        }
++        changed
++    }
++
++    /// Resolve an `Operand` of function type to the instance that will run.
++    fn resolve_callee(&self, func: &Operand<'tcx>) -> Option<Instance<'tcx>> {
++        let ty = func.ty(self.body, self.cx.tcx);
++        let ty::FnDef(def_id, args) = *ty.kind() else {
++            return None;
++        };
++        let args = self
++            .cx
++            .tcx
++            .try_normalize_erasing_regions(self.cx.typing_env, Unnormalized::new_wip(args))
++            .ok()?
++            .no_bound_vars()?;
++        let instance =
++            Instance::try_resolve(self.cx.tcx, self.cx.typing_env, def_id, args).ok().flatten()?;
++        if matches!(instance.def, InstanceKind::Virtual(..)) {
++            return None;
++        }
++        Some(instance)
++    }
++
++    fn is_const_eval_select(&self, instance: Instance<'tcx>) -> bool {
++        match instance.def {
++            InstanceKind::Item(def_id) => self.cx.tcx.is_intrinsic(def_id, sym::const_eval_select),
++            _ => false,
++        }
++    }
++
++    /// The operands of a tuple built by a single `Aggregate(Tuple)` assignment
++    /// to `place`, if it can be identified unambiguously.
++    fn tuple_elements(&self, operand: &Operand<'tcx>) -> Option<Vec<Operand<'tcx>>> {
++        let place = match operand {
++            Operand::Copy(place) | Operand::Move(place) => *place,
++            Operand::Constant(_) | Operand::RuntimeChecks(_) => return None,
++        };
++        if !place.projection.is_empty() {
++            return None;
++        }
++        let mut found: Option<Vec<Operand<'tcx>>> = None;
++        for bb in self.body.basic_blocks.reverse_postorder() {
++            for statement in &self.body[*bb].statements {
++                let StatementKind::Assign(assign) = &statement.kind else {
++                    continue;
++                };
++                let (destination, rvalue) = &**assign;
++                if destination.local != place.local || !destination.projection.is_empty() {
++                    continue;
++                }
++                let Rvalue::Aggregate(kind, elements) = rvalue else {
++                    return None;
++                };
++                if !matches!(**kind, AggregateKind::Tuple) {
++                    return None;
++                }
++                if found.is_some() {
++                    return None;
++                }
++                found = Some(elements.iter().cloned().collect());
++            }
++        }
++        found
++    }
++}
++
++/// Does a borrow of `base` escape before or inside the loop?
++///
++/// This is the caller half of the summary: a borrow seeded at `base` is
++/// followed through copies, reborrows, casts and locals. It is safe only when
++/// every sink is a call argument the callee's summary marks non-capturing and
++/// the borrow is not used inside the loop.
++pub(super) fn borrow_escapes<'tcx>(
++    cx: &mut CaptureAnalysis<'tcx>,
++    body: &Body<'tcx>,
++    base: Local,
++    loop_blocks: &DenseBitSet<BasicBlock>,
++) -> bool {
++    let arg_count = 1;
++    let mut taint =
++        IndexVec::from_elem_n(DenseBitSet::new_empty(arg_count), body.local_decls.len());
++    let mut captured = DenseBitSet::new_empty(arg_count);
++    {
++        let mut walker = TaintWalker {
++            cx,
++            body,
++            taint: &mut taint,
++            captured: &mut captured,
++            arg_count,
++            seed: Some(base),
++            in_loop: Some(loop_blocks),
++        };
++        walker.fixpoint();
++    }
++    captured.contains(ArgIdx::from_usize(0))
++}
+diff --git a/compiler/rustc_mir_transform/src/capture_hoist.rs b/compiler/rustc_mir_transform/src/capture_hoist.rs
+new file mode 100644
+--- /dev/null
++++ b/compiler/rustc_mir_transform/src/capture_hoist.rs
+@@ -0,0 +1,412 @@
++//! Hoist loop-invariant field reads out of loops.
++//!
++//! `sroa` promotes a local only when its address is never taken, so a `Vec`
++//! local that was written before a loop stays in its stack slot and every
++//! `vec[i]` reloads its pointer and length. This pass reads such a field once
++//! in the loop preheader into a fresh local and replaces the in-loop read with
++//! a copy of that local. The destination of the original assignment stays in
++//! place, so a loop that runs zero times leaves the destination untouched.
++//!
++//! A local borrowed before the loop is only a candidate when every borrow of it
++//! reaches only callees whose argument summary says the address is not captured,
++//! and no borrow of it is used inside the loop. The summary is in `capture.rs`.
++//! The local rules from the earlier, dropped hoist stay:
++//!
++//! - a direct read of `base.field` cannot coexist with a live unique borrow of
++//!   `base` in borrow-checked MIR, so a reference borrow taken before the loop
++//!   cannot mutate the field while the loop reads it directly;
++//! - a shared borrow cannot write a `Freeze` base, which we require;
++//! - any borrow of `base` created inside the loop, any move out of it, any
++//!   direct, discriminant or storage write, and inline asm reject the base.
++//!
++//! Only loops that are part of a nest are optimized: the preheader read is paid
++//! once per loop entry, and a single-level loop over a runtime-length
++//! collection can execute too few times to pay for it.
++//!
++//! The pass is opt-in through `-Zmir-capture-hoist`, off by default. It must not
++//! run in the compiler, sysroot or default benchmark builds: the compiler has
++//! not been validated with it on, and the flag is the boundary between the
++//! measured experiment and the shipped pipeline.
++//!
++//! This is a local CogWasm experiment, not an upstream contribution. The code
++//! and comments are LLM-generated under the Rust project's personal-use
++//! exemption and a human must review and own it before it goes anywhere else.
++
++use rustc_data_structures::fx::FxHashMap;
++use rustc_data_structures::graph::dominators::Dominators;
++use rustc_index::bit_set::DenseBitSet;
++use rustc_middle::mir::*;
++use rustc_middle::ty::{self, TyCtxt};
++use tracing::debug;
++
++use crate::PassPolicy;
++use crate::capture::{CaptureAnalysis, borrow_escapes};
++use crate::patch::MirPatch;
++
++pub(super) struct CaptureHoist;
++
++impl<'tcx> crate::MirPass<'tcx> for CaptureHoist {
++    fn policy(&self, ctx: &crate::PassCtx<'_>) -> PassPolicy {
++        PassPolicy::optional(ctx.opts.unstable_opts.mir_capture_hoist)
++    }
++
++    fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
++        use rustc_hir::def::DefKind;
++        if body.source.promoted.is_some()
++            || matches!(
++                tcx.def_kind(body.source.def_id()),
++                DefKind::Const | DefKind::Static { .. } | DefKind::AnonConst
++            )
++        {
++            return;
++        }
++
++        let reachable = reachable_blocks(body);
++        let typing_env = body.typing_env(tcx);
++        let mut analysis = CaptureAnalysis::new(tcx, typing_env);
++        let dominators = body.basic_blocks.dominators().clone();
++        let mut loops = Vec::new();
++        for header in loop_headers(body, &dominators, &reachable) {
++            let blocks = loop_blocks(body, &dominators, &reachable, header);
++            if blocks.len() < 2 {
++                continue;
++            }
++            let mut members = DenseBitSet::new_empty(body.basic_blocks.len());
++            for bb in &blocks {
++                members.insert(*bb);
++            }
++            loops.push(Loop { header, blocks, members });
++        }
++        for (index, loop_) in loops.iter().enumerate() {
++            // Pay the preheader read only where the loop is part of a nest.
++            let nested = loops.iter().enumerate().any(|(other_index, other)| {
++                other_index != index && other.members.contains(loop_.header)
++            });
++            let contains_nested = loops.iter().enumerate().any(|(other_index, other)| {
++                other_index != index && loop_.members.contains(other.header)
++            });
++            if !nested && !contains_nested {
++                debug!(
++                    "capture-hoist: skip single-level loop at {:?} of {:?}",
++                    loop_.header,
++                    tcx.def_path_str(body.source.def_id())
++                );
++                continue;
++            }
++            debug!(
++                "capture-hoist: consider loop at {:?} ({} blocks) of {:?}",
++                loop_.header,
++                loop_.blocks.len(),
++                tcx.def_path_str(body.source.def_id())
++            );
++            hoist_loop(tcx, body, typing_env, &dominators, &reachable, loop_, &mut analysis);
++        }
++    }
++}
++
++struct Loop {
++    header: BasicBlock,
++    blocks: Vec<BasicBlock>,
++    members: DenseBitSet<BasicBlock>,
++}
++
++fn reachable_blocks(body: &Body<'_>) -> DenseBitSet<BasicBlock> {
++    let mut reachable = DenseBitSet::new_empty(body.basic_blocks.len());
++    for bb in body.basic_blocks.reverse_postorder() {
++        reachable.insert(*bb);
++    }
++    reachable
++}
++
++/// Loop headers with a backedge: a successor that dominates the block pointing
++/// at it.
++fn loop_headers(
++    body: &Body<'_>,
++    dominators: &Dominators<BasicBlock>,
++    reachable: &DenseBitSet<BasicBlock>,
++) -> Vec<BasicBlock> {
++    let mut headers = Vec::new();
++    for bb in body.basic_blocks.indices() {
++        if !reachable.contains(bb) {
++            continue;
++        }
++        for successor in body[bb].terminator().successors() {
++            if dominators.dominates(successor, bb) && !headers.contains(&successor) {
++                headers.push(successor);
++            }
++        }
++    }
++    headers
++}
++
++/// Blocks of the natural loop with `header`.
++fn loop_blocks(
++    body: &Body<'_>,
++    dominators: &Dominators<BasicBlock>,
++    reachable: &DenseBitSet<BasicBlock>,
++    header: BasicBlock,
++) -> Vec<BasicBlock> {
++    let mut in_loop: DenseBitSet<BasicBlock> = DenseBitSet::new_empty(body.basic_blocks.len());
++    in_loop.insert(header);
++    let mut stack = Vec::new();
++    for bb in body.basic_blocks.indices() {
++        if !reachable.contains(bb) {
++            continue;
++        }
++        for successor in body[bb].terminator().successors() {
++            if successor == header && dominators.dominates(header, bb) {
++                stack.push(bb);
++            }
++        }
++    }
++    while let Some(bb) = stack.pop() {
++        if in_loop.contains(bb) {
++            continue;
++        }
++        in_loop.insert(bb);
++        for predecessor in body.basic_blocks.predecessors()[bb].iter() {
++            if *predecessor != header
++                && reachable.contains(*predecessor)
++                && !in_loop.contains(*predecessor)
++                && dominators.dominates(header, *predecessor)
++            {
++                stack.push(*predecessor);
++            }
++        }
++    }
++    body.basic_blocks.indices().filter(|bb| in_loop.contains(*bb)).collect()
++}
++
++fn hoist_loop<'tcx>(
++    tcx: TyCtxt<'tcx>,
++    body: &mut Body<'tcx>,
++    typing_env: ty::TypingEnv<'tcx>,
++    dominators: &Dominators<BasicBlock>,
++    reachable: &DenseBitSet<BasicBlock>,
++    loop_: &Loop,
++    analysis: &mut CaptureAnalysis<'tcx>,
++) {
++    let Some(preheader) = unique_preheader(body, &loop_.blocks, loop_.header) else {
++        return;
++    };
++    let (written, escaped, has_inline_asm) = loop_effects(body, &loop_.blocks);
++    if has_inline_asm {
++        return;
++    }
++    let initialized = initialized_before(body, dominators, reachable, preheader);
++    let preheader_end =
++        Location { block: preheader, statement_index: body[preheader].statements.len() };
++
++    // The per-base answer does not depend on the field read, so compute it once
++    // per base and loop.
++    let mut hoistable: FxHashMap<Local, bool> = FxHashMap::default();
++    let mut patch = MirPatch::new(body);
++    let mut moved = 0;
++    for bb in &loop_.blocks {
++        let bb = *bb;
++        if body[bb].is_cleanup {
++            continue;
++        }
++        for (index, statement) in body[bb].statements.iter().enumerate() {
++            let StatementKind::Assign(assign) = &statement.kind else {
++                continue;
++            };
++            let (destination, rvalue) = &**assign;
++            let Rvalue::Use(Operand::Copy(place), with_retag) = rvalue else {
++                continue;
++            };
++            if !destination.projection.is_empty() || place.projection.is_empty() {
++                continue;
++            }
++            if place.projection.iter().any(|element| !matches!(element, PlaceElem::Field(..))) {
++                continue;
++            }
++            let base = place.local;
++            if written.contains(base)
++                || escaped.contains(base)
++                || !initialized.contains(base)
++                || !body.local_decls[base].ty.is_freeze(tcx, typing_env)
++            {
++                debug!(
++                    "capture-hoist: reject base {:?}: written={} escaped={} initialized={} freeze={}",
++                    base,
++                    written.contains(base),
++                    escaped.contains(base),
++                    initialized.contains(base),
++                    body.local_decls[base].ty.is_freeze(tcx, typing_env)
++                );
++                continue;
++            }
++            let allowed = *hoistable.entry(base).or_insert_with(|| {
++                let escapes = borrow_escapes(analysis, body, base, &loop_.members);
++                debug!("capture-hoist: base {:?} borrow_escapes={escapes}", base);
++                !escapes
++            });
++            if !allowed {
++                continue;
++            }
++            if !body.local_decls[destination.local].ty.is_scalar() {
++                continue;
++            }
++            let temporary =
++                patch.new_temp(body.local_decls[destination.local].ty, statement.source_info.span);
++            patch.add_assign(
++                preheader_end,
++                temporary.into(),
++                Rvalue::Use(Operand::Copy(*place), WithRetag::No),
++            );
++            patch.add_statement(
++                Location { block: bb, statement_index: index },
++                StatementKind::Assign(Box::new((
++                    *destination,
++                    Rvalue::Use(Operand::Copy(temporary.into()), *with_retag),
++                ))),
++            );
++            patch.nop_statement(Location { block: bb, statement_index: index });
++            moved += 1;
++        }
++    }
++    if moved > 0 {
++        patch.apply(body);
++    }
++}
++
++fn unique_preheader(
++    body: &Body<'_>,
++    blocks: &[BasicBlock],
++    header: BasicBlock,
++) -> Option<BasicBlock> {
++    let outside: Vec<BasicBlock> = body.basic_blocks.predecessors()[header]
++        .iter()
++        .copied()
++        .filter(|bb| !blocks.contains(bb))
++        .collect();
++    let [preheader] = outside[..] else {
++        return None;
++    };
++    let TerminatorKind::Goto { target, .. } = &body[preheader].terminator().kind else {
++        return None;
++    };
++    (*target == header).then_some(preheader)
++}
++
++/// Locals written, moved out of or mutably borrowed inside the loop, and
++/// whether the loop contains inline asm (whose operands we do not analyse).
++fn loop_effects(
++    body: &Body<'_>,
++    blocks: &[BasicBlock],
++) -> (DenseBitSet<Local>, DenseBitSet<Local>, bool) {
++    let mut written: DenseBitSet<Local> = DenseBitSet::new_empty(body.local_decls.len());
++    let mut escaped: DenseBitSet<Local> = DenseBitSet::new_empty(body.local_decls.len());
++    let mut has_inline_asm = false;
++    for bb in blocks {
++        for statement in &body[*bb].statements {
++            match &statement.kind {
++                StatementKind::Assign(assign) => {
++                    let (place, rvalue) = &**assign;
++                    // Any assignment to the local, including one to the whole
++                    // local rather than a field, changes the value the
++                    // preheader read would see.
++                    written.insert(place.local);
++                    match rvalue {
++                        Rvalue::Ref(_, _, referenced) | Rvalue::RawPtr(_, referenced) => {
++                            escaped.insert(referenced.local);
++                        }
++                        Rvalue::Use(Operand::Move(moved), _) => {
++                            written.insert(moved.local);
++                        }
++                        _ => {}
++                    }
++                }
++                StatementKind::SetDiscriminant { place, .. } => {
++                    written.insert(place.local);
++                }
++                StatementKind::StorageLive(local) | StatementKind::StorageDead(local) => {
++                    // Storage going in or out of scope inside the loop means
++                    // the preheader cannot see the same live value.
++                    written.insert(*local);
++                }
++                _ => {}
++            }
++        }
++        match &body[*bb].terminator().kind {
++            TerminatorKind::Call { args, destination, .. } => {
++                // The call writes its result to this local (or field). A call
++                // inside the loop can therefore replace the base the preheader
++                // read was taken from.
++                written.insert(destination.local);
++                for argument in &**args {
++                    match &argument.node {
++                        Operand::Copy(place) if place.projection.is_empty() => {
++                            escaped.insert(place.local);
++                        }
++                        Operand::Move(place) => {
++                            written.insert(place.local);
++                        }
++                        _ => {}
++                    }
++                }
++            }
++            TerminatorKind::TailCall { args, .. } => {
++                for argument in &**args {
++                    match &argument.node {
++                        Operand::Copy(place) if place.projection.is_empty() => {
++                            escaped.insert(place.local);
++                        }
++                        Operand::Move(place) => {
++                            written.insert(place.local);
++                        }
++                        _ => {}
++                    }
++                }
++            }
++            TerminatorKind::Drop { place, .. } => {
++                written.insert(place.local);
++            }
++            TerminatorKind::Yield { resume_arg, .. } => {
++                written.insert(resume_arg.local);
++            }
++            TerminatorKind::InlineAsm { operands, .. } => {
++                has_inline_asm = true;
++                for operand in operands.iter() {
++                    match operand {
++                        InlineAsmOperand::Out { place: Some(place), .. }
++                        | InlineAsmOperand::InOut { out_place: Some(place), .. } => {
++                            written.insert(place.local);
++                        }
++                        _ => {}
++                    }
++                }
++            }
++            _ => {}
++        }
++    }
++    (written, escaped, has_inline_asm)
++}
++
++/// Locals with an assignment (or a function argument) in a block that
++/// dominates the preheader.
++fn initialized_before(
++    body: &Body<'_>,
++    dominators: &Dominators<BasicBlock>,
++    reachable: &DenseBitSet<BasicBlock>,
++    preheader: BasicBlock,
++) -> DenseBitSet<Local> {
++    let mut initialized: DenseBitSet<Local> = DenseBitSet::new_empty(body.local_decls.len());
++    for argument in body.args_iter() {
++        initialized.insert(argument);
++    }
++    for bb in body.basic_blocks.indices() {
++        if !reachable.contains(bb) || !dominators.dominates(bb, preheader) {
++            continue;
++        }
++        for statement in &body[bb].statements {
++            if let StatementKind::Assign(assign) = &statement.kind
++                && assign.0.projection.is_empty()
++            {
++                initialized.insert(assign.0.local);
++            }
++        }
++    }
++    initialized
++}
