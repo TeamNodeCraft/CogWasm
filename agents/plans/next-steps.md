@@ -183,9 +183,11 @@ runner, where the edit is 174 ms against the 100 ms target).
 2. [ ] Option A (long-lived guest keeping sysroot metadata) for the
        remaining ≈ 40 ms of crate loading and session set-up; measure on a
        plugin-sized source (plugin (c), `json`), where CI is still over 100 ms.
-       Phase 1 implemented (`0007-wasm-serve-loop.patch`, `ServeSession`,
-       `--verify-cold`): locally −11 to −14 ms per job, byte-identical output.
-       CI measurement pending.
+       Phase 1 done (`0007-wasm-serve-loop.patch`, `ServeSession`,
+       `--verify-cold`): **CI edit → result 53.6 → 23.6 ms** (run
+       44997648351), byte-identical to cold compiles; locally −11 to −14 ms
+       per job. Next: measure plugin (c) and `json` through the serving path
+       on CI, where the fixed saving matters less than per-source work.
 3. [x] Acceptance for the small edit: CI edit → result under 100 ms (53.6 ms,
        run 44978461782); difftest green. Plugin-sized edits are the next bar.
 

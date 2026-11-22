@@ -464,11 +464,19 @@ the host session, then the supervisor and the CI checks.
   | `json` | 254.2 ms | **240.5 ms** (−5%) |
 
   A fixed ≈ 11–14 ms per job, as predicted (no metadata read, no guest
-  start). CI numbers pending; the runner's read cost was larger (7–20 ms).
-- Not run locally (disk below the 15 GiB guard): the full CI script,
-  difftest and the fuel benchmark; CI runs them. The registry change is in
-  code the compiler executes, so compiler-fuel values may shift slightly from
-  405581528 / 806598433 / 458378659.
+  start).
+- **CI runner** (ubuntu-latest; runs 44993929682 and 44997648351): resident
+  `edit-loop` with `--verify-cold` **24.9 ms and 23.6 ms** median (was
+  53.6 ms one instance per job), build ≈ 23–25 ms per edit, every edit
+  byte-identical to a cold compile. The resident test's jobs: 46 ms, 15 ms,
+  rejected, 24 ms after the error. Difftest, the LLVM audit, plugins, A.2,
+  incremental, the `.cwasm` checks and the fuel-determinism guard all pass.
+- Compiler fuel moved by +0.02–0.04% locally (a_add 405581528 → 405733607)
+  because the registry change is in code the compiler executes; CI's guard
+  compares two runs in one job, so this needs no baseline change.
+- Follow-up found in CI: `bench-host` builds `StoreOptions` with a struct
+  literal and stopped compiling when the new fields were added (fixed in
+  `9692fb0`; the whole workspace is now checked, not only touched crates).
 
 ## Recommendation
 
