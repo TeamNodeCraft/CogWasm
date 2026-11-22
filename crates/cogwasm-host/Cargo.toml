@@ -27,7 +27,7 @@ wasmparser = "0.263"
 # Latest stable Wasmtime as of the CogWasm compiler (51.0.0 is still an RC). rustc.wasm no
 # longer spawns a compiler thread, so plain WASI p1 is enough: no wasi-threads.
 # The exact version is pinned once in the root workspace.
-wasmtime = { workspace = true, features = ["cranelift", "runtime", "std", "cache", "anyhow", "threads"] }
+wasmtime = { workspace = true, features = ["cranelift", "runtime", "std", "cache", "anyhow", "threads", "pooling-allocator"] }
 # Not a public dependency: `wasmtime` does not re-export its own version, and
 # the sidecar metadata must record the exact version. Pinned in lockstep with
 # `wasmtime` in the root workspace.

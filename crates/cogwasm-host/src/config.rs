@@ -8,7 +8,9 @@
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use wasmtime::{Cache, CacheConfig, Config, Engine};
+use wasmtime::{
+    Cache, CacheConfig, Config, Engine, InstanceAllocationStrategy, PoolingAllocationConfig,
+};
 
 /// Guest stack limit for the rustc.wasm module.
 pub const MAX_WASM_STACK: usize = 8 << 20;
@@ -72,6 +74,7 @@ pub fn engine_config_with(summary: &ConfigSummary, cache_dir: Option<&Path>) -> 
         .wasm_relaxed_simd(summary.wasm_relaxed_simd)
         .max_wasm_stack(summary.max_wasm_stack)
         .async_stack_size(summary.async_stack_size);
+    apply_pooling_experiment(&mut config);
     if let Some(dir) = cache_dir {
         let mut cache_config = CacheConfig::new();
         // The 137 MiB rustc.wasm is much faster to mmap/deserialize than to
@@ -87,6 +90,42 @@ pub fn engine_config_with(summary: &ConfigSummary, cache_dir: Option<&Path>) -> 
         config.cache(None);
     }
     Ok(config)
+}
+
+/// G2.3 experiment A0 (`docs/notes/warm-session.md`): opt into Wasmtime's
+/// pooling instance allocator with `COGWASM_POOLING=1`, so per-job instances
+/// reuse one linear-memory slot instead of mapping fresh memory each time.
+/// `COGWASM_POOLING_KEEP_RESIDENT_MB` keeps that many MiB of each slot
+/// resident (zeroed in place) instead of decommitting it.
+///
+/// Off by default; the shipped configuration is unchanged. The allocation
+/// strategy is a runtime setting: with it on, the existing `.cwasm` still
+/// loads (measured on 2026-11-22), so it does not change the compatibility
+/// hash.
+fn apply_pooling_experiment(config: &mut Config) {
+    if std::env::var_os("COGWASM_POOLING").is_none_or(|value| value == "0") {
+        return;
+    }
+    let keep_resident_mb = std::env::var("COGWASM_POOLING_KEEP_RESIDENT_MB")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(0);
+    let mut pooling = PoolingAllocationConfig::default();
+    pooling
+        // A resident backend runs one job at a time; a few slots leave room
+        // for a supervisor tier running beside it.
+        .total_core_instances(4)
+        .total_memories(4)
+        .total_tables(4)
+        .total_stacks(4)
+        // rustc.wasm's linear memory may grow to the full 32-bit range.
+        .max_memory_size(4 << 30)
+        // rustc.wasm's indirect-call table and instance state are far larger
+        // than the pooling defaults, which target small modules.
+        .table_elements(1 << 20)
+        .max_core_instance_size(64 << 20)
+        .linear_memory_keep_resident(keep_resident_mb << 20);
+    config.allocation_strategy(InstanceAllocationStrategy::Pooling(pooling));
 }
 
 /// The shipped configuration, with an optional module cache directory.

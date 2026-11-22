@@ -230,10 +230,37 @@ What this changes:
 - C's restore cost (E2) also grows: a snapshot to restore is at least the
   46 MiB of metadata plus the session state.
 
+## A0 result: pooling allocator (2026-11-22)
+
+`COGWASM_POOLING=1` (opt-in, `crates/cogwasm-host/src/config.rs`) switches
+the engine to Wasmtime's pooling allocator, so each per-job instance reuses a
+linear-memory slot. `COGWASM_POOLING_KEEP_RESIDENT_MB` keeps that much of the
+slot resident and zeroes it in place instead of decommitting it. The existing
+`.cwasm` still loads with pooling on (module load ≈ 17 ms), so the allocation
+strategy does not affect the compatibility hash.
+
+`edit-loop`, resident backend, 20 edits, macOS arm64, two interleaved rounds:
+
+| allocator | median (round 1 / round 2) |
+| --- | ---: |
+| default (on demand) | 39.5 / 40.2 ms |
+| pooling, keep resident 0 | 41.9 / 44.7 ms |
+| pooling, keep resident 256 MiB | 42.5 / 43.4 ms |
+| pooling, keep resident 1 GiB | 40.6 / 41.2 ms |
+
+**No gain on macOS**: pooling is level or slightly slower. Zeroing a reused
+slot costs about what first-touching fresh pages does, so the "~10 ms of
+first-touch" estimate under E1 is not recovered this way. That estimate was
+inferred from host RSS, which also counts host-side memory, so it was
+probably too high. Linux decommits with `madvise` and refaults differently,
+so `ci/build-and-test.sh` runs one pooling `edit-loop` beside the default one
+and reports it as a separate notice (temporary). If Linux shows no gain
+either, A0 is dropped and the opt-in removed.
+
 ## Recommendation
 
-1. E1 is done (above): the read is ≈ 7 ms and fresh memory adds more. Next,
-   try **A0** (pooling allocator, host-only), then run E2 and E4.
+1. E1 and A0 are done (above): the read is ≈ 7 ms; pooling gives nothing on
+   macOS (Linux pending in CI). Next, run E2 and E4.
 2. Implement **A** (guest request loop plus metadata cache) and
    **D**'s in-process link, then measure with `edit-loop`. Together they
    plausibly bring the runner to about 110–120 ms.
