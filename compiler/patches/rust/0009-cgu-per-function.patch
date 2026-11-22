@@ -1,0 +1,116 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Stage C <stage-c@example.invalid>
+Date: Mon, 23 Nov 2026 08:00:00 +1030
+Subject: [PATCH] put each monomorphised function in its own codegen unit
+
+V1's incremental edit loop rebuilds the codegen unit that holds a source
+module's functions: a one-function edit re-codegens every function in that
+module. The V2 phase 1 experiment asks whether one codegen unit per
+monomorphised function makes the rebuild proportional to the change.
+
+`-Zcogwasm-cgu-per-fn` is off by default and only has an effect in incremental
+mode. Root (GloballyShared) functions are named after their mangled symbol,
+which is unique per instance, so instantiations of the same generic definition
+get separate CGUs. The existing inlined (LocalCopy) handling is unchanged:
+those bodies are still attached to every CGU that uses them. The
+`-Ccodegen-units` merging pass is skipped for this mode, because merging the
+functions back together would defeat the experiment. Statics and global
+assembly keep their module-based CGUs.
+
+The default pipeline, compiler build and sysroot do not pass the flag. This is
+a local CogWasm experiment, not an upstream contribution; the code, comments
+and this message are LLM-generated under the Rust project's personal-use
+exemption, and a human must review and own it before it goes anywhere else.
+
+---
+diff --git a/compiler/rustc_session/src/options.rs b/compiler/rustc_session/src/options.rs
+--- a/compiler/rustc_session/src/options.rs
++++ b/compiler/rustc_session/src/options.rs
+@@ -2445,6 +2445,8 @@
+         "emit retag function calls in generated code"),
+     codegen_source_order: bool = (false, parse_bool, [UNTRACKED],
+         "emit mono items in the order of spans in source files (default: no)"),
++    cogwasm_cgu_per_fn: bool = (false, parse_bool, [TRACKED],
++        "put every monomorphised function in its own codegen unit in incremental builds; CogWasm V2 phase 1 experiment (default: no)"),
+     contract_checks: Option<bool> = (None, parse_opt_bool, [TRACKED],
+         "emit runtime checks for contract pre- and post-conditions (default: no)"),
+     coverage_options: CoverageOptions = (CoverageOptions::default(), parse_coverage_options, [TRACKED],
+diff --git a/compiler/rustc_monomorphize/src/partitioning.rs b/compiler/rustc_monomorphize/src/partitioning.rs
+--- a/compiler/rustc_monomorphize/src/partitioning.rs
++++ b/compiler/rustc_monomorphize/src/partitioning.rs
+@@ -204,6 +204,8 @@
+ {
+     let mut codegen_units = UnordMap::default();
+     let is_incremental_build = cx.tcx.sess.opts.incremental.is_some();
++    let per_fn_cgu =
++        cx.tcx.sess.opts.unstable_opts.cogwasm_cgu_per_fn && is_incremental_build;
+     let mut internalization_candidates = UnordSet::default();
+ 
+     // Determine if monomorphizations instantiated in this crate will be made
+@@ -229,15 +231,24 @@
+         let characteristic_def_id = characteristic_def_id_of_mono_item(cx.tcx, mono_item);
+         let is_volatile = is_incremental_build && mono_item.is_generic_fn();
+ 
+-        let cgu_name = match characteristic_def_id {
+-            Some(def_id) => compute_codegen_unit_name(
+-                cx.tcx,
+-                cgu_name_builder,
+-                def_id,
+-                is_volatile,
+-                cgu_name_cache,
+-            ),
+-            None => fallback_cgu_name(cgu_name_builder),
++        let cgu_name = if per_fn_cgu && matches!(mono_item, MonoItem::Fn(_)) {
++            // V2 phase 1 experiment: one codegen unit per monomorphised
++            // function. The mangled symbol is unique per instance, so two
++            // instantiations of the same generic definition do not collide.
++            // Inlined (LocalCopy) items are still attached to the CGUs that
++            // use them by the loop below, exactly as before.
++            compute_per_fn_cgu_name(cx.tcx, cgu_name_builder, mono_item)
++        } else {
++            match characteristic_def_id {
++                Some(def_id) => compute_codegen_unit_name(
++                    cx.tcx,
++                    cgu_name_builder,
++                    def_id,
++                    is_volatile,
++                    cgu_name_cache,
++                ),
++                None => fallback_cgu_name(cgu_name_builder),
++            }
+         };
+ 
+         let cgu = codegen_units.entry(cgu_name).or_insert_with(|| CodegenUnit::new(cgu_name));
+@@ -342,7 +353,11 @@
+     // then at least one of the biggest N will have to grow. codegen_units[N-1]
+     // is the smallest of those, and so has the most room to grow.
+     let max_codegen_units = cx.tcx.sess.codegen_units().as_usize();
+-    while codegen_units.len() > max_codegen_units {
++    // The per-function CGU experiment deliberately ignores the `-Ccodegen-units`
++    // cap: merging would put the functions back together and defeat the point.
++    let per_fn_cgu = cx.tcx.sess.opts.unstable_opts.cogwasm_cgu_per_fn
++        && cx.tcx.sess.opts.incremental.is_some();
++    while !per_fn_cgu && codegen_units.len() > max_codegen_units {
+         // Sort small CGUs to the back.
+         codegen_units.sort_by_key(|cgu| cmp::Reverse(cgu.size_estimate()));
+ 
+@@ -701,6 +716,19 @@
+     }
+ }
+ 
++fn compute_per_fn_cgu_name<'tcx>(
++    tcx: TyCtxt<'tcx>,
++    name_builder: &mut CodegenUnitNameBuilder<'tcx>,
++    mono_item: MonoItem<'tcx>,
++) -> Symbol {
++    // A GloballyShared function's mangled symbol is unique per instance, so it
++    // is the natural stable identity for a per-function CGU. The name builder
++    // hashes the components into the short, filesystem-safe form rustc uses
++    // for every CGU name.
++    let symbol = mono_item.symbol_name(tcx);
++    name_builder.build_cgu_name(LOCAL_CRATE, ["cgu-per-fn", symbol.name], None::<&str>)
++}
++
+ fn compute_codegen_unit_name(
+     tcx: TyCtxt<'_>,
+     name_builder: &mut CodegenUnitNameBuilder<'_>,

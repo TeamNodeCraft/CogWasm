@@ -423,6 +423,10 @@ def compile_clif(
         # Goal 1 step 5b experiment: opt the clif compile into the capture-aware
         # loop-field hoist. The LLVM reference compiler has no such pass.
         command.extend(["--rustc-arg", "-Zmir-capture-hoist"])
+    if os.environ.get("BENCH_CGU_PER_FN") == "1":
+        # V2 phase 1 experiment: one monomorphised function per CGU in
+        # incremental builds. The compile below is already incremental.
+        command.extend(["--rustc-arg", "-Zcogwasm-cgu-per-fn"])
     if fuel:
         # Two samples per program: the host fails if they disagree, so a
         # non-deterministic compiler work count stops the run.

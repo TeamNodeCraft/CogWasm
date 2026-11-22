@@ -210,6 +210,10 @@ enum Command {
         /// require byte-identical output.
         #[arg(long)]
         verify_cold: bool,
+        /// V2 phase 1 experiment: one monomorphised function per CGU
+        /// (`-Zcogwasm-cgu-per-fn`). Off by default.
+        #[arg(long)]
+        cgu_per_fn: bool,
     },
     /// Build a multi-crate workspace in dependency order.
     Workspace {
@@ -430,6 +434,7 @@ fn main() -> Result<()> {
             json,
             target_ms,
             verify_cold,
+            cgu_per_fn,
         } => {
             let config = RealCompilerConfig {
                 host,
@@ -453,6 +458,7 @@ fn main() -> Result<()> {
                 json.as_deref(),
                 target_ms,
                 verify_cold,
+                cgu_per_fn,
             )?;
         }
         Command::Workspace {
@@ -759,6 +765,7 @@ fn edit_loop(
     json: Option<&Path>,
     target_ms: f64,
     verify_cold: bool,
+    cgu_per_fn: bool,
 ) -> Result<()> {
     if edits == 0 {
         bail!("--edits must be at least 1");
@@ -817,6 +824,8 @@ fn edit_loop(
     let mut swapper = Swapper::new(runtime);
     let name = crate_name(&copy)?;
     let make_job = |options: CompileOptions| -> Result<JobSpec> {
+        let mut options = options;
+        options.cgu_per_fn = cgu_per_fn;
         let mut job = JobSpec::new(SourceSpec::new(copy.clone(), name.clone()), options);
         if job.options.incremental {
             let key = ArtifactStore::incremental_key_for(&job, &config.compiler_id)?;

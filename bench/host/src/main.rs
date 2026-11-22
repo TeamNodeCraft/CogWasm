@@ -715,7 +715,12 @@ fn compile_with(
         None
     };
 
-    let final_build = if incremental.is_some() {
+    // The final build normally rebuilds the artifact without incremental mode,
+    // so the measured module is the same one a one-shot compile produces. The
+    // V2 per-function-CGU experiment needs the *incremental* artifact instead
+    // (the flag only applies in incremental mode), so opt out explicitly.
+    let keep_incremental_artifact = std::env::var_os("BENCH_KEEP_INCREMENTAL_ARTIFACT").is_some();
+    let final_build = if incremental.is_some() && !keep_incremental_artifact {
         Some(compile_once(
             engine, module, &options, &linker, 0, None, false,
         )?)
