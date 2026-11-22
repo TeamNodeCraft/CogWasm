@@ -26,11 +26,19 @@ fn particle(i: f32, n: f32, t: f32) -> (f32, f32) {
   },
   {
     name: "Spiral",
-    source: `// A golden-angle spiral that breathes.
+    source: `// A golden-angle spiral whose rings slowly twist.
 fn particle(i: f32, n: f32, t: f32) -> (f32, f32) {
     let golden = PI * (3.0 - sqrt(5.0));
-    let r = sqrt(i / n) * (0.85 + 0.1 * sin(t));
-    let a = i * golden + t * 0.3;
+    let f = i / n;
+
+    // Ripples travel outward through the rings.
+    let r = 0.86 * sqrt(f) + 0.025 * sin(30.0 * sqrt(f) - t * 1.2);
+
+    // Inner rings turn against the outer ones, so the
+    // spiral arms slowly wind up and unwind again.
+    let twist = 1.4 * sin(t * 0.35) * (1.0 - f);
+    let a = i * golden + t * 0.12 + twist;
+
     (r * cos(a), r * sin(a))
 }
 `,
