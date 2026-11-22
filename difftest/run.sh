@@ -179,16 +179,11 @@ compile_llvm() {
 
 compile_clif() {
     local name=$1 src=$2 out=$3 log="$WORK/logs/$1.clif.log"
-    # Goal 1 step 5b experiment: opt the clif compile into the loop-field
-    # hoist. The LLVM reference compiler has no such pass.
-    local extra=()
-    if [ "${DIFFTEST_MIR_HOIST:-0}" = "1" ]; then
-        extra=(-Zmir-hoist-loop-field-reads)
-    fi
     # Goal 1 step 5b experiment: opt the clif compile into the loop-aware MIR
     # inliner. The LLVM reference compiler has no such pass.
+    local extra=()
     if [ "${DIFFTEST_INLINE_WASM:-0}" = "1" ]; then
-        extra+=(-Zmir-inline-wasm)
+        extra=(-Zmir-inline-wasm)
     fi
     if ! "$COMPILER_HOST" raw \
         --rustc "$RUSTC_WASM" --sysroot "$SYSROOT" --linker "$WILD" \

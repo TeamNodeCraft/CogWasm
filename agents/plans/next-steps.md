@@ -1,7 +1,8 @@
 # Next steps after the layout migration
 
 Written 2026-11-21, after the layout migration landed on `main` (`81e1049`).
-Last updated 2026-11-22: N1 and M1–M3 done, G2.1 done, G2.3 in progress.
+Last updated 2026-11-23: N1 and M1–M3 done, G2.1 done, G2.3 in progress,
+G1.1's fourth increment measured and the hoist dropped.
 Ordered by priority. Each task has a size (S under a day, M a few days, L a
 week or more), what it depends on, and when it is done. Goal numbers refer to
 [`ROADMAP.md`](../ROADMAP.md); the migration record is in
@@ -210,34 +211,46 @@ runner, where the edit is 174 ms against the 100 ms target).
 
 ### G1.1. Finish step 5b: SROA / mem2reg after the inliner (L)
 
-The cost-model inliner (patch `0006`) and the opt-in loop-field hoist
-(`0005`) are in. Next is the half that 5a measured as the win.
+The cost-model inliner (patch `0006`) is in and measured on the full 21-program
+suite. The loop-field hoist (patch `0005`) was dropped in the fourth increment.
+The SROA/mem2reg half, which 5a measured as the win, is still not built.
 
-1. [ ] Escape/alias analysis for locals whose address is passed to a callee
-       that the inliner has removed. Not built yet. Progress: the third
-       increment's diagnosis (`docs/notes/step-5b.md`) found the
-       hot escape is a callee taking `&mut`/`*mut` of the local. `InlineWasm`
-       now gives such callees 400 instead of 200, which inlines
-       `next_code_point` in `strings` and removes the address-taken
-       `SplitWhitespace`. `nbody` is explicitly not covered: its `Vec`s are
-       `#[inline(never)] grow_one` plus a drop, so a real alias analysis would
-       not help either.
+1. [ ] Escape/alias analysis for locals whose address reaches a callee
+       (including pointers returned by calls). **Not built.** The fourth
+       increment implemented the only cheap sound rule it could find -- treat
+       a local as escaped once it is mutably borrowed anywhere in the function
+       -- and it hoists zero reads on `strings`, `collections`, `sort`, `json`,
+       `expr`, `scene` and `nbody`. The useful `nbody` win comes from `Vec`
+       locals passed as `&mut` to the `#[inline(never)]` `RawVec::grow_one`;
+       proving that safe needs an interprocedural escape analysis of the
+       callee, not a local rule.
 2. [ ] SROA of non-escaping aggregates, then mem2reg; iterate with the
-       inliner. A plain second round was **measured as no win and not kept**: a second
-       `ReferencePropagation -> SROA -> GVN` round (after GVN and at the end
-       of the pipeline) left every hot address-taken local in place, because
-       `sroa`'s `excluded_locals` marks any local whose field address is
-       observed and `Vec`/`String` also need a drop. The remaining SROA work
-       is drop expansion and partial aggregate splitting, not another round.
-3. [ ] Make the loop-field hoist sound enough to be default-on, or drop it.
-       Composition with the inliner (0005 + 0006) is the next experiment: it
-       is what can move `nbody`'s 1.01G stack accesses, which this increment
-       does not.
+       inliner. **Not built.** A plain second round was measured as no win and
+       not kept: a second `ReferencePropagation -> SROA -> GVN` round left every
+       hot address-taken local in place, because `sroa`'s `excluded_locals`
+       marks any local whose field address is observed and `Vec`/`String` also
+       need a drop. The full-suite measurement adds that the remaining locals
+       are kept in memory by calls the inliner deliberately does not remove
+       (`grow_one`, recursive `walk`, `fmt`), so partial splitting would have
+       to rewrite those calls. That is the same interprocedural problem.
+3. [x] Make the loop-field hoist sound enough to be default-on, or drop it.
+       **Dropped** in the fourth increment: the patch, flag, test/bench
+       plumbing and workflow input are gone. The cheap sound variant hoists
+       nothing, and the useful variant cannot be proved safe without
+       interprocedural alias analysis. The composition measurement (`nbody`
+       6.20G -> 5.55G executed instructions, 1.01G -> 0.87G stack accesses) is
+       kept in `docs/notes/step-5b.md` as the target for that analysis.
 4. [ ] Acceptance: iterator-heavy benchmarks within 1.2× of LLVM `-O2`;
        difftest green; warm compile time within 5%.
-       Difftest is green with the inliner (49 handwritten + 24 generated).
-       Not met: `strings` is still about 4.4× LLVM `-O2`, and its warm compile
-       is +6.2% in the six-program A/B.
+       **A not met:** after the inliner, `strings` is 2.98×, `collections`
+       4.50×, `sort` 1.99× and `json` 3.68× of LLVM `-O2` in executed
+       instructions (`nbody` 3.45×, or 3.08× with the dropped hoist).
+       **B met:** full difftest green with the pass off and on (49 handwritten
+       + 24 generated, 0 mismatches).
+       **C met:** suite-median warm compile +1.29% over three interleaved
+       pairs, geomean +2.03%, total +2.01%; the caveat is `strings` +9.97%,
+       `json` +5.70% and `sort` +5.17% individually.
+       **D met** by dropping `0005`.
 
 ### G1.2. Bench table in the README updated by CI (M, in progress)
 

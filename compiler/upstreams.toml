@@ -24,7 +24,6 @@ patches = [
     "0002-generate-copyright-path-deps.patch",
     "0003-wasm-file-locks.patch",
     "0004-wasm-sync-cached-cgus.patch",
-    "0005-hoist-loop-invariant-field-reads.patch",
     "0006-wasm-cost-model-inliner.patch",
     "0007-wasm-serve-loop.patch",
 ]

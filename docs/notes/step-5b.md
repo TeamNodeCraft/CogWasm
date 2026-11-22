@@ -1,13 +1,13 @@
 # Goal 1 step 5b: a MIR optimiser
 
-Status: **in progress**. The first SROA increment is landed and measured on the
-suite. A loop-aware cost-model inliner is landed behind its own flag and
-measured on the full suite through a rebuilt `rustc.wasm`, with a green
-difftest. A third increment diagnoses the locals that still live in memory
-after inlining and adds a narrow threshold for mutably-borrowed callees; it is
-measured on a six-program subset, leaves the five flag-off modules it was
-compared on byte-identical, and does not move `nbody`. All of it is opt-in and no speed claim is made for
-the product default.
+Status: **in progress**. The cost-model inliner and the third increment's
+mutable-borrow rule are landed. A fourth increment
+measures the inliner on the full 21-program suite, composes it with the
+loop-field hoist, and drops the hoist: the only cheap sound rule hoists nothing
+and the useful rule needs interprocedural escape/alias analysis. The inliner
+stays opt-in. B, C and D are met; A is not (`strings` 2.98x, `collections`
+4.50x, `sort` 1.99x, `json` 3.68x of LLVM `-O2`). The default, fast and pure
+sysroot builds are unchanged.
 
 > The pass code, patch header and this note are LLM-generated under the Rust
 > project's personal-use exemption. This is a local CogWasm experiment, not an
@@ -15,6 +15,10 @@ the product default.
 > anywhere else.
 
 ## What landed
+
+> Historical: the `0005` pass described in this section was dropped in the
+> fourth increment (see below). The section is kept as the record of the first
+> three increments.
 
 `compiler/patches/rust/0005-hoist-loop-invariant-field-reads.patch` adds
 `LoopFieldHoist`, a MIR pass after GVN that is opt-in through
@@ -156,6 +160,9 @@ then this is an implementation increment, not a speed result.
 
 ## Reproduce
 
+> Historical commands for the first increment. The hoist flag and patch `0005`
+> no longer exist; the fourth increment's commands are in its own section.
+
 ```sh
 # MIR-level check, native compiler (the config targets wasm by default)
 toolchain/rust/x build --stage 1 \
@@ -187,7 +194,7 @@ and skip the ~26-minute build.
 
 `compiler/patches/rust/0006-wasm-cost-model-inliner.patch` adds `InlineWasm`, a
 MIR pass after the normal inliner, opt-in through `-Zmir-inline-wasm` and
-`-Zmir-inline-wasm-threshold` (default 400). It reuses rustc's inlining
+`-Zmir-inline-wasm-threshold` (default 200). It reuses rustc's inlining
 machinery and changes only the decision.
 
 ### What the baseline does
@@ -439,7 +446,9 @@ tier. The other five are within +/-4%.
 The regenerated `0006-wasm-cost-model-inliner.patch` applies cleanly to a
 scratch worktree at the prior-art tip (`2f59a94fd`, which is patch 0001's
 commit) with `0002`-`0005` and `0007` applied, and reproduces the four files
-it owns byte-for-byte; it also reverse-applies to the working tree. The
+it owns byte-for-byte; it also reverse-applies to the working tree. (This was
+the check at the time; `0005` has since been dropped and the fourth increment
+rechecks the series without it.) The
 scratch check skips `0001` because the prior-art series already contains it,
 which is what the build script's reverse check does on a fresh checkout. The
 only difference from a full `toolchain/rust` copy is the build script's
@@ -451,41 +460,336 @@ and the `setup-sources.sh` changes; neither is part of a patch. The
 
 `nbody`'s 1.01G stack accesses are unchanged: a `Vec` needs a drop and is
 borrowed by `#[inline(never)] grow_one`, so SROA cannot see it and the
-inliner must not override `inline(never)`. That remains the loop-field hoist's
-job (patch 0005), and the honest composition of 0005 with this inliner is the
-next experiment. `json`'s hot locals are behind recursive calls, which cannot
+inliner must not override `inline(never)`. That was the loop-field hoist's job
+(patch 0005); the fourth increment ran the composition and then dropped the
+hoist because no cheap sound version exists. `json`'s hot locals are behind recursive calls, which cannot
 inline. `collections` still has 34 address-taken locals, mostly iterator
 state behind non-inlined `next`.
 
+## Fourth increment: composition, the full suite, and dropping the hoist
+
+Status: **the inliner is measured on the full 21-program suite and stays
+opt-in; the loop-field hoist is dropped.** The composition run shows exactly
+what the two patches do: `0006` moves the iterator-heavy programs, `0005` moves
+`nbody` and a few small kernels, and neither substitutes for the other. The
+inliner does not reach the 1.2x target. The hoist's only cheap sound form hoists
+nothing, so the patch, its flag and its workflow switch are gone; the default
+and pure sysroot builds are unchanged.
+
+### Composition
+
+Both flags were run on one rebuilt `rustc.wasm` that still contained `0005`
+(commit `6d1a14d` plus the third increment), 21 programs, 3 runs x 4 seeds,
+counts from `bench/gap`. Only the programs whose instruction count moved at
+either stage are shown; `smoke` moved +0.01% and the other nine are
+byte-identical.
+
+| program | off | inline only (0006) | both (0006 + 0005) | both vs off | ratio both |
+|---|---:|---:|---:|---:|---:|
+| `nbody` | 6,204,745,840 | 6,204,745,840 | 5,550,101,348 | **-10.55%** | 3.082 |
+| `b_alloc` | 1,634,448 | 1,634,448 | 1,606,154 | -1.73% | 4.617 |
+| `scene` | 415,667 | 409,913 | 406,055 | -2.31% | 3.567 |
+| `matmul` | 380,350,388 | 380,352,296 | 380,155,700 | -0.05% | 1.096 |
+| `strings` | 107,244,701 | 66,008,021 | 66,008,021 | -38.45% | 2.978 |
+| `collections` | 5,061,326 | 4,772,355 | 4,772,355 | -5.71% | 4.498 |
+| `sort` | 321,207,695 | 299,459,431 | 299,459,431 | -6.77% | 1.988 |
+| `json` | 1,871,062 | 1,777,296 | 1,777,296 | -5.01% | 3.677 |
+| `float_sum` | 243,236 | 222,388 | 222,388 | -8.57% | 3.129 |
+| `expr` | 2,700,640 | 2,647,871 | 2,647,871 | -1.95% | 3.958 |
+| `math_e` | 774,674,908 | 773,874,908 | 773,874,908 | -0.10% | 2.207 |
+
+`nbody`'s stack load/store count falls 1,012,060,384 -> 873,395,276 (-13.7%),
+the same figure the 5a prototype reported. The composition is additive: `0006`
+adds nothing to `nbody`, and `0005` adds nothing to `strings`, `collections`,
+`sort` or `json`. The hoist is the only part that touches `nbody`, and it is
+also the part with the soundness problem.
+
+### D: the hoist cannot be made sound cheaply, so it is dropped
+
+The missing fact in `0005` is a pointer the pass cannot see. It already skips a
+function that creates a raw pointer to a local, and relies on borrow checking
+for references, but a call can return a raw pointer into a local. The only
+local dataflow rule that closes that hole without interprocedural analysis is
+to treat a local as escaped for the whole function as soon as any `&mut`/`*mut`
+to it exists anywhere: an opaque callee that receives the borrow may keep the
+address as a raw pointer and hand it back later. Shared borrows of a `Freeze`
+base are safe (a write through `&` would need `UnsafeCell` or be UB), so only
+mutable borrows need to disqualify a local.
+
+That rule was implemented as a scratch variant of the pass and built into a
+native stage-1 compiler. Its final optimized MIR was compared with the hoist
+off, per program, after normalizing the source paths:
+
+| program | final MIR with the sound guard |
+| --- | --- |
+| `strings`, `sort`, `expr`, `nbody` | identical to flag off |
+| `collections`, `json`, `scene` | identical except allocation-ID numbering |
+
+So the sound version hoists **zero** reads on every hot program in the suite.
+The reason is visible in `nbody`'s final MIR: each of the four `Vec` locals is
+passed as `&mut` to `RawVec::grow_one` before the hot loop --
+
+```text
+bb40:
+    _389 = &mut (_2.0: alloc::raw_vec::RawVec<[f64; 3]>);
+    _388 = alloc::raw_vec::RawVec::<[f64; 3]>::grow_one(move _389) -> ...
+```
+
+-- and `grow_one` is `#[inline(never)]`, so neither inlining nor a local rule
+can remove the escape. Hoisting those fields is exactly what produced the
+10.55% `nbody` win, and proving it safe needs an interprocedural escape/alias
+analysis of the callee, not a cheap guard. The pass also previously
+miscompiled rustc's own crates when it ran by default (a dataflow bounds panic
+while building the pure sysroot in CI), which is the bar item D sets.
+
+Decision: **drop `0005`**. The patch file, the `-Zmir-hoist-loop-field-reads`
+flag, the `BENCH_MIR_HOIST`/`DIFFTEST_MIR_HOIST` plumbing and the `mir_hoist`
+workflow dispatch input are removed. No pass in the tree can now miscompile
+unsafe code in pursuit of that win. The measured composition above is kept as
+evidence of what a sound escape analysis would have to recover.
+
+### Full-suite measurement of the inliner
+
+The instruction counts were measured with the pre-drop compiler
+(`rustc.wasm` `7dac7e2b3e10ff7a…`) in both configurations; the compile-time
+pairs were measured with the final, hoist-free compiler
+(`3a79116e1c7568be…`), as was the re-count of the hot programs below. The compiler was then rebuilt with only `0006` (the
+hoist removed), and the flag-off and inline modules for `strings` and `nbody`
+were byte-identical to the pre-drop compiler, as they must be: `0005` was off
+in both configurations. Re-counting `collections`, `sort` and `json` with the
+final compiler gives exactly 4,772,355, 299,459,431 and 1,777,296 instructions,
+the same numbers as the table. The tables below therefore describe the final
+compiler as well as the one that produced them.
+
+### A: not met
+
+The four required benchmarks are not within 1.2x of LLVM `-O2`; the inliner
+gets `strings` from 4.84x to 2.98x and `collections` from 4.77x to 4.50x, and
+moves `sort` and `json` much less:
+
+| benchmark | instructions off | instructions on | ratio on | target | over target |
+|---|---:|---:|---:|---:|---:|
+| `strings` | 107,244,701 | 66,008,021 | 2.978 | 1.2 | 2.48x |
+| `collections` | 5,061,326 | 4,772,355 | 4.498 | 1.2 | 3.75x |
+| `sort` | 321,207,695 | 299,459,431 | 1.988 | 1.2 | 1.66x |
+| `json` | 1,871,062 | 1,777,296 | 3.677 | 1.2 | 3.06x |
+| `nbody` | 6,204,745,840 | 6,204,745,840 | 3.446 | 1.2 | 2.87x |
+| `nbody` + hoist | 6,204,745,840 | 5,550,101,348 | 3.082 | 1.2 | 2.57x |
+
+Reaching the target needs removing 60% of `strings`' remaining instructions,
+73% of `collections`', 40% of `sort`'s and 67% of `json`'s. The inliner's win
+is real but it is the easy half: the remaining cost is calls it cannot remove
+(`build_lines`, `String::push`, `fmt`, recursive `walk`, `#[inline(never)]`
+`grow_one`), allocations, and the memory traffic of locals whose address is
+observed. Threshold tuning does not close a 2.5-3.8x gap (next section), and
+the hoist never touched these four programs even before it was dropped. A is
+**not met**.
+
+### Full suite: instructions and code size
+
+The tables below are the full 21-program suite. "on" is `-Zmir-inline-wasm`
+with the 200/400 thresholds. The composition table in the first section is a
+separate, earlier run with both patches; it is not the shipped configuration.
+
+### Instructions and LLVM ratio
+
+| program | instructions off | instructions on | delta | ours/O2 off | ours/O2 on |
+|---|---:|---:|---:|---:|---:|
+| `a_add` | 804 | 804 | +0.00% | 3.045 | 3.045 |
+| `b_alloc` | 1,634,448 | 1,634,448 | +0.00% | 4.699 | 4.699 |
+| `c_plugin` | 4,124 | 4,124 | +0.00% | 12.274 | 12.274 |
+| `smoke` | 405,976 | 406,016 | +0.01% | 5.045 | 5.045 |
+| `int_loops` | 213,915 | 213,915 | +0.00% | 1.735 | 1.735 |
+| `float_sum` | 243,236 | 222,388 | -8.57% | 3.422 | 3.129 |
+| `expr` | 2,700,640 | 2,647,871 | -1.95% | 4.037 | 3.958 |
+| `json` | 1,871,062 | 1,777,296 | -5.01% | 3.871 | 3.677 |
+| `collections` | 5,061,326 | 4,772,355 | -5.71% | 4.771 | 4.498 |
+| `scene` | 415,667 | 409,913 | -1.38% | 3.652 | 3.601 |
+| `nbody` | 6,204,745,840 | 6,204,745,840 | +0.00% | 3.446 | 3.446 |
+| `mandelbrot` | 611,294,724 | 611,294,724 | +0.00% | 1.439 | 1.439 |
+| `sha256` | 70,417,340 | 70,417,340 | +0.00% | 1.663 | 1.663 |
+| `sort` | 321,207,695 | 299,459,431 | -6.77% | 2.132 | 1.988 |
+| `matmul` | 380,350,388 | 380,352,296 | +0.00% | 1.096 | 1.096 |
+| `strings` | 107,244,701 | 66,008,021 | -38.45% | 4.838 | 2.978 |
+| `math_e` | 774,674,908 | 773,874,908 | -0.10% | 2.209 | 2.207 |
+| `hostcall_f` | 10,881,056 | 10,881,056 | +0.00% | 1.546 | 1.546 |
+| `libm_driver` | 302,693,800 | 302,693,800 | +0.00% | 2.461 | 2.461 |
+| `miniz_driver` | 216,101,124 | 216,101,124 | +0.00% | 2.295 | 2.295 |
+| `generated_stress` | 671,468 | 671,468 | +0.00% | 1.913 | 1.913 |
+
+### Module size and warm compile
+
+| program | module off | module on | delta | warm off ms | warm on ms | delta |
+|---|---:|---:|---:|---:|---:|---:|
+| `a_add` | 18,163 | 18,163 | +0.00% | 58.70 | 60.28 | +2.69% |
+| `b_alloc` | 63,757 | 63,757 | +0.00% | 92.58 | 91.45 | -1.23% |
+| `c_plugin` | 19,830 | 19,830 | +0.00% | 62.97 | 65.72 | +4.36% |
+| `smoke` | 46,496 | 46,780 | +0.61% | 91.19 | 93.08 | +2.08% |
+| `int_loops` | 19,172 | 19,172 | +0.00% | 67.77 | 66.35 | -2.09% |
+| `float_sum` | 33,122 | 33,770 | +1.96% | 83.17 | 84.07 | +1.09% |
+| `expr` | 60,583 | 60,783 | +0.33% | 130.20 | 133.21 | +2.32% |
+| `json` | 94,384 | 96,151 | +1.87% | 162.70 | 171.97 | +5.70% |
+| `collections` | 223,702 | 218,702 | -2.24% | 250.36 | 254.71 | +1.74% |
+| `scene` | 67,620 | 67,518 | -0.15% | 133.87 | 137.48 | +2.70% |
+| `nbody` | 41,858 | 41,858 | +0.00% | 96.54 | 95.63 | -0.94% |
+| `mandelbrot` | 19,766 | 19,766 | +0.00% | 65.85 | 63.80 | -3.11% |
+| `sha256` | 33,347 | 33,347 | +0.00% | 76.19 | 78.56 | +3.11% |
+| `sort` | 50,535 | 50,560 | +0.05% | 97.04 | 102.06 | +5.17% |
+| `matmul` | 31,881 | 31,649 | -0.73% | 76.16 | 75.66 | -0.65% |
+| `strings` | 52,002 | 53,077 | +2.07% | 96.43 | 106.04 | +9.97% |
+| `math_e` | 41,090 | 41,039 | -0.12% | 65.50 | 69.06 | +5.44% |
+| `hostcall_f` | 19,046 | 19,046 | +0.00% | 60.59 | 62.32 | +2.86% |
+| `libm_driver` | 47,278 | 47,278 | +0.00% | 65.93 | 68.02 | +3.17% |
+| `miniz_driver` | 236,262 | 236,262 | +0.00% | 82.63 | 81.54 | -1.32% |
+| `generated_stress` | 153,659 | 153,659 | +0.00% | 388.62 | 390.31 | +0.43% |
+
+Suite summary: total executed instructions 9,012,834,242 -> 8,948,589,138
+(-0.71%), dominated by `nbody`, which the inliner does not change; the
+per-program geomean ratio is 2.894 -> 2.787 (ten modules change, eleven are
+byte-identical). Module-size median change 0.00%, mean
++0.17%; the largest growth is `strings` +2.07%, `float_sum` +1.96% and `json`
++1.87%, the largest shrink `collections` -2.24%.
+
+### C: met, with a caveat for the hot programs
+
+Three interleaved full-suite pairs, each with five warm-compile samples per
+program and `--cold-runs 1`; the only difference between the two sides is the
+`BENCH_INLINE_WASM` environment variable.
+
+| pair | suite median warm delta | mean | worst program |
+|---|---:|---:|---:|
+| 1 | +1.16% | +1.65% | +10.7% (`strings`) |
+| 2 | +1.29% | +2.12% | +9.9% (`strings`) |
+| 3 | +1.59% | +2.38% | +10.0% (`strings`) |
+| **median of pairs** | **+1.29%** | | |
+
+The suite-level median is stable (83.07, 83.17 and 83.83 ms across the three
+flag-off runs, a 0.9% spread). It is also insensitive to per-program noise: the
+median across-run range of a single program is 3.07% (max 7.85%), and the
+eleven byte-identical modules show a compile delta median of +0.43% with a
+range of -3.11% to +4.36%. Against that noise floor, the median delta is about
++1.3% and the geomean is +2.03%; total suite compile time is +2.01%.
+
+The caveat is that the median hides the programs the inliner actually changes:
+`strings` +9.97%, `json` +5.70%, `sort` +5.17%, `math_e` +5.44% (whose module
+changed by -0.12%, so that one is noise), and `collections` +1.74%. Four of
+twenty-one programs exceed 5% individually. Criterion C is met as written
+(median over the suite), not as "every program is within 5%". The cost is only
+paid by the opt-in optimising compile; the default and fast tiers never run the
+pass.
+
+### B: difftest is green with the pass on and off
+
+Full corpus, 24 generated programs, four run seeds:
+
+- flags off: `PASS: 49 handwritten + 24 generated programs`, 292 calls,
+  276 value matches, 16 trap matches, 0 mismatches, 63 s;
+- `-Zmir-inline-wasm`: same 73 programs, 0 mismatches, 56 s.
+
+### Threshold recheck on the full suite
+
+The 200/400 constants were re-tested at 300 on the full suite (same compiler,
+`-Zmir-inline-wasm-threshold=300`, the mutable-borrow floor stays 400). The
+higher threshold buys a slightly better suite instruction geomean (2.7875 ->
+2.7553) but loses on the required benchmarks and on size:
+
+| program | instructions 200 | instructions 300 | delta | module 200 | module 300 |
+|---|---:|---:|---:|---:|---:|
+| `strings` | 66,008,021 | 67,905,889 | +2.88% | 53,077 | 53,508 |
+| `collections` | 4,772,355 | 4,847,727 | +1.58% | 218,702 | 225,537 |
+| `sort` | 299,459,431 | 299,457,763 | -0.00% | 50,560 | 52,327 |
+| `json` | 1,777,296 | 1,776,505 | -0.04% | 96,151 | 97,241 |
+| `int_loops` | 213,915 | 198,719 | -7.10% | 19,172 | 20,213 |
+| `nbody` | 6,204,745,840 | 6,204,743,664 | -0.00% | 41,858 | 46,304 |
+| `mandelbrot` | 611,294,724 | 611,283,416 | -0.00% | 19,766 | 22,085 |
+| `matmul` | 380,352,296 | 380,350,620 | -0.00% | 31,649 | 34,167 |
+| `scene` | 409,913 | 407,949 | -0.48% | 67,518 | 71,545 |
+
+`nbody`, `mandelbrot` and `matmul` grow their modules 8-12% for no instruction
+change; `strings` and `collections` -- the two programs the pass exists for --
+get worse. Module size over the suite is +1.21% median / +3.00% mean at 300,
+against +0.00% / +0.17% at 200. One full compile-time run at 300 measured a
+suite median warm-compile delta of +11.3% against the flag-off medians (+7.9%
+against the 200 runs), so the higher threshold also costs much more. 300 is
+rejected; the default stays 200. The mutable-borrow floor
+stays 400 because it is what admits `next_code_point` (cost 370) in `strings`;
+lowering it to 300 would undo the third increment, and the full-suite data
+above does not justify raising it.
+
+### SROA beyond rustc's: not built, and the measurements say why
+
+The remaining plan item was partial aggregate splitting and drop expansion for
+`Vec`/`String`-like locals. Nothing was landed. The third increment already
+showed why a repeat `ReferencePropagation -> SROA -> GVN` round is a no-op:
+`sroa`'s `excluded_locals` marks any local whose field address is observed, and
+`Vec`/`String` also need a drop, which `sroa` does not expand. The full-suite
+measurement adds a second constraint: the locals that still matter are kept in
+memory by calls the inliner deliberately does not remove (`#[inline(never)]`
+`grow_one`, recursive `walk`, `fmt`). Splitting such a local would have to
+rewrite the call to operate on the split fields, which is an interprocedural
+change, not a local SROA extension. That is the same escape/alias problem as
+`0005`, just on a larger scale, and it is not a cheap increment. The honest
+next step for A is a different representation change (for example, promoting
+the `Vec` pointer/length around a known non-retaining call), not a threshold.
+
+### Patch reproduction
+
+`0006-wasm-cost-model-inliner.patch` was regenerated without `0005`'s option
+context. A fresh export of `toolchain/rust` at `2f59a94fd` with `0002`, `0003`,
+`0004`, `0006` and `0007` applied reproduces all 18 files the series touches
+byte-for-byte, including the four owned by `0006` (`inline.rs`,
+`inline_wasm.rs`, `lib.rs`, `options.rs`); `0006` also reverse-applies to the
+working tree. The `.cogwasm-applied-patches` entry was updated to the new file
+hash.
+
+### Reproduce
+
+```sh
+compiler/scripts/build-rustc-wasm.sh
+BENCH_INLINE_WASM=1 bench/gap/run.sh --no-mir
+BENCH_INLINE_WASM=1 bench/run.sh --full --runs 5 --cold-runs 1 \
+    --out toolchain/work/step5b/bench/on.json
+DIFFTEST_INLINE_WASM=1 difftest/run.sh
+```
+
 ## What remains for step 5b
 
-1. A sound escape/alias analysis for raw pointers, including pointers returned
-   by calls, so the pass can run in the default optimised build without
-   miscompiling the compiler or unsafe user code.
-2. Run the opt-in experiment (the `mir_hoist` dispatch) and record per-program
-   and suite instruction counts, runner time and compile fuel against the
-   default baseline.
-3. The cost-model inliner is measured: `InlineWasm` (patch 0006) inlines
-   loop-contained calls that rustc's cost model declines, with a 200 loop
-   threshold and 400 for callees that take `&mut`/`*mut`. `rustc.wasm` is
-   rebuilt, the six-program subset is measured, and difftest is green. The
-   full 21-program suite and a repeat of the `mir_hoist` dispatch are still
-   missing before it can be more than an experiment.
-4. A real mem2reg/SSA promotion at CFG joins (the hoist only handles
-   loop-invariant reads, not arbitrary non-escaping locals).
-5. Repeat inlining and promotion in a loop: **measured no-win** for rustc's
-   own `ReferencePropagation`/`SROA`/`GVN` (see the third increment). The
-   next SROA work is drop expansion and partial aggregate splitting, not a
-   repeat round.
-6. Measure executed instructions and runner time on the full suite, and the
-   compile time cost, before claiming any of it. The six-program subset is in
-   the third increment; the 5a notes say the +5% warm compile belongs in the
-   tier-2 build; a default-on pass would pay that in the fast tier, so it
-   stays opt-in until tier 2 exists.
-7. Understand the intermittent 5-unit compiler-fuel difference the pass causes
-   on `sha256` (1 in 3 local runs) before considering a default-on pass; it
-   may be a nondeterministic hash-order path in rustc that the changed MIR
-   reaches.
-8. The loop-nest profitability gate is in and removes the `expr` regression.
-   A finer trip-count/loop-cost model could recover single-level hot loops, and
-   the gated suite numbers still need the confirming dispatch.
+Step 5b is still **in progress**. Of its four acceptance criteria, B (difftest),
+C (suite-median warm compile) and D (no unsound hoist) are met; A (1.2x of
+LLVM `-O2` on the iterator-heavy benchmarks) is not, and the SROA/mem2reg half
+that was supposed to deliver it is not built.
+
+1. **A: not met.** `strings` is 2.98x, `collections` 4.50x, `sort` 1.99x and
+   `json` 3.68x of LLVM `-O2` in executed instructions after the inliner
+   (`nbody` 3.45x, or 3.08x with the dropped hoist). The gap is 40-73% of the
+   remaining instructions, not a threshold. The measured options are exhausted:
+   300 inlines more but makes `strings`/`collections` worse and costs +11%
+   median warm compile; the hoist only helps `nbody` and is unsound. The next
+   work is a real representation change, not a knob.
+2. **SROA beyond rustc's: not built.** `sroa`'s `excluded_locals` still excludes
+   any local whose field address is observed, and `Vec`/`String` need drop
+   expansion. Partial aggregate splitting would have to rewrite the calls that
+   take `&mut` of the aggregate (`RawVec::grow_one`, `String::push`, recursive
+   `walk`), which is interprocedural. That is the same analysis as item 3, at a
+   larger scale; no cheap version was found.
+3. **The hoist stays dropped.** A sound version needs an interprocedural
+   escape/alias analysis for pointers that reach a callee (including pointers
+   returned by calls). The cheap sound rule -- reject a local as soon as it is
+   mutably borrowed anywhere in the function -- hoists zero reads on every hot
+   program and loses the 10.55% `nbody` win. The composition numbers are the
+   target for that analysis if it is ever built.
+4. **The inliner stays opt-in.** The default, fast and pure-sysroot builds are
+   unchanged. The suite-median compile cost is +1.3% (C met), but `strings`
+   +10.0%, `json` +5.7%, `sort` +5.2%; before it becomes default in an
+   optimising tier, either fix the `strings` body or decide that a per-program
+   >5% cost is acceptable there. Tier 2 itself is still not built.
+5. **Fuel determinism is restored.** With `0005` gone, one quick-suite run with
+   `-Zmir-inline-wasm --fuel` passed the two-sample agreement (12 programs,
+   compiler-fuel median 662,387,630). The intermittent 5-unit `sha256`
+   difference from the first experiment was a property of the hoist, which is
+   no longer in the tree, so the experiment workflow uses `--fuel` again.
+6. **The full suite remains the measurement unit.** The tables above are 21
+   programs x 3 runs x 4 seeds for instructions and 3 interleaved pairs x 5
+   warm samples for compile time. The per-program compile noise is large
+   (median across-run range 3.07%, max 7.85%), so a single pair is not enough
+   to judge a future change.

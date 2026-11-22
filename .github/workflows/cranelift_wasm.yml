@@ -32,10 +32,6 @@ on:
       - '!bench/gap/results/**'
   workflow_dispatch:
     inputs:
-      mir_hoist:
-        description: "Enable the experimental loop-field hoist in clif program compiles"
-        type: boolean
-        default: false
       inline_wasm:
         description: "Enable the experimental loop-aware MIR inliner in clif program compiles"
         type: boolean
@@ -168,9 +164,8 @@ jobs:
           # Only the exact-input cache hit is allowed to skip the build; the id
           # is unset on a miss, and build-and-test.sh then builds from source.
           CI_REUSE_COMPILER: ${{ steps.cache-compiler.outputs.cache-hit }}
-          # Goal 1 step 5b experiments: opt difftest into the loop-field hoist
-          # and the loop-aware MIR inliner.
-          DIFFTEST_MIR_HOIST: ${{ github.event.inputs.mir_hoist == 'true' && '1' || '' }}
+          # Goal 1 step 5b experiment: opt difftest into the loop-aware MIR
+          # inliner.
           DIFFTEST_INLINE_WASM: ${{ github.event.inputs.inline_wasm == 'true' && '1' || '' }}
         run: |
           bash ci/build-with-diagnostics.sh \
@@ -198,23 +193,12 @@ jobs:
       - name: quick performance suite
         if: success()
         env:
-          # Goal 1 step 5b experiments: opt the clif program compiles into the
-          # loop-field hoist or the loop-aware MIR inliner. The LLVM reference
-          # compiler is unchanged.
-          BENCH_MIR_HOIST: ${{ github.event.inputs.mir_hoist == 'true' && '1' || '' }}
+          # Goal 1 step 5b experiment: opt the clif program compiles into the
+          # loop-aware MIR inliner. The LLVM reference compiler is unchanged.
           BENCH_INLINE_WASM: ${{ github.event.inputs.inline_wasm == 'true' && '1' || '' }}
         run: |
-          if [ "${BENCH_MIR_HOIST}" = "1" ] || [ "${BENCH_INLINE_WASM}" = "1" ]; then
-            # An opt-in MIR pass can make sha256's compiler fuel differ by a
-            # few units between samples, which the --fuel agreement guard
-            # rejects. The runtime instruction counts are still measured by the
-            # deterministic-counts step below.
-            bash bench/run.sh --quick --runs 3 \
-              --out "bench/results/quick-${GITHUB_RUN_ID}.json"
-          else
-            bash bench/run.sh --quick --runs 3 --fuel \
-              --out "bench/results/quick-${GITHUB_RUN_ID}.json"
-          fi
+          bash bench/run.sh --quick --runs 3 --fuel \
+            --out "bench/results/quick-${GITHUB_RUN_ID}.json"
 
       # Exact executed wasm instructions for the same quick modules, plus the
       # compiler-work median already in the JSON. Two measurements per module
@@ -266,7 +250,7 @@ jobs:
       - name: publish benchmark history and chart
         # An experiment run compiles programs with an opt-in pass, so it must
         # not add a point that the chart would compare with the default build.
-        if: success() && github.ref == 'refs/heads/main' && github.event.inputs.mir_hoist != 'true' && github.event.inputs.inline_wasm != 'true'
+        if: success() && github.ref == 'refs/heads/main' && github.event.inputs.inline_wasm != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
@@ -286,7 +270,7 @@ jobs:
       # sysroot (packaged and checked by ci/build-and-test.sh) from the `repl`
       # release; deploy_pages.yml copies them into the site after this run.
       - name: publish the in-browser REPL compiler
-        if: success() && github.ref == 'refs/heads/main' && github.event.inputs.mir_hoist != 'true' && github.event.inputs.inline_wasm != 'true'
+        if: success() && github.ref == 'refs/heads/main' && github.event.inputs.inline_wasm != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}

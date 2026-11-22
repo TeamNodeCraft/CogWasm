@@ -98,10 +98,10 @@ LLM-generated and a human must review and own it.
 
 ---
 diff --git a/compiler/rustc_mir_transform/src/inline.rs b/compiler/rustc_mir_transform/src/inline.rs
-index 367e16daa..eaa701004 100644
+index 367e16d..eaa7010 100644
 --- a/compiler/rustc_mir_transform/src/inline.rs
 +++ b/compiler/rustc_mir_transform/src/inline.rs
-@@ -31,10 +31,10 @@
+@@ -31,10 +31,10 @@ const HISTORY_DEPTH_LIMIT: usize = 20;
  const TOP_DOWN_DEPTH_LIMIT: usize = 5;
  
  #[derive(Clone, Debug)]
@@ -115,7 +115,7 @@ index 367e16daa..eaa701004 100644
      source_info: SourceInfo,
  }
  
-@@ -95,7 +95,7 @@ fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
+@@ -95,7 +95,7 @@ impl<'tcx> crate::MirPass<'tcx> for ForceInline {
      }
  }
  
@@ -124,7 +124,7 @@ index 367e16daa..eaa701004 100644
      fn new(tcx: TyCtxt<'tcx>, def_id: DefId, body: &Body<'tcx>) -> Self;
  
      fn tcx(&self) -> TyCtxt<'tcx>;
-@@ -476,7 +476,7 @@ fn on_inline_success(
+@@ -476,7 +476,7 @@ impl<'tcx> Inliner<'tcx> for NormalInliner<'tcx> {
      fn on_inline_failure(&self, _: &CallSite<'tcx>, _: &'static str) {}
  }
  
@@ -144,7 +144,7 @@ index 367e16daa..eaa701004 100644
      blocks: Range<BasicBlock>,
 diff --git a/compiler/rustc_mir_transform/src/inline_wasm.rs b/compiler/rustc_mir_transform/src/inline_wasm.rs
 new file mode 100644
-index 000000000..035cc4585
+index 0000000..035cc45
 --- /dev/null
 +++ b/compiler/rustc_mir_transform/src/inline_wasm.rs
 @@ -0,0 +1,319 @@
@@ -468,10 +468,10 @@ index 000000000..035cc4585
 +    }
 +}
 diff --git a/compiler/rustc_mir_transform/src/lib.rs b/compiler/rustc_mir_transform/src/lib.rs
-index 2ad5db511..fd0965a88 100644
+index 2a38b3b..23fb4f8 100644
 --- a/compiler/rustc_mir_transform/src/lib.rs
 +++ b/compiler/rustc_mir_transform/src/lib.rs
-@@ -157,6 +157,7 @@ mod dead_store_elimination : DeadStoreElimination {
+@@ -156,6 +156,7 @@ declare_passes! {
      // Made public so that `mir_drops_elaborated_and_const_checked` can be overridden
      // by custom rustc drivers, running all the steps by themselves. See #114628.
      pub mod inline : Inline, ForceInline;
@@ -479,7 +479,7 @@ index 2ad5db511..fd0965a88 100644
      mod impossible_clauses : ImpossibleClauses;
      mod instsimplify : InstSimplify { BeforeInline, AfterSimplifyCfg };
      mod jump_threading : JumpThreading;
-@@ -719,6 +720,7 @@ fn o1<T>(x: T) -> WithMinOptLevel<T> {
+@@ -718,6 +719,7 @@ pub(crate) fn run_optimization_passes<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'
              &inline::ForceInline,
              // Perform inlining, which may add a lot of code.
              &inline::Inline,
@@ -488,13 +488,13 @@ index 2ad5db511..fd0965a88 100644
              // Now, we need to shrink the generated MIR.
              // Code from other crates may have storage markers, so this needs to happen after
 diff --git a/compiler/rustc_session/src/options.rs b/compiler/rustc_session/src/options.rs
-index 6e00be0b0..f910930ce 100644
+index a29309c..1403a77 100644
 --- a/compiler/rustc_session/src/options.rs
 +++ b/compiler/rustc_session/src/options.rs
-@@ -2688,6 +2688,10 @@ pub(crate) fn parse_rust_version(slot: &mut Option<RustcVersion>, v: Option<&str
+@@ -2686,6 +2686,10 @@ options! {
+     mir_include_spans: MirIncludeSpans = (MirIncludeSpans::default(), parse_mir_include_spans, [UNTRACKED],
+         "include extra comments in mir pretty printing, like line numbers and statement indices, \
           details about types, etc. (boolean for all passes, 'nll' to enable in NLL MIR only, default: 'nll')"),
-     mir_hoist_loop_field_reads: bool = (false, parse_bool, [TRACKED],
-         "hoist loop-invariant field reads out of loops; CogWasm step 5b experiment (default: no)"),
 +    mir_inline_wasm: bool = (false, parse_bool, [TRACKED],
 +        "inline loop-contained calls that the normal MIR inliner declined; CogWasm step 5b experiment (default: no)"),
 +    mir_inline_wasm_threshold: Option<usize> = (None, parse_opt_number, [TRACKED],
