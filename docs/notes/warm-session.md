@@ -288,13 +288,46 @@ Caveats:
   job that touches more memory the saving could shrink. Plugin-sized sources
   should be measured too.
 
+### A0 confirmed and adopted (CI run 44972190861, `d653fd0`)
+
+`ci/edit-loop-ab.sh` ran six interleaved configurations (pool1024, default,
+pool0, pool256, default, pool1024), 10 edits each, on the fixture and on
+`bench/programs/medium/json.rs` (562 lines plus the prelude, uses `alloc`).
+Medians in ms:
+
+| source | default | pooling, keep 0 | pooling, keep 256 MiB | pooling, keep 1 GiB |
+| --- | ---: | ---: | ---: | ---: |
+| fixture | 124.0 / 126.3 | 125.9 | **93.4** | 94.8 / 94.1 |
+| json | 546.0 / 532.5 | 540.8 | **503.0** | 509.5 / 498.6 |
+
+- **The win is keeping memory resident, not pooling as such.** With nothing
+  kept resident, pooling is identical to the default allocator.
+- **256 MiB is enough.** It matches 1 GiB on both sources.
+- **The saving is a fixed ≈ 31–36 ms per job**, not a percentage: −25% on
+  the fixture, −7% on `json`. It is the cost of mapping and first-touching a
+  fresh linear memory on Linux, which every per-job instance paid.
+- Both orders agree (pool1024 ran first and last; default second and fifth),
+  so order does not explain it.
+
+**Decision:** the resident backend now uses `Allocation::RESIDENT_DEFAULT`
+(pooling, 256 MiB kept resident; `crates/cogwasm-host/src/config.rs`). The
+one-shot CLI and `cogwasm-precompile` keep the on-demand allocator.
+`COGWASM_POOLING=0` turns it off and `COGWASM_POOLING_KEEP_RESIDENT_MB`
+resizes it. The CI comparison step is removed; `ci/edit-loop-ab.sh` stays for
+manual reruns.
+
+What it means for Goal 2: the fixture's edit → result on CI is now about
+95 ms, just under the target, but a plugin-sized source is about 500 ms. The
+remaining fixed cost (crate loading, session set-up, link) is still the
+lever, and on `json` the per-source work is large too. Next: E2/E4, then
+option A.
+
 ## Recommendation
 
 1. E1 and A0 are done (above): the read is ≈ 7 ms; pooling gives nothing on
    macOS but −27% on the Linux CI runner (131 → 96.5 ms, under target).
-   Next: confirm A0 on CI (swapped order, keep-resident sizes, a plugin-sized
-   source), make it the resident backend's default if it holds, then run E2
-   and E4 for the rest of the margin.
+   A0 was confirmed on CI and is now the resident default (≈ 31–36 ms per
+   job saved). Next: E2 and E4, then option A.
 2. Implement **A** (guest request loop plus metadata cache) and
    **D**'s in-process link, then measure with `edit-loop`. Together they
    plausibly bring the runner to about 110–120 ms.

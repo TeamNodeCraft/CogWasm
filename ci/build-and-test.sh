@@ -200,11 +200,6 @@ step "edit → result through the resident supervisor"
 )
 python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); load=r["module_load_ms"]; print("::notice title=edit to result::median %.1f ms (target %.0f ms: %s), module load %s ms" % (r["median"], r["target_ms"], "MET" if r["met"] else "MISSED", "unknown" if load is None else "%.1f" % load))' "$TOOL/work/supervisor/edit-loop.json"
 
-# G2.3 experiment A0 (docs/notes/warm-session.md): default vs pooling
-# allocator, interleaved, on the fixture and a plugin-sized source.
-# Temporary; remove once the decision is recorded.
-step "A0: allocator comparison for edit -> result"
-"$CI_DIR/edit-loop-ab.sh"
 
 # Differential test: the same 48 no_std+alloc corpus programs plus 24 seeded
 # random programs are compiled by LLVM rustc and by rustc.wasm+cg_clif, run in

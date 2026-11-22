@@ -169,10 +169,11 @@ runner, where the edit is 174 ms against the 100 ms target).
         macOS: no gain (40 ms default vs 41–45 ms pooled). **Linux CI: 131.3 →
         96.5 ms median (−27%), under the 100 ms target** (run 44969263935,
         keep resident 1 GiB).
-1d. [ ] Confirm A0 on CI: swapped order, keep-resident 0 / 256 MiB / 1 GiB,
-        and a plugin-sized source; then make pooling the resident backend's
-        default (engine config only for the supervisor's resident path; the
-        `.cwasm` stays compatible) and drop the temporary CI step.
+1d. [x] A0 confirmed on CI (run 44972190861, interleaved, two sources):
+        keeping 256 MiB resident saves ≈ 31–36 ms per job (fixture 125 → 93 ms,
+        `json` 539 → 503 ms); pooling with nothing resident saves nothing.
+        Now the resident backend's default (`Allocation::RESIDENT_DEFAULT`);
+        temporary CI step removed, `ci/edit-loop-ab.sh` kept for reruns.
 1c. [ ] E2 (guest memory size / restore cost), E4 (per-pass ratio on CI).
 2. [ ] Prototype the cheapest variant and measure with `edit-loop`.
 3. [ ] Acceptance: CI edit → result under 100 ms; difftest green.

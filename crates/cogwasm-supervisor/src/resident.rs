@@ -13,6 +13,7 @@ use std::time::Instant;
 
 use cogwasm_host::Compiler as HostCompiler;
 use cogwasm_host::compile::Teardown;
+use cogwasm_host::config::Allocation;
 
 use crate::compiler::{CompileError, CompileOutput, Compiler};
 use crate::job::JobSpec;
@@ -37,11 +38,15 @@ impl ResidentCompiler {
     /// Returns [`CompileError::Unavailable`] when the engine cannot be created
     /// or rustc.wasm cannot be loaded.
     pub fn new(config: RealCompilerConfig) -> Result<Self, CompileError> {
-        let compiler = HostCompiler::load(
+        // One instance per job: the pooling allocator reuses a resident memory
+        // slot instead of mapping and faulting in fresh memory every time
+        // (−25% edit → result on the Linux CI runner; see Allocation).
+        let compiler = HostCompiler::load_with(
             &config.rustc,
             config.precompiled.as_deref(),
             false,
             config.cache_dir.as_deref(),
+            Allocation::from_env_or(Allocation::RESIDENT_DEFAULT),
         )
         .map_err(|error| {
             CompileError::Unavailable(format!("loading {}: {error:#}", config.rustc.display()))

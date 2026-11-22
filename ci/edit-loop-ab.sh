@@ -10,8 +10,8 @@
 #   pool1024, default, pool0, pool256, default, pool1024
 #
 # Prints a table and one ::notice per source. A measurement, not a gate: it
-# fails only when edit-loop's correctness checks fail. Temporary; remove with
-# the decision recorded in the design note.
+# fails only when edit-loop's correctness checks fail. CI ran it for the A0
+# decision (run 44972190861); it is kept for manual reruns, not run by CI.
 #
 # Expects the toolchain built by ci/build-and-test.sh (rustc.wasm, sysroot,
 # Wild, the precompiled .cwasm and the cogwasm-supervisor release binary).
@@ -44,7 +44,7 @@ PY
 
 run_one() { # label source-name source-path
     local label=$1 name=$2 source=$3 slot=$4
-    local -a pooling=(env -u COGWASM_POOLING -u COGWASM_POOLING_KEEP_RESIDENT_MB)
+    local -a pooling=(env COGWASM_POOLING=0 -u COGWASM_POOLING_KEEP_RESIDENT_MB)
     case "$label" in
         pool*) pooling=(env COGWASM_POOLING=1 "COGWASM_POOLING_KEEP_RESIDENT_MB=${label#pool}") ;;
     esac

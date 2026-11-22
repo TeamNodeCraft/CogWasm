@@ -12,7 +12,9 @@ pub mod precompiled;
 pub use compile::{
     compile, compile_args, rustc_args, CompileOutcome, CompileRequest, Compiler, Teardown,
 };
-pub use config::{engine, engine_config, engine_config_with, ConfigSummary};
+pub use config::{
+    engine, engine_config, engine_config_with, engine_with, Allocation, ConfigSummary,
+};
 pub use precompiled::{
     compatibility_hash_hex, load_rustc_module, metadata_sidecar, sha256_file, sha256_hex,
     wasmtime_version, ArtifactMetadata, FileInfo, LoadedModule, ModuleSource, TargetInfo,

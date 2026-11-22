@@ -214,7 +214,26 @@ impl Compiler {
         verify_precompiled: bool,
         cache_dir: Option<&Path>,
     ) -> Result<Self> {
-        let engine = crate::config::engine(cache_dir)?;
+        Self::load_with(
+            rustc,
+            precompiled,
+            verify_precompiled,
+            cache_dir,
+            crate::config::Allocation::OnDemand,
+        )
+    }
+
+    /// [`Compiler::load`] with an explicit instance allocation strategy. A
+    /// resident host that instantiates once per job should pass
+    /// [`Allocation::RESIDENT_DEFAULT`](crate::config::Allocation::RESIDENT_DEFAULT).
+    pub fn load_with(
+        rustc: &Path,
+        precompiled: Option<&Path>,
+        verify_precompiled: bool,
+        cache_dir: Option<&Path>,
+        allocation: crate::config::Allocation,
+    ) -> Result<Self> {
+        let engine = crate::config::engine_with(cache_dir, allocation)?;
         let t = Instant::now();
         let loaded =
             crate::precompiled::load_rustc_module(&engine, rustc, precompiled, verify_precompiled)?;

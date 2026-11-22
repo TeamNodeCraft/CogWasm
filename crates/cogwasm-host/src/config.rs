@@ -74,7 +74,6 @@ pub fn engine_config_with(summary: &ConfigSummary, cache_dir: Option<&Path>) -> 
         .wasm_relaxed_simd(summary.wasm_relaxed_simd)
         .max_wasm_stack(summary.max_wasm_stack)
         .async_stack_size(summary.async_stack_size);
-    apply_pooling_experiment(&mut config);
     if let Some(dir) = cache_dir {
         let mut cache_config = CacheConfig::new();
         // The 137 MiB rustc.wasm is much faster to mmap/deserialize than to
@@ -92,40 +91,81 @@ pub fn engine_config_with(summary: &ConfigSummary, cache_dir: Option<&Path>) -> 
     Ok(config)
 }
 
-/// G2.3 experiment A0 (`docs/notes/warm-session.md`): opt into Wasmtime's
-/// pooling instance allocator with `COGWASM_POOLING=1`, so per-job instances
-/// reuse one linear-memory slot instead of mapping fresh memory each time.
-/// `COGWASM_POOLING_KEEP_RESIDENT_MB` keeps that many MiB of each slot
-/// resident (zeroed in place) instead of decommitting it.
+/// How the engine allocates guest instances.
 ///
-/// Off by default; the shipped configuration is unchanged. The allocation
-/// strategy is a runtime setting: with it on, the existing `.cwasm` still
-/// loads (measured on 2026-11-22), so it does not change the compatibility
-/// hash.
-fn apply_pooling_experiment(config: &mut Config) {
-    if std::env::var_os("COGWASM_POOLING").is_none_or(|value| value == "0") {
-        return;
+/// A runtime setting: it does not change the `.cwasm` compatibility hash (the
+/// existing precompiled artifact loads under both, measured 2026-11-22).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Allocation {
+    /// Wasmtime's default: fresh linear memory mapped for every instance. The
+    /// one-shot CLI and `cogwasm-precompile` use this.
+    OnDemand,
+    /// Wasmtime's pooling allocator: instances reuse a linear-memory slot, and
+    /// the first `keep_resident_mib` MiB of it stay resident and are zeroed in
+    /// place instead of being unmapped and faulted in again.
+    Pooling {
+        /// MiB of each memory slot kept resident between instances.
+        keep_resident_mib: usize,
+    },
+}
+
+impl Allocation {
+    /// The resident backend's default, from experiment A0
+    /// (`docs/notes/warm-session.md`): on the Linux CI runner keeping 256 MiB
+    /// resident saved about 31-36 ms per job (fixture 125 -> 93 ms, json
+    /// 539 -> 503 ms), as much as 1 GiB; pooling with nothing resident saved
+    /// nothing. macOS shows no difference either way.
+    pub const RESIDENT_DEFAULT: Self = Self::Pooling {
+        keep_resident_mib: 256,
+    };
+
+    /// `default`, overridden by the environment for experiments:
+    /// `COGWASM_POOLING=0` selects [`Allocation::OnDemand`],
+    /// `COGWASM_POOLING=1` selects pooling, and
+    /// `COGWASM_POOLING_KEEP_RESIDENT_MB` sets the resident size (pooling only;
+    /// 256 when unset).
+    #[must_use]
+    pub fn from_env_or(default: Self) -> Self {
+        let pooling = match std::env::var("COGWASM_POOLING").ok().as_deref() {
+            Some("0") => return Self::OnDemand,
+            Some(_) => true,
+            None => matches!(default, Self::Pooling { .. }),
+        };
+        if !pooling {
+            return Self::OnDemand;
+        }
+        let default_mib = match default {
+            Self::Pooling { keep_resident_mib } => keep_resident_mib,
+            Self::OnDemand => 256,
+        };
+        let keep_resident_mib = std::env::var("COGWASM_POOLING_KEEP_RESIDENT_MB")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(default_mib);
+        Self::Pooling { keep_resident_mib }
     }
-    let keep_resident_mb = std::env::var("COGWASM_POOLING_KEEP_RESIDENT_MB")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(0);
-    let mut pooling = PoolingAllocationConfig::default();
-    pooling
-        // A resident backend runs one job at a time; a few slots leave room
-        // for a supervisor tier running beside it.
-        .total_core_instances(4)
-        .total_memories(4)
-        .total_tables(4)
-        .total_stacks(4)
-        // rustc.wasm's linear memory may grow to the full 32-bit range.
-        .max_memory_size(4 << 30)
-        // rustc.wasm's indirect-call table and instance state are far larger
-        // than the pooling defaults, which target small modules.
-        .table_elements(1 << 20)
-        .max_core_instance_size(64 << 20)
-        .linear_memory_keep_resident(keep_resident_mb << 20);
-    config.allocation_strategy(InstanceAllocationStrategy::Pooling(pooling));
+
+    fn apply(self, config: &mut Config) {
+        let Self::Pooling { keep_resident_mib } = self else {
+            return;
+        };
+        let mut pooling = PoolingAllocationConfig::default();
+        pooling
+            // A resident backend runs one job at a time; a few slots leave
+            // room for a supervisor tier running beside it.
+            .total_core_instances(4)
+            .total_memories(4)
+            .total_tables(4)
+            .total_stacks(4)
+            // rustc.wasm's linear memory may grow to the full 32-bit range.
+            .max_memory_size(4 << 30)
+            // rustc.wasm's indirect-call table and instance state are far
+            // larger than the pooling defaults, which target small modules.
+            .table_elements(1 << 20)
+            .max_core_instance_size(64 << 20)
+            .linear_memory_keep_resident(keep_resident_mib << 20);
+        config.allocation_strategy(InstanceAllocationStrategy::Pooling(pooling));
+    }
 }
 
 /// The shipped configuration, with an optional module cache directory.
@@ -133,9 +173,15 @@ pub fn engine_config(cache_dir: Option<&Path>) -> Result<Config> {
     engine_config_with(&ConfigSummary::shipped(), cache_dir)
 }
 
-/// Create the CogWasm engine.
+/// Create the CogWasm engine with the default (on-demand) allocator.
 pub fn engine(cache_dir: Option<&Path>) -> Result<Engine> {
-    let config = engine_config(cache_dir)?;
+    engine_with(cache_dir, Allocation::OnDemand)
+}
+
+/// Create the CogWasm engine with an explicit instance allocation strategy.
+pub fn engine_with(cache_dir: Option<&Path>, allocation: Allocation) -> Result<Engine> {
+    let mut config = engine_config(cache_dir)?;
+    allocation.apply(&mut config);
     Engine::new(&config).map_err(|error| anyhow!("creating Wasmtime engine: {error}"))
 }
 
