@@ -1,6 +1,7 @@
 # Next steps after the layout migration
 
 Written 2026-11-21, after the layout migration landed on `main` (`81e1049`).
+Last updated 2026-11-22: N1 and M1–M3 done, G2.1 done, G2.3 in progress.
 Ordered by priority. Each task has a size (S under a day, M a few days, L a
 week or more), what it depends on, and when it is done. Goal numbers refer to
 [`ROADMAP.md`](../ROADMAP.md); the migration record is in
@@ -15,17 +16,22 @@ first cold build from the new paths. It exercises what was not verified
 locally: `ci/setup-toolchain.sh` reading `compiler/upstreams.toml`, a fresh
 `setup-sources.sh`, and `rustc.wasm` built from source under `toolchain/`.
 
-- [ ] If it fails, fix forward on `main`. Likely places: toolchain paths in
-      `ci/setup-toolchain.sh`, the `build/host` stage1 path, cache `path:`
-      entries, `release/gen-notices.py` manifest paths.
-- [ ] Push a trivial change that touches a cached input's neighbour (for
-      example a doc) and confirm run #40 restores the compiler cache (the
-      log says "build reused").
+- [x] If it fails, fix forward on `main`. Fixed forward in four commits:
+      `toolchain/` excluded from the root workspace (`6858879`), cg_clif's
+      clif-to-wasm path computed (`33e614e`), a frozen guest clock for fuel
+      samples (`73ea336`), setup run when a reused compiler has no cargo
+      (`50aa738`). The cold path passed build and all checks in run #41.
+- [x] Confirm a later run restores the compiler cache: run 44898130401
+      (`50aa738`) and run 44912655095 (`6934ed5`) both logged "build reused"
+      and were green; all caches are now saved.
 - [ ] Record the cold and warm durations in `docs/notes/release.md` (CI section).
+      Known so far: warm (compiler reused) run 44912655095 took 35 min wall,
+      986 s inside `build-and-test.sh`.
 - [ ] Delete the old `cranelift-wasm-*-v1` compiler and source cache entries in
       Actions → Caches; they can never match again.
 
-Done when: one cold and one warm green run on `main`.
+Done when: one cold and one warm green run on `main`. **Met** (remaining
+boxes are bookkeeping).
 
 ### N2. Run the workflows the migration touched but did not run (S)
 
@@ -55,8 +61,10 @@ before and passes after.
 | `spawn_impl` / `add_playground_spawn` | debug env var, log prefix, argv vs count | Shared impl, per-host recorder |
 | `startup_once`, `prepare_source`, `main` | genuinely different CLIs | Leave separate |
 
-- [ ] One PR per row, each with `bench/run.sh --quick` identical apart from
-      timings and difftest green.
+- [x] Done in `cba2435` with the decisions in the table: `read_cstr` errors
+      past 1 MiB, `median` uses `a+(b-a)/2` with `total_cmp`, `GuestMem`
+      everywhere, `prepare_instance` with `StoreOptions`, one spawn
+      implementation with per-host recorders. Bench and difftest unchanged.
 
 Unblocks: G2.1 (the supervisor needs a library API, not copies).
 
@@ -68,10 +76,11 @@ Unblocks: G2.1 (the supervisor needs a library API, not copies).
 `release/gen-notices.py`, the `env:` and cache keys in `cranelift_wasm.yml`,
 `release.yml`, `bench.yml` and `quality.yml`.
 
-- [ ] Read them through `compiler/scripts/upstream.py get`. In workflows, a
-      first step that writes them to `$GITHUB_ENV`.
-- [ ] Add to `upstream.py check`: the root `Cargo.toml` Wasmtime pin equals
-      `upstream.wasmtime.version`.
+- [x] Read them through `compiler/scripts/upstream.py get`. In workflows, a
+      first step that writes them to `$GITHUB_ENV`. (`3b8d675`)
+- [x] Check that the root `Cargo.toml` Wasmtime pin equals
+      `upstream.wasmtime.version`: in `compiler/scripts/check-upstreams.py`
+      (kept out of `upstream.py` so the compiler cache key did not change).
 
 Done when: `git grep nightly-2026-10-19` hits only the manifest and history.
 
@@ -81,6 +90,10 @@ All four bundles in `compiler/upstream/` differ from the live patches
 (`upstream.py check` warns). Either regenerate each bundle's `.patch` from the
 live series and re-run its `test-results.txt`, or mark it superseded in
 `compiler/upstream/README.md`. Then make the warning a failure.
+
+**Done** (`3b8d675`): the bundles are deliberate refreshed-for-upstream
+versions, not stale copies. Each has a `DIVERGES.md`, the README has a table,
+and `check-upstreams.py` fails on a differing bundle without one.
 
 ### M4. Decide where generated evidence lives (S, owner decision)
 
@@ -102,8 +115,8 @@ first release after the migration, and the note in `docs/compiler.md`.
       The disk has about 20 GB free.
 - [ ] The next local `rustc.wasm` rebuild is likely a full one, because the
       toolchain moved (bootstrap records absolute paths).
-- [ ] Make pushes use the account key: `git config core.sshCommand "ssh -i
-      ~/.ssh/github_alex -o IdentitiesOnly=yes"` in this clone.
+- [x] Make pushes use the account key: `core.sshCommand` is set in this
+      clone.
 
 ## Then: roadmap work, by leverage
 
