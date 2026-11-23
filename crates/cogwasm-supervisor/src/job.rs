@@ -125,6 +125,14 @@ pub struct CompileOptions {
     /// Emit debug info (cannot be combined with a strip).
     #[serde(default)]
     pub debug: bool,
+    /// V2 phase 1 experiment: one monomorphised function per codegen unit in
+    /// incremental builds (`-Zcogwasm-cgu-per-fn`). Off by default.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub cgu_per_fn: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl Default for CompileOptions {
@@ -138,6 +146,7 @@ impl Default for CompileOptions {
             strip: Strip::None,
             codegen_units: None,
             debug: false,
+            cgu_per_fn: false,
         }
     }
 }
@@ -192,6 +201,9 @@ impl CompileOptions {
         if self.debug {
             flags.push("-Cdebuginfo=2".to_owned());
         }
+        if self.cgu_per_fn {
+            flags.push("-Zcogwasm-cgu-per-fn".to_owned());
+        }
         flags
     }
 
@@ -212,6 +224,9 @@ impl CompileOptions {
             parts.push(format!("codegen-units={units}"));
         }
         parts.push(format!("debug={}", yes_no(self.debug)));
+        if self.cgu_per_fn {
+            parts.push("cgu-per-fn=yes".to_owned());
+        }
         parts.join(",")
     }
 
@@ -256,6 +271,7 @@ impl CompileOptions {
                         })?);
                 }
                 "debug" => options.debug = parse_bool(value)?,
+                "cgu-per-fn" => options.cgu_per_fn = parse_bool(value)?,
                 other => return Err(format!("unknown option {other:?}")),
             }
         }

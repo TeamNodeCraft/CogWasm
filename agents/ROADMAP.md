@@ -11,6 +11,11 @@ open an issue saying you are working on it, and follow
 Status keys: **done**, **in progress**, **open**, **research** (needs
 investigation before it can be planned).
 
+The next generation is drafted in [plans/v2.md](plans/v2.md): a
+function-granular, always-optimising compiler (one optimised build per edit,
+a size-only tier 2, a global store of optimised functions, table-slot hot
+patching), with per-axis targets.
+
 ## Already done
 
 | | |

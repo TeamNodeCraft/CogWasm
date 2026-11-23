@@ -134,7 +134,7 @@ if [ "$(free_gb "$WORK")" -lt 15 ]; then
     printf 'error: only %s GiB free under %s; stopping before compiling (need 15 GiB)\n' "$(free_gb "$WORK")" "$WORK" >&2
     exit 1
 fi
-rm -rf "$WORK/llvm" "$WORK/clif" "$WORK/generated" "$WORK/logs"
+rm -rf "$WORK/llvm" "$WORK/clif" "$WORK/generated" "$WORK/logs" "$WORK/incremental"
 mkdir -p "$WORK/llvm" "$WORK/clif" "$WORK/generated" "$WORK/logs"
 MANIFEST="$WORK/manifest.tsv"
 : > "$MANIFEST"
@@ -187,6 +187,16 @@ compile_clif() {
     fi
     if [ "${DIFFTEST_CAPTURE_HOIST:-0}" = "1" ]; then
         extra+=(-Zmir-capture-hoist)
+    fi
+    if [ "${DIFFTEST_CGU_PER_FN:-0}" = "1" ]; then
+        # V2 phase 1 experiment. The flag only takes effect in incremental
+        # mode, so give each program a fresh incremental directory; this is a
+        # cold compile that still partitions one monomorphised function per
+        # CGU.
+        mkdir -p "$WORK/incremental"
+        extra+=(-Zcogwasm-cgu-per-fn)
+        extra+=(-Cincremental="$WORK/incremental/$name")
+        rm -rf "$WORK/incremental/$name"
     fi
     if ! "$COMPILER_HOST" raw \
         --rustc "$RUSTC_WASM" --sysroot "$SYSROOT" --linker "$WILD" \
