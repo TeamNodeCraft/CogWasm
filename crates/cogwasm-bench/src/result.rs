@@ -43,6 +43,9 @@ pub struct CompilerInfo {
     pub rustc_wasm_bytes: u64,
     pub git_commit: String,
     pub git_subject: String,
+    /// Committer date of `git_commit` (ISO 8601), empty when unknown.
+    #[serde(default)]
+    pub git_commit_date: String,
     pub rustc_version: String,
     pub wasmtime_version: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -305,7 +308,7 @@ pub fn run(toolchain: &Toolchain, options: &RunOptions) -> Result<RunArtifact> {
         )
     });
     let machine = MachineInfo {
-        os: format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
+        os: std::env::consts::OS.to_owned(),
         arch: std::env::consts::ARCH.to_owned(),
         cores,
         cpu: cpu_brand(),
@@ -317,6 +320,7 @@ pub fn run(toolchain: &Toolchain, options: &RunOptions) -> Result<RunArtifact> {
     let compiler_info = CompilerInfo {
         rustc_wasm_sha256: footprint.rustc_wasm_sha256.clone(),
         rustc_wasm_bytes: footprint.rustc_wasm_bytes,
+        git_commit_date: util::git_commit_date(&toolchain.root),
         git_commit,
         git_subject,
         rustc_version: toolchain
@@ -856,7 +860,7 @@ pub(crate) mod tests {
             generated_at: "20260101T000000Z".to_owned(),
             suite: "quick".to_owned(),
             machine: MachineInfo {
-                os: "macos aarch64".to_owned(),
+                os: "macos".to_owned(),
                 arch: "aarch64".to_owned(),
                 cores: 14,
                 cpu: Some("Apple M4 Pro".to_owned()),
@@ -869,6 +873,7 @@ pub(crate) mod tests {
                 rustc_wasm_bytes: 100,
                 git_commit: "0123456789abcdef".to_owned(),
                 git_subject: "test".to_owned(),
+                git_commit_date: "2026-01-01T00:00:00Z".to_owned(),
                 rustc_version: "rustc test".to_owned(),
                 wasmtime_version: "50.0.2".to_owned(),
                 precompiled: None,

@@ -1,0 +1,11 @@
+{
+  "suite": "quick",
+  "configs": ["default", "capture"],
+  "runs": 3,
+  "out": "../../toolchain/work/bench/spec-quick",
+  "chart": {
+    "out": "../../toolchain/work/bench/spec-quick/chart",
+    "config": "default",
+    "history": ["../../toolchain/work/bench/history"]
+  }
+}

@@ -147,6 +147,29 @@ pub fn git_identity(root: &Path) -> (String, String) {
     (sha, subject)
 }
 
+/// The committer date of `HEAD` at `root` as RFC 3339 UTC, or empty.
+///
+/// UTC keeps the dates of different machines comparable as plain strings.
+#[must_use]
+pub fn git_commit_date(root: &Path) -> String {
+    Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["log", "-1", "--format=%ct"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| {
+            String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .parse::<u64>()
+                .ok()
+        })
+        .map_or_else(String::new, |seconds| {
+            compact_to_rfc3339(&format_utc(seconds))
+        })
+}
+
 /// The current process's peak resident set size in bytes, when the platform
 /// reports it.
 #[must_use]
@@ -210,6 +233,36 @@ pub fn utc_timestamp() -> String {
         .duration_since(UNIX_EPOCH)
         .map_or(0, |duration| duration.as_secs());
     format_utc(seconds)
+}
+
+/// The current time as RFC 3339 UTC, `YYYY-MM-DDTHH:MM:SSZ`.
+#[must_use]
+pub fn utc_rfc3339() -> String {
+    compact_to_rfc3339(&utc_timestamp())
+}
+
+/// Turn `YYYYMMDDTHHMMSSZ` into `YYYY-MM-DDTHH:MM:SSZ`; other text is
+/// returned unchanged.
+#[must_use]
+pub fn compact_to_rfc3339(compact: &str) -> String {
+    let bytes = compact.as_bytes();
+    if bytes.len() != 16
+        || bytes[8] != b'T'
+        || bytes[15] != b'Z'
+        || !compact[..8].bytes().all(|b| b.is_ascii_digit())
+        || !compact[9..15].bytes().all(|b| b.is_ascii_digit())
+    {
+        return compact.to_owned();
+    }
+    format!(
+        "{}-{}-{}T{}:{}:{}Z",
+        &compact[0..4],
+        &compact[4..6],
+        &compact[6..8],
+        &compact[9..11],
+        &compact[11..13],
+        &compact[13..15]
+    )
 }
 
 /// Format Unix seconds as `YYYYMMDDTHHMMSSZ` (UTC).
@@ -280,6 +333,19 @@ mod tests {
         assert_eq!(format_utc(0), "19700101T000000Z");
         assert_eq!(format_utc(1_000_000_000), "20010909T014640Z");
         assert_eq!(format_utc(1_700_000_000), "20231114T221320Z");
+    }
+
+    #[test]
+    fn compact_timestamps_become_rfc3339() {
+        assert_eq!(
+            compact_to_rfc3339("20231114T221320Z"),
+            "2023-11-14T22:13:20Z"
+        );
+        assert_eq!(
+            compact_to_rfc3339("2023-11-14T22:13:20Z"),
+            "2023-11-14T22:13:20Z"
+        );
+        assert_eq!(compact_to_rfc3339("garbage"), "garbage");
     }
 
     #[test]

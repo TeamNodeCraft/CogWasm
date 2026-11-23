@@ -169,6 +169,43 @@ swap engine (parallel compilation and the in-memory incremental cache), so
 single-sample reading (host RSS, peak memory) as changed only beyond 5%;
 `--runs 5` or more gives tighter timing spreads on a shared machine.
 
+### JSON in, chart JSON out
+
+`run --spec FILE.json` reads the run's settings from JSON (every field is
+optional, flags given alongside it win, and relative paths are resolved against
+the spec file). [`bench/specs/quick.json`](specs/quick.json) is an example:
+
+```json
+{
+  "suite": "quick",
+  "programs": ["a_add", "nbody"],
+  "configs": ["default", "capture"],
+  "runs": 3,
+  "fuel": true,
+  "out": "run",
+  "chart": { "out": "chart", "config": "default", "history": ["history"] }
+}
+```
+
+With a `chart` block (or `--chart DIR`), the run also writes `DIR/data.json`:
+the document the site's interactive chart (`bench/chart/chart.js`) renders,
+with one point per result. `history` lists earlier `result.json` files, or
+directories of them, plotted before this run. To chart results you already
+have:
+
+```sh
+cargo run -p cogwasm-bench -- chart results/ new/result.json --out site-chart/
+cargo run -p cogwasm-bench -- chart results/ --stdout --config capture
+```
+
+Points are ordered by commit date (UTC), then run time. Each carries the commit,
+runner, program set (a change is marked on the chart) and these series: execution,
+executed instructions and module size against LLVM `-O2` (and size against
+`-Oz`), warm compile, edit -> result p50, precompiled compiler load and median
+compiler fuel. To publish, put `data.json` where the page's
+`data-src="bench/data.json"` points (the Pages build copies it from the
+`bench-history` release today).
+
 The tool intentionally does not read or call the Python scripts or write into
 `bench/results` or `bench/gap/results`; all of its own output lives under
 `toolchain/work/`. Local unit tests need no toolchain

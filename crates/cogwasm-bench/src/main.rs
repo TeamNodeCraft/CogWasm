@@ -1,6 +1,7 @@
 //! `cogwasm-bench`: the `CogWasm` compile, size and execution benchmark.
 
 mod build;
+mod chart;
 mod compare;
 mod exec;
 mod generator;
@@ -10,6 +11,7 @@ mod programs;
 mod report;
 mod result;
 mod size;
+mod spec;
 mod stats;
 mod toolchain;
 mod util;
@@ -40,6 +42,8 @@ enum Command {
     Report(ReportArgs),
     /// Measure the toolchain footprint only (fast, no compiles).
     Toolchain(ToolchainCommand),
+    /// Turn result documents into the site chart's data.json.
+    Chart(ChartArgs),
 }
 
 #[derive(Args, Clone, Default)]
@@ -97,18 +101,21 @@ impl ToolchainArgs {
 struct RunArgs {
     #[command(flatten)]
     toolchain: ToolchainArgs,
-    /// quick, full, large or plugin.
-    #[arg(long, default_value = "quick")]
-    suite: String,
+    /// JSON run specification; flags given alongside it win.
+    #[arg(long)]
+    spec: Option<PathBuf>,
+    /// quick, full, large or plugin (default quick).
+    #[arg(long)]
+    suite: Option<String>,
     /// Program names or class/name (repeat the flag or pass several values).
     #[arg(long, num_args = 1.., action = clap::ArgAction::Append)]
     program: Vec<String>,
     /// Configuration names: default, inline, capture or cgu-per-fn.
     #[arg(long, num_args = 1.., action = clap::ArgAction::Append)]
     config: Vec<String>,
-    /// Samples per seed and edits in the edit loop.
-    #[arg(long, default_value_t = 5)]
-    runs: usize,
+    /// Samples per seed and edits in the edit loop (default 5).
+    #[arg(long)]
+    runs: Option<usize>,
     /// Output directory (defaults to toolchain/work/bench/<timestamp>).
     #[arg(long)]
     out: Option<PathBuf>,
@@ -118,6 +125,41 @@ struct RunArgs {
     /// Skip deterministic compiler-fuel measurement (saves a fuel compile).
     #[arg(long)]
     no_fuel: bool,
+    /// Also write the chart's data.json into this directory.
+    #[arg(long)]
+    chart: Option<PathBuf>,
+    /// Config to plot in the chart (default `default`).
+    #[arg(long)]
+    chart_config: Option<String>,
+    /// Earlier result.json files or directories of them, plotted before this
+    /// run.
+    #[arg(long, num_args = 1.., action = clap::ArgAction::Append)]
+    history: Vec<PathBuf>,
+}
+
+#[derive(Args)]
+struct ChartArgs {
+    /// result.json files, or directories whose *.json are result documents.
+    #[arg(required = true)]
+    inputs: Vec<PathBuf>,
+    /// Directory for data.json.
+    #[arg(long)]
+    out: Option<PathBuf>,
+    /// Print the chart document on stdout instead of writing a file.
+    #[arg(long)]
+    stdout: bool,
+    /// Config to plot.
+    #[arg(long, default_value = "default")]
+    config: String,
+    /// GitHub repository the commit links point at.
+    #[arg(long, default_value = "TeamNodeCraft/CogWasm")]
+    repo: String,
+    /// Page the chart is published on.
+    #[arg(
+        long,
+        default_value = "https://teamnodecraft.github.io/CogWasm/#benchmarks"
+    )]
+    page_url: String,
 }
 
 #[derive(Args)]
@@ -155,13 +197,49 @@ fn main() -> Result<()> {
         Command::Compare(args) => compare_command(&args),
         Command::Report(args) => report_command(args),
         Command::Toolchain(args) => toolchain_command(&args),
+        Command::Chart(args) => chart_command(&args),
     }
 }
 
 fn run_command(args: RunArgs) -> Result<()> {
     let toolchain = args.toolchain.resolve()?;
-    let suite = programs::Suite::parse(&args.suite)?;
-    let out_dir = args.out.unwrap_or_else(|| {
+    let spec = args
+        .spec
+        .as_deref()
+        .map(spec::RunSpec::load)
+        .transpose()?
+        .unwrap_or_default();
+    let suite = programs::Suite::parse(
+        args.suite
+            .as_deref()
+            .or(spec.suite.as_deref())
+            .unwrap_or("quick"),
+    )?;
+    let pick = |flag: Vec<String>, from_spec: &[String]| {
+        if flag.is_empty() {
+            from_spec.to_vec()
+        } else {
+            flag
+        }
+    };
+    let program_names = pick(args.program, &spec.programs);
+    let config_names = pick(args.config, &spec.configs);
+    let runs = args.runs.or(spec.runs).unwrap_or(5);
+    let fuel = !args.no_fuel && spec.fuel.unwrap_or(true);
+    let spec_chart = spec.chart.clone().unwrap_or_default();
+    let chart_out = args
+        .chart
+        .or_else(|| spec.chart.as_ref().map(|c| c.out.clone()));
+    let chart_config = args
+        .chart_config
+        .or(spec_chart.config)
+        .unwrap_or_else(|| "default".to_owned());
+    let history = if args.history.is_empty() {
+        spec_chart.history
+    } else {
+        args.history
+    };
+    let out_dir = args.out.or(spec.out).unwrap_or_else(|| {
         toolchain
             .work_root
             .join("bench")
@@ -169,13 +247,43 @@ fn run_command(args: RunArgs) -> Result<()> {
     });
     let options = result::RunOptions {
         suite,
-        programs: args.program,
-        configs: args.config,
-        runs: args.runs,
+        programs: program_names,
+        configs: config_names,
+        runs,
         out_dir,
-        fuel: !args.no_fuel,
+        fuel,
     };
     let artifact = result::run(&toolchain, &options)?;
+    if let Some(chart_out) = chart_out {
+        // A history directory that does not exist yet is the first run.
+        let history: Vec<PathBuf> = history
+            .into_iter()
+            .filter(|path| {
+                let exists = path.exists();
+                if !exists {
+                    eprintln!(
+                        "[cogwasm-bench] chart history {} does not exist yet; skipping it",
+                        path.display()
+                    );
+                }
+                exists
+            })
+            .collect();
+        let mut files = if history.is_empty() {
+            Vec::new()
+        } else {
+            chart::collect_inputs(&history)?
+        };
+        files.retain(|path| !same_file(path, &artifact.result_path));
+        files.push(artifact.result_path.clone());
+        let options = chart::ChartOptions {
+            config: chart_config,
+            ..chart::ChartOptions::default()
+        };
+        let document = chart::chart_files(&files, &options)?;
+        let path = chart::write(&document, &chart_out)?;
+        eprintln!("[cogwasm-bench] wrote {}", path.display());
+    }
     if args.json {
         println!(
             "{}",
@@ -291,6 +399,37 @@ fn toolchain_command(args: &ToolchainCommand) -> Result<()> {
         );
     } else {
         print!("{markdown}");
+    }
+    Ok(())
+}
+
+fn same_file(a: &std::path::Path, b: &std::path::Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+
+fn chart_command(args: &ChartArgs) -> Result<()> {
+    if args.out.is_none() && !args.stdout {
+        bail!("pass --out DIR or --stdout");
+    }
+    let files = chart::collect_inputs(&args.inputs)?;
+    let options = chart::ChartOptions {
+        config: args.config.clone(),
+        repo: args.repo.clone(),
+        page_url: args.page_url.clone(),
+    };
+    let document = chart::chart_files(&files, &options)?;
+    if args.stdout {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&document).context("serialising the chart")?
+        );
+    }
+    if let Some(out) = &args.out {
+        let path = chart::write(&document, out)?;
+        eprintln!("wrote {} ({} point(s))", path.display(), files.len());
     }
     Ok(())
 }
