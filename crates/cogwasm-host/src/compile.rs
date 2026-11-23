@@ -154,7 +154,7 @@ pub fn compile_args(
         .collect::<Vec<_>>();
     let link_ms: f64 = spawns.iter().map(|s| s.ms).sum();
     if spawns.iter().any(|s| s.status != 0) {
-        bail!("linker failed: {:?}", spawns);
+        bail!("linker failed: {spawns:?}");
     }
 
     // A 137 MiB compiled module + 1 GiB shared memory can take seconds to tear

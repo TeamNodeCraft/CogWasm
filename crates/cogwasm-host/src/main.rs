@@ -1,4 +1,4 @@
-//! CogWasm host: run rustc.wasm (wasm32-wasip1, cg_clif only) under the latest
+//! `CogWasm` host: run rustc.wasm (wasm32-wasip1, cg_clif only) under the latest
 //! stable Wasmtime with plain WASI preview 1, service its `playground.spawn`
 //! linker import with native Wild, then load and evaluate the linked plugin.
 //!
@@ -529,19 +529,7 @@ fn inspect_wasm(path: &Path) -> Result<Inspect> {
     for payload in wasmparser::Parser::new(0).parse_all(&bytes) {
         match payload? {
             wasmparser::Payload::ImportSection(s) => {
-                for group in s {
-                    for item in group? {
-                        let (_off, imp) = item?;
-                        let module = imp.module.to_string();
-                        let name = imp.name.to_string();
-                        if module.to_ascii_lowercase().contains("llvm")
-                            || name.to_ascii_lowercase().contains("llvm")
-                        {
-                            llvm_imports.push(format!("{module}::{name}"));
-                        }
-                        imports.push((module, name));
-                    }
-                }
+                collect_imports(s, &mut imports, &mut llvm_imports)?;
             }
             wasmparser::Payload::ExportSection(s) => {
                 for e in s {
@@ -552,24 +540,8 @@ fn inspect_wasm(path: &Path) -> Result<Inspect> {
                 code_bytes += body.range().end - body.range().start;
                 functions += 1;
             }
-            wasmparser::Payload::CustomSection(c) => {
-                if c.name() == "name" {
-                    let mut r = wasmparser::NameSectionReader::new(wasmparser::BinaryReader::new(
-                        c.data(),
-                        c.data_offset(),
-                    ));
-                    while let Some(Ok(entry)) = r.next() {
-                        if let wasmparser::Name::Function(n) = entry {
-                            for ass in n {
-                                let Ok(ass) = ass else { continue };
-                                let name = ass.name.to_string();
-                                if name.to_ascii_lowercase().contains("llvm") {
-                                    llvm_function_names.push(name);
-                                }
-                            }
-                        }
-                    }
-                }
+            wasmparser::Payload::CustomSection(c) if c.name() == "name" => {
+                collect_llvm_function_names(&c, &mut llvm_function_names);
             }
             wasmparser::Payload::DataSection(s) => {
                 for d in s {
@@ -592,6 +564,51 @@ fn inspect_wasm(path: &Path) -> Result<Inspect> {
         llvm_imports,
         llvm_strings_in_data,
     })
+}
+
+/// Record every import, and separately the ones whose module or name
+/// mentions LLVM.
+fn collect_imports(
+    section: wasmparser::ImportSectionReader<'_>,
+    imports: &mut Vec<(String, String)>,
+    llvm_imports: &mut Vec<String>,
+) -> Result<()> {
+    for group in section {
+        for item in group? {
+            let (_off, imp) = item?;
+            let module = imp.module.to_string();
+            let name = imp.name.to_string();
+            if module.to_ascii_lowercase().contains("llvm")
+                || name.to_ascii_lowercase().contains("llvm")
+            {
+                llvm_imports.push(format!("{module}::{name}"));
+            }
+            imports.push((module, name));
+        }
+    }
+    Ok(())
+}
+
+/// Record function names in the `name` section that mention LLVM.
+fn collect_llvm_function_names(
+    section: &wasmparser::CustomSectionReader<'_>,
+    llvm_function_names: &mut Vec<String>,
+) {
+    let reader = wasmparser::NameSectionReader::new(wasmparser::BinaryReader::new(
+        section.data(),
+        section.data_offset(),
+    ));
+    for entry in reader.flatten() {
+        let wasmparser::Name::Function(names) = entry else {
+            continue;
+        };
+        for naming in names.into_iter().flatten() {
+            let name = naming.name.to_string();
+            if name.to_ascii_lowercase().contains("llvm") {
+                llvm_function_names.push(name);
+            }
+        }
+    }
 }
 
 fn count_llvm(bytes: &[u8]) -> usize {
@@ -644,7 +661,9 @@ fn sha256_hex(bytes: &[u8]) -> String {
         msg.push(0);
     }
     msg.extend_from_slice(&bit_len.to_be_bytes());
-    for chunk in msg.chunks_exact(64) {
+    // The padding above makes the length a multiple of 64, so no remainder.
+    let (blocks, _) = msg.as_chunks::<64>();
+    for chunk in blocks {
         let mut w = [0u32; 64];
         for i in 0..16 {
             w[i] = u32::from_be_bytes(chunk[i * 4..i * 4 + 4].try_into().unwrap());

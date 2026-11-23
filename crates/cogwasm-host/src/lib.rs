@@ -1,4 +1,4 @@
-//! Shared library for the CogWasm host tools.
+//! Shared library for the `CogWasm` host tools.
 //!
 //! The `cogwasm-host` binary and the `cogwasm-precompile` binary both use
 //! [`config`] for the Wasmtime engine and [`precompiled`] for loading and

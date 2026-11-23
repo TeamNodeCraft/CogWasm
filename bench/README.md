@@ -225,9 +225,11 @@ counter comparisons was 0.50%. That is why the default counter tolerance is
 median: parallel Wasmtime compilation spin-waits differently under load, so a
 single swap-compile median can move by tens of percent while its cheapest
 compile stays within about 1%. Under heavier load even that minimum moved by
-8.8% (`nbody`, two runs of two edits), so the swap's instructions retired are
-reported but `compare` does not judge them; edit fuel and the link counters
-cover the edit's work.
+8.8% (`nbody`, two runs of two edits), and the large program's cold Wild link
+moved 32%: both the swap and Wild run on thread pools whose spin-waits grow
+with load. So the swap's and every link's instructions retired are reported
+but `compare` does not judge them; compiler fuel and the output's sizes and
+executed instructions cover the work.
 
 `cogwasm-bench ab` compares two configs or two rustc.wasm builds by alternating
 A, B, A, B per program so drift hits both sides equally. It reports the

@@ -439,19 +439,19 @@ fn collect(result: &BenchResult) -> BTreeMap<String, Point> {
                     true,
                 );
             }
-            insert_metric(
-                &mut points,
-                &format!("{base}.build.edit.link_instructions"),
-                &measurement.build.edit.link_instructions,
-                true,
-            );
-            // The swap's instructions retired are reported but not compared:
-            // Wasmtime compiles the module on parallel threads whose
-            // spin-waits depend on machine load, so even the minimum of N
-            // moved by 8.8% between two identical busy runs, beyond any
-            // useful tolerance. Edit fuel and link instructions cover the
-            // edit's work deterministically.
+            // Instructions retired by multi-threaded native steps are
+            // reported but not compared: the swap (Wasmtime compiles on
+            // parallel threads) and every Wild link (Wild links on a thread
+            // pool). Their threads spin-wait more or less depending on
+            // machine load, so the count moves with load, not with the work:
+            // the swap's minimum of N moved 8.8% and the large program's cold
+            // link 32% between identical busy runs. Compiler fuel and the
+            // output's sizes and executed instructions cover the work
+            // deterministically.
             for (label, metric) in measurement.build.native.iter() {
+                if label.ends_with("_link_instructions") {
+                    continue;
+                }
                 insert_metric(
                     &mut points,
                     &format!("{base}.build.native.{label}"),

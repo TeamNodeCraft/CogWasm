@@ -1,4 +1,4 @@
-//! One Wasmtime [`Engine`] configuration for every CogWasm host tool.
+//! One Wasmtime [`Engine`] configuration for every `CogWasm` host tool.
 //!
 //! The host binary and the `cogwasm-precompile` binary must agree exactly:
 //! a `.cwasm` may only be deserialized by an engine whose configuration is
@@ -18,7 +18,7 @@ pub const MAX_WASM_STACK: usize = 8 << 20;
 /// the historical baseline configuration).
 pub const ASYNC_STACK_SIZE: usize = 16 << 20;
 
-/// The CogWasm engine configuration, before an optional module cache.
+/// The `CogWasm` engine configuration, before an optional module cache.
 ///
 /// This is recorded in `.cwasm` metadata so a mismatch can be reported with a
 /// readable reason instead of only an opaque compatibility hash.
@@ -173,12 +173,12 @@ pub fn engine_config(cache_dir: Option<&Path>) -> Result<Config> {
     engine_config_with(&ConfigSummary::shipped(), cache_dir)
 }
 
-/// Create the CogWasm engine with the default (on-demand) allocator.
+/// Create the `CogWasm` engine with the default (on-demand) allocator.
 pub fn engine(cache_dir: Option<&Path>) -> Result<Engine> {
     engine_with(cache_dir, Allocation::OnDemand)
 }
 
-/// Create the CogWasm engine with an explicit instance allocation strategy.
+/// Create the `CogWasm` engine with an explicit instance allocation strategy.
 pub fn engine_with(cache_dir: Option<&Path>, allocation: Allocation) -> Result<Engine> {
     let mut config = engine_config(cache_dir)?;
     allocation.apply(&mut config);
