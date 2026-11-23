@@ -4,7 +4,9 @@
 use crate::build::{
     BuildMeasurement, BuildRequest, Config, FuelCompiler, ServeCompiler, measure_build,
 };
+use crate::calibrate::{Calibration, WallEstimate};
 use crate::exec::{BenchRuntime, ExecMeasurement, InstructionMeasurement, Outcome};
+use crate::idle::{self, BenchMode, IdleEvidence, IdleMonitor, Regime};
 use crate::llvm::{LlvmBuild, LlvmMeasurement, measure_llvm};
 use crate::programs::{Program, Suite, ensure_dependencies, prepare_programs};
 use crate::report;
@@ -18,7 +20,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// Version of the result-document layout.
-pub const SCHEMA: u32 = 1;
+pub const SCHEMA: u32 = 2;
 
 /// Machine facts recorded before and after a run.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -67,6 +69,19 @@ pub struct Settings {
     pub seeds: Vec<u64>,
     pub fuel: bool,
     pub out_dir: String,
+    /// The requested regime (`auto`, `counters` or `full`).
+    #[serde(default)]
+    pub mode: BenchMode,
+    /// Seconds auto mode was allowed to wait for the machine to become idle.
+    #[serde(default)]
+    pub wait_idle_seconds: u64,
+    /// Fraction of one core other processes may use and still be idle.
+    #[serde(default = "default_idle_threshold")]
+    pub idle_threshold_fraction: f64,
+}
+
+fn default_idle_threshold() -> f64 {
+    idle::DEFAULT_IDLE_THRESHOLD_FRACTION
 }
 
 /// One config's measurements for one program.
@@ -100,6 +115,9 @@ pub struct ProgramResult {
     pub llvm: LlvmResult,
     pub correct: bool,
     pub outcomes: BTreeMap<String, Outcome>,
+    /// Idle evidence for this program's timed windows.
+    #[serde(default)]
+    pub idle: IdleEvidence,
 }
 
 /// Suite geomeans for one config.
@@ -154,6 +172,21 @@ pub struct BenchResult {
     pub geomeans: Geomeans,
     pub v2_targets: Vec<V2Target>,
     pub ok: bool,
+    /// The regime this run actually used.
+    #[serde(default)]
+    pub regime: Regime,
+    /// Why that regime was chosen, for the summary and the report.
+    #[serde(default)]
+    pub regime_reason: String,
+    /// Idle evidence for the whole run.
+    #[serde(default)]
+    pub idle: IdleEvidence,
+    /// Wall-clock fits from `cogwasm-bench calibrate`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub calibration: Option<Calibration>,
+    /// Estimated wall times for a counters-mode run with a calibration.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub estimates: Vec<WallEstimate>,
 }
 
 /// What `run` wrote.
@@ -173,6 +206,13 @@ pub struct RunOptions {
     pub runs: usize,
     pub out_dir: PathBuf,
     pub fuel: bool,
+    pub mode: BenchMode,
+    pub wait_idle_seconds: u64,
+    pub idle_threshold_fraction: f64,
+    /// Fit the wall-clock model from this run.
+    pub calibrate: bool,
+    /// A previously measured model used to estimate counters-mode wall times.
+    pub calibration: Option<Calibration>,
 }
 
 /// Run the requested suite and write `result.json` + `report.md`.
@@ -190,6 +230,13 @@ pub fn run(toolchain: &Toolchain, options: &RunOptions) -> Result<RunArtifact> {
         bail!("--runs must be at least 1");
     }
     toolchain.validate()?;
+    let monitor = IdleMonitor::new(options.idle_threshold_fraction);
+    let (regime, regime_reason) = idle::decide(options.mode, &monitor, options.wait_idle_seconds);
+    let timed = regime == Regime::Full;
+    eprintln!(
+        "[cogwasm-bench] regime {}: {regime_reason}",
+        regime.as_str()
+    );
     let load_before = util::load_average();
     let configs = parse_configs(&options.configs)?;
     let programs = prepare_programs(toolchain, options.suite, &options.programs)?;
@@ -224,8 +271,10 @@ pub fn run(toolchain: &Toolchain, options: &RunOptions) -> Result<RunArtifact> {
         None
     };
     let runtime = BenchRuntime::new("bench")?;
+    let exec_runs = if timed { options.runs } else { 1 };
     let mut measured = BTreeMap::new();
     for program in &programs {
+        let program_start = monitor.sample_count();
         eprintln!(
             "[cogwasm-bench] {} ({}, {} lines)",
             program.def.name, program.def.class, program.lines
@@ -235,9 +284,11 @@ pub fn run(toolchain: &Toolchain, options: &RunOptions) -> Result<RunArtifact> {
             program,
             &dependencies,
             &work,
-            options.runs,
+            exec_runs,
             &seeds,
             &runtime,
+            &monitor,
+            timed,
         )?;
         let llvm = measure_llvm_instructions(&runtime, program, &work, &seeds, llvm)?;
         let mut config_results = BTreeMap::new();
@@ -254,12 +305,14 @@ pub fn run(toolchain: &Toolchain, options: &RunOptions) -> Result<RunArtifact> {
                 work: work.clone(),
                 runs: options.runs,
                 seeds: &seeds,
+                idle: &monitor,
+                timed,
             };
             let built = measure_build(&mut request)?;
             let bytes = std::fs::read(&built.wasm)
                 .with_context(|| format!("reading {}", built.wasm.display()))?;
             let exec = runtime
-                .execute(&bytes, &seeds, options.runs)
+                .execute(&bytes, &seeds, exec_runs, &monitor, timed)
                 .with_context(|| format!("executing {} / {}", program.def.name, config.name))?;
             let instructions = runtime
                 .measure_instructions(&bytes, &seeds, &exec.outcomes)
@@ -285,6 +338,7 @@ pub fn run(toolchain: &Toolchain, options: &RunOptions) -> Result<RunArtifact> {
             .next()
             .map(|result| result.exec.outcomes.clone())
             .unwrap_or_default();
+        let program_idle = monitor.evidence_since(program_start);
         measured.insert(
             program.def.name.clone(),
             ProgramResult {
@@ -297,6 +351,7 @@ pub fn run(toolchain: &Toolchain, options: &RunOptions) -> Result<RunArtifact> {
                 llvm,
                 correct: true,
                 outcomes,
+                idle: program_idle,
             },
         );
     }
@@ -337,6 +392,22 @@ pub fn run(toolchain: &Toolchain, options: &RunOptions) -> Result<RunArtifact> {
         module_load_ms: compiler.module_load_ms,
         serve_start_ms: serve.start_ms,
     };
+    let run_idle = monitor.evidence();
+    let calibration = if options.calibrate {
+        Some(crate::calibrate::fit(
+            &crate::calibrate::points(&measured),
+            run_idle.qualified(),
+        ))
+    } else {
+        options.calibration.clone()
+    };
+    let estimates = if regime == Regime::Counters {
+        calibration.as_ref().map_or_else(Vec::new, |model| {
+            crate::calibrate::estimates(&measured, model)
+        })
+    } else {
+        Vec::new()
+    };
     let config_names = configs.iter().map(|config| config.name.clone()).collect();
     let program_names = measured.keys().cloned().collect();
     let settings = Settings {
@@ -346,6 +417,9 @@ pub fn run(toolchain: &Toolchain, options: &RunOptions) -> Result<RunArtifact> {
         seeds,
         fuel: options.fuel,
         out_dir: out_dir.display().to_string(),
+        mode: options.mode,
+        wait_idle_seconds: options.wait_idle_seconds,
+        idle_threshold_fraction: options.idle_threshold_fraction,
     };
     let geomeans = geomeans(&measured);
     let v2_targets = v2_targets(&measured, &geomeans);
@@ -367,6 +441,11 @@ pub fn run(toolchain: &Toolchain, options: &RunOptions) -> Result<RunArtifact> {
         geomeans,
         v2_targets,
         ok: true,
+        regime,
+        regime_reason,
+        idle: run_idle,
+        calibration,
+        estimates,
     };
     let result_path = out_dir.join("result.json");
     let report_path = out_dir.join("report.md");
@@ -687,9 +766,9 @@ pub fn load_result(path: &Path) -> Result<BenchResult> {
         std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     let result: BenchResult =
         serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
-    if result.schema != SCHEMA {
+    if result.schema != SCHEMA && result.schema != 1 {
         bail!(
-            "{} has result schema {} (this tool reads {SCHEMA})",
+            "{} has result schema {} (this tool reads schema 1 or {SCHEMA})",
             path.display(),
             result.schema
         );
@@ -706,13 +785,22 @@ pub fn report_path_for(result_path: &Path) -> PathBuf {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::build::{EditSummary, FuelMeasurement, PhaseBreakdown};
+    use crate::build::{EditSummary, FuelMeasurement, NativeMeasurement, PhaseBreakdown};
     use crate::exec::{ExecMeasurement, InstructionMeasurement, Outcome};
+    use crate::idle::{IdleEvidence, Regime};
     use crate::size::SizeBreakdown;
-    use crate::stats::Metric;
+    use crate::stats::{Metric, MetricClass};
 
     fn metric(value: f64, deterministic: bool) -> Metric {
-        Metric::one(value, deterministic).expect("metric")
+        Metric::one(
+            value,
+            if deterministic {
+                MetricClass::Exact
+            } else {
+                MetricClass::Wall
+            },
+        )
+        .expect("metric")
     }
 
     fn size(total: u64) -> SizeBreakdown {
@@ -759,6 +847,83 @@ pub(crate) mod tests {
         }
     }
 
+    /// Convert every schema-2 metric object to its schema-1 shape and strip
+    /// the fields schema 1 did not have.
+    fn downgrade_metric(value: &mut serde_json::Value) {
+        if let serde_json::Value::Object(object) = value {
+            if object.contains_key("median") && object.contains_key("runs") {
+                let deterministic = object
+                    .get("class")
+                    .and_then(serde_json::Value::as_str)
+                    .is_none_or(|class| class != "wall");
+                object.remove("class");
+                object.remove("idle_qualified");
+                object.remove("unavailable");
+                object.insert(
+                    "deterministic".to_owned(),
+                    serde_json::Value::Bool(deterministic),
+                );
+                return;
+            }
+            for child in object.values_mut() {
+                downgrade_metric(child);
+            }
+        } else if let serde_json::Value::Array(items) = value {
+            for item in items {
+                downgrade_metric(item);
+            }
+        }
+    }
+
+    #[test]
+    fn a_schema_one_document_still_loads_and_maps_classes() {
+        let result = minimal_result();
+        let mut value = serde_json::to_value(&result).expect("serialise");
+        value["schema"] = serde_json::json!(1);
+        for field in [
+            "regime",
+            "regime_reason",
+            "idle",
+            "calibration",
+            "estimates",
+        ] {
+            value.as_object_mut().expect("object").remove(field);
+        }
+        value["settings"]
+            .as_object_mut()
+            .expect("settings")
+            .remove("mode");
+        value["settings"]
+            .as_object_mut()
+            .expect("settings")
+            .remove("wait_idle_seconds");
+        value["settings"]
+            .as_object_mut()
+            .expect("settings")
+            .remove("idle_threshold_fraction");
+        downgrade_metric(&mut value);
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("schema1.json");
+        std::fs::write(&path, serde_json::to_vec_pretty(&value).expect("encode")).expect("write");
+        let loaded = load_result(&path).expect("load schema 1");
+        assert_eq!(loaded.schema, 1);
+        let config = loaded
+            .programs
+            .get("a_add")
+            .expect("program")
+            .configs
+            .get("default")
+            .expect("config");
+        assert_eq!(
+            config.build.fuel.as_ref().expect("fuel").fuel.class,
+            MetricClass::Exact
+        );
+        assert_eq!(config.build.warm_compile_ms.class, MetricClass::Wall);
+        assert_eq!(config.build.warm_compile_ms.idle_qualified, None);
+        assert_eq!(loaded.regime, Regime::Full);
+        assert!(!loaded.idle.qualified());
+    }
+
     /// A small but structurally complete result for report/compare tests.
     #[expect(
         clippy::too_many_lines,
@@ -775,6 +940,11 @@ pub(crate) mod tests {
             build_no_link_ms: metric(7.0, false),
             swap_ms: metric(1.0, false),
             call_ms: metric(1.0, false),
+            link_instructions: metric(100.0, true),
+            link_cycles: metric(200.0, true),
+            swap_instructions: metric(300.0, true),
+            swap_cycles: metric(400.0, true),
+            fuel: None,
             edits: Vec::new(),
             byte_identical_to_cold: true,
         };
@@ -802,6 +972,11 @@ pub(crate) mod tests {
                 fuel: metric(1000.0, true),
                 samples: vec![1000, 1000],
             }),
+            warm_fuel: Some(FuelMeasurement {
+                fuel: metric(900.0, true),
+                samples: vec![900, 900],
+            }),
+            native: NativeMeasurement::default(),
             incremental_dir_bytes: 4096,
             incremental_files: 4,
             intermediate_object_files: 2,
@@ -842,6 +1017,7 @@ pub(crate) mod tests {
             llvm,
             correct: true,
             outcomes: BTreeMap::new(),
+            idle: IdleEvidence::default(),
         };
         let set = GeomeanSet {
             exec_ratio: Some(0.83),
@@ -903,6 +1079,9 @@ pub(crate) mod tests {
                 seeds: vec![0, 1, 42, u64::MAX],
                 fuel: true,
                 out_dir: "toolchain/work/bench/test".to_owned(),
+                mode: BenchMode::Full,
+                wait_idle_seconds: 0,
+                idle_threshold_fraction: idle::DEFAULT_IDLE_THRESHOLD_FRACTION,
             },
             programs: BTreeMap::from([("a_add".to_owned(), program)]),
             geomeans: Geomeans {
@@ -916,6 +1095,26 @@ pub(crate) mod tests {
                 met: Some(true),
             }],
             ok: true,
+            regime: Regime::Full,
+            regime_reason: "test fixture".to_owned(),
+            calibration: None,
+            estimates: Vec::new(),
+            idle: IdleEvidence {
+                method: crate::counters::method().to_owned(),
+                threshold_fraction: idle::DEFAULT_IDLE_THRESHOLD_FRACTION,
+                samples: vec![crate::idle::IdleSample {
+                    label: "fixture".to_owned(),
+                    window_ms: 100.0,
+                    other_cpu_ms: 1.0,
+                    other_cpu_fraction: 0.01,
+                    load_average: Some(1.0),
+                    qualified: true,
+                    observed_processes: 10,
+                    excluded_processes: 1,
+                    unreadable_processes: 0,
+                    method: crate::counters::method().to_owned(),
+                }],
+            },
         }
     }
 }

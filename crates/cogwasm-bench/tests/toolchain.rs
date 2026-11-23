@@ -15,6 +15,32 @@ fn required() -> bool {
     std::env::var_os("COGWASM_REQUIRE_TOOLCHAIN").is_some()
 }
 
+/// A command for the bench binary, with path overrides for a worktree that
+/// does not contain the built toolchain itself (CI has them in-tree; a
+/// developer's linked worktree often points at the main checkout).
+fn bench(args: &[&str]) -> Command {
+    let mut command = Command::new(binary());
+    let Some((subcommand, rest)) = args.split_first() else {
+        return command;
+    };
+    command.arg(subcommand);
+    // Only the commands that take `ToolchainArgs` accept these overrides.
+    if ["run", "calibrate", "ab", "toolchain"].contains(subcommand) {
+        for (variable, flag) in [
+            ("COGWASM_BENCH_TOOLCHAIN", "--toolchain"),
+            ("COGWASM_BENCH_DEPS_ROOT", "--deps-root"),
+            ("COGWASM_BENCH_WORK_ROOT", "--work-root"),
+            ("COGWASM_BENCH_CACHE_DIR", "--cache-dir"),
+        ] {
+            if let Ok(value) = std::env::var(variable) {
+                command.arg(flag).arg(value);
+            }
+        }
+    }
+    command.args(rest);
+    command
+}
+
 #[test]
 fn a_quick_program_round_trips_through_run_report_and_compare() {
     if !required() {
@@ -23,21 +49,20 @@ fn a_quick_program_round_trips_through_run_report_and_compare() {
     }
     let dir = tempfile::tempdir().expect("temp dir");
     let out = dir.path().join("run");
-    let status = Command::new(binary())
-        .args([
-            "run",
-            "--program",
-            "a_add",
-            "--runs",
-            "1",
-            "--config",
-            "default",
-            "--no-fuel",
-            "--out",
-        ])
-        .arg(&out)
-        .status()
-        .expect("run cogwasm-bench");
+    let status = bench(&[
+        "run",
+        "--program",
+        "a_add",
+        "--runs",
+        "1",
+        "--config",
+        "default",
+        "--no-fuel",
+        "--out",
+    ])
+    .arg(&out)
+    .status()
+    .expect("run cogwasm-bench");
     assert!(status.success(), "run failed");
 
     let result = out.join("result.json");
@@ -45,18 +70,22 @@ fn a_quick_program_round_trips_through_run_report_and_compare() {
     assert!(result.is_file(), "result.json was not written");
     assert!(report.is_file(), "report.md was not written");
     let text = std::fs::read_to_string(&result).expect("read result");
-    assert!(text.contains("\"schema\": 1"), "unexpected result schema");
+    assert!(text.contains("\"schema\": 2"), "unexpected result schema");
     assert!(text.contains("\"byte_identical_to_cold\": true"));
+    assert!(text.contains("\"regime\":"), "regime is missing");
+    assert!(text.contains("\"idle\":"), "idle evidence is missing");
+    assert!(
+        text.contains("\"class\": \"wall\""),
+        "metric classes are missing"
+    );
 
-    let status = Command::new(binary())
-        .args(["report"])
+    let status = bench(&["report"])
         .arg(&result)
         .status()
         .expect("report cogwasm-bench");
     assert!(status.success(), "report failed");
 
-    let comparison = Command::new(binary())
-        .args(["compare"])
+    let comparison = bench(&["compare"])
         .arg(&result)
         .arg(&result)
         .output()
@@ -73,8 +102,7 @@ fn toolchain_footprint_is_fast_and_does_not_compile() {
         eprintln!("skipping: set COGWASM_REQUIRE_TOOLCHAIN=1 to run");
         return;
     }
-    let output = Command::new(binary())
-        .args(["toolchain", "--json"])
+    let output = bench(&["toolchain", "--json"])
         .output()
         .expect("toolchain command");
     assert!(output.status.success(), "toolchain command failed");

@@ -1,8 +1,9 @@
 //! Execute compiled benchmark modules: timing, result equality and exact
 //! executed-instruction counts.
 
+use crate::idle::IdleMonitor;
 use crate::instrument::{COUNTER_EXPORT, instrument};
-use crate::stats::Metric;
+use crate::stats::{Metric, MetricClass};
 use anyhow::{Context, Result, anyhow, bail};
 use cogwasm_supervisor::{Artifact, Instance, Runtime};
 use serde::{Deserialize, Serialize};
@@ -107,6 +108,18 @@ impl BenchRuntime {
         Ok(module)
     }
 
+    /// Compile (and cache) the module for a swapped artifact, without
+    /// instantiating it. The edit loop calls this so the Wasmtime compile's
+    /// instructions can be counted separately; the timed swap still includes
+    /// the same compile work.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the artifact is not a valid module.
+    pub fn compile_swapped(&self, artifact: &Artifact) -> Result<()> {
+        self.module(artifact).map(|_| ())
+    }
+
     /// Execute a module over every seed for `runs` samples per seed.
     ///
     /// # Errors
@@ -114,7 +127,15 @@ impl BenchRuntime {
     /// Returns an error when the module does not export the benchmark ABI, a
     /// run traps, a seed is non-deterministic within the module, or the output
     /// buffer is out of bounds.
-    pub fn execute(&self, wasm: &[u8], seeds: &[u64], runs: usize) -> Result<ExecMeasurement> {
+    pub fn execute(
+        &self,
+        wasm: &[u8],
+        seeds: &[u64],
+        runs: usize,
+        idle: &IdleMonitor,
+        timed: bool,
+    ) -> Result<ExecMeasurement> {
+        let window = timed.then(|| idle.window("exec"));
         let module = Module::new(&self.engine, wasm).wt("compiling the benchmark module")?;
         let mut exec_values = Vec::with_capacity(seeds.len() * runs);
         let mut instantiate_values = Vec::with_capacity(seeds.len() * runs);
@@ -151,9 +172,12 @@ impl BenchRuntime {
                 instantiate_values.push(instantiate_ms);
             }
         }
+        let sample = window.map(|window| idle.finish(window));
+        let qualified = sample.as_ref().is_some_and(|sample| sample.qualified);
         Ok(ExecMeasurement {
-            exec_ms: Metric::new(&exec_values, false)?,
-            instantiate_ms: Metric::new(&instantiate_values, false)?,
+            exec_ms: Metric::new(&exec_values, MetricClass::Wall)?.with_idle_qualified(qualified),
+            instantiate_ms: Metric::new(&instantiate_values, MetricClass::Wall)?
+                .with_idle_qualified(qualified),
             outcomes,
         })
     }
@@ -203,7 +227,7 @@ impl BenchRuntime {
             per_seed.insert(seed.to_string(), counts[0]);
         }
         Ok(InstructionMeasurement {
-            instructions: Metric::one(u64_as_f64(total), true)?,
+            instructions: Metric::one(u64_as_f64(total), MetricClass::Exact)?,
             blocks: instrumented.blocks,
             static_instructions: instrumented.static_instructions,
             per_seed,

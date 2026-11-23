@@ -1,10 +1,14 @@
 //! `cogwasm-bench`: the `CogWasm` compile, size and execution benchmark.
 
+mod ab;
 mod build;
+mod calibrate;
 mod chart;
 mod compare;
+mod counters;
 mod exec;
 mod generator;
+mod idle;
 mod instrument;
 mod llvm;
 mod programs;
@@ -44,6 +48,10 @@ enum Command {
     Toolchain(ToolchainCommand),
     /// Turn result documents into the site chart's data.json.
     Chart(ChartArgs),
+    /// Compare two configs or rustc.wasm builds with interleaved A/B rounds.
+    Ab(AbArgs),
+    /// Fit wall-clock time against fuel and native counters on an idle machine.
+    Calibrate(CalibrateArgs),
 }
 
 #[derive(Args, Clone, Default)]
@@ -125,6 +133,21 @@ struct RunArgs {
     /// Skip deterministic compiler-fuel measurement (saves a fuel compile).
     #[arg(long)]
     no_fuel: bool,
+    /// Measurement regime: auto, counters or full.
+    #[arg(long, value_enum, default_value_t = idle::BenchMode::Auto)]
+    mode: idle::BenchMode,
+    /// In auto mode, seconds to wait for the machine to become idle.
+    #[arg(long, default_value_t = 0)]
+    wait_idle: u64,
+    /// Idle threshold as a fraction of one core (0.10 = 10%).
+    #[arg(long, default_value_t = idle::DEFAULT_IDLE_THRESHOLD_FRACTION)]
+    idle_threshold: f64,
+    /// Fit the wall-clock model from this run and store it in result.json.
+    #[arg(long)]
+    calibrate: bool,
+    /// Use a calibration stored in this earlier result.json for estimates.
+    #[arg(long)]
+    calibration: Option<PathBuf>,
     /// Also write the chart's data.json into this directory.
     #[arg(long)]
     chart: Option<PathBuf>,
@@ -135,6 +158,12 @@ struct RunArgs {
     /// run.
     #[arg(long, num_args = 1.., action = clap::ArgAction::Append)]
     history: Vec<PathBuf>,
+}
+
+#[derive(Args)]
+struct CalibrateArgs {
+    #[command(flatten)]
+    run: RunArgs,
 }
 
 #[derive(Args)]
@@ -169,6 +198,42 @@ struct CompareArgs {
     /// Exit 1 when a regression is found.
     #[arg(long)]
     fail_on_regression: bool,
+    /// Relative tolerance for native CPU-counter metrics (default 0.5%).
+    #[arg(long, default_value_t = compare::DEFAULT_COUNTER_TOLERANCE)]
+    counter_tolerance: f64,
+}
+
+#[derive(Args)]
+struct AbArgs {
+    #[command(flatten)]
+    toolchain: ToolchainArgs,
+    /// quick, full, large or plugin (default quick).
+    #[arg(long, default_value = "quick")]
+    suite: String,
+    /// Program names or class/name (repeat the flag or pass several values).
+    #[arg(long, num_args = 1.., action = clap::ArgAction::Append)]
+    program: Vec<String>,
+    /// Configuration name for side A (default `default`).
+    #[arg(long)]
+    a_config: Option<String>,
+    /// Configuration name for side B (default `default`).
+    #[arg(long)]
+    b_config: Option<String>,
+    /// rustc.wasm for side A (default: the toolchain's).
+    #[arg(long)]
+    a_rustc: Option<PathBuf>,
+    /// rustc.wasm for side B (default: the toolchain's).
+    #[arg(long)]
+    b_rustc: Option<PathBuf>,
+    /// A/B rounds; the order is A, B, A, B per program (default 3).
+    #[arg(long, default_value_t = 3)]
+    runs: usize,
+    /// Output directory (defaults to toolchain/work/bench/ab-<timestamp>).
+    #[arg(long)]
+    out: Option<PathBuf>,
+    /// Idle threshold as a fraction of one core (0.10 = 10%).
+    #[arg(long, default_value_t = idle::DEFAULT_IDLE_THRESHOLD_FRACTION)]
+    idle_threshold: f64,
 }
 
 #[derive(Args)]
@@ -198,11 +263,25 @@ fn main() -> Result<()> {
         Command::Report(args) => report_command(args),
         Command::Toolchain(args) => toolchain_command(&args),
         Command::Chart(args) => chart_command(&args),
+        Command::Ab(args) => ab_command(&args),
+        Command::Calibrate(args) => calibrate_command(args),
     }
 }
 
 fn run_command(args: RunArgs) -> Result<()> {
     let toolchain = args.toolchain.resolve()?;
+    let calibration = match &args.calibration {
+        Some(path) => {
+            let previous = result::load_result(path)?;
+            Some(previous.calibration.with_context(|| {
+                format!(
+                    "{} has no calibration; run `cogwasm-bench calibrate` first",
+                    path.display()
+                )
+            })?)
+        }
+        None => None,
+    };
     let spec = args
         .spec
         .as_deref()
@@ -252,6 +331,11 @@ fn run_command(args: RunArgs) -> Result<()> {
         runs,
         out_dir,
         fuel,
+        mode: args.mode,
+        wait_idle_seconds: args.wait_idle,
+        idle_threshold_fraction: args.idle_threshold,
+        calibrate: args.calibrate,
+        calibration,
     };
     let artifact = result::run(&toolchain, &options)?;
     if let Some(chart_out) = chart_out {
@@ -306,11 +390,13 @@ fn run_command(args: RunArgs) -> Result<()> {
 
 fn summary(result: &result::BenchResult) -> String {
     let mut text = format!(
-        "cogwasm-bench {}: {} program(s), {} config(s), {} runs\n",
+        "cogwasm-bench {}: {} program(s), {} config(s), {} runs\n  regime: {} ({})\n",
         result.suite,
         result.programs.len(),
         result.settings.configs.len(),
-        result.settings.runs
+        result.settings.runs,
+        result.regime.as_str(),
+        result.regime_reason
     );
     for (config, set) in &result.geomeans.by_config {
         let _ = writeln!(
@@ -330,6 +416,54 @@ fn summary(result: &result::BenchResult) -> String {
                 .map_or_else(|| "—".to_owned(), |value| format!("{value:.2}")),
         );
     }
+    let idle = if result.idle.qualified() {
+        "qualified"
+    } else {
+        "not qualified"
+    };
+    writeln!(
+        text,
+        "  idle: {idle}; worst other-process CPU {}",
+        result.idle.worst_fraction().map_or_else(
+            || "unavailable".to_owned(),
+            |fraction| format!("{:.1}% of one core", fraction * 100.0)
+        )
+    )
+    .expect("writing to a String cannot fail");
+    for estimate in &result.estimates {
+        writeln!(
+            text,
+            "  estimate {:?} / {} {}: ~{:.1} ms (± {:.1} ms, fit class {}, n={})",
+            estimate.program,
+            estimate.config,
+            estimate.kind,
+            estimate.estimate.wall_ms,
+            estimate.estimate.error_ms,
+            estimate.estimate.fit_program_class,
+            estimate.estimate.fit_samples
+        )
+        .expect("writing to a String cannot fail");
+    }
+    if !result.estimates.is_empty() {
+        writeln!(
+            text,
+            "  estimates: inferred from the stored calibration, not measured wall time"
+        )
+        .expect("writing to a String cannot fail");
+    }
+    if let Some(calibration) = &result.calibration {
+        writeln!(
+            text,
+            "  calibration: {} ({} fit(s))",
+            if calibration.idle_qualified {
+                "idle-qualified"
+            } else {
+                "NOT idle-qualified; run calibrate on an idle machine"
+            },
+            calibration.fits.len()
+        )
+        .expect("writing to a String cannot fail");
+    }
     if let Some(warning) = &result.machine.load_warning {
         writeln!(text, "  warning: {warning}").expect("writing to a String cannot fail");
     }
@@ -337,16 +471,77 @@ fn summary(result: &result::BenchResult) -> String {
     text
 }
 
+fn calibrate_command(mut args: CalibrateArgs) -> Result<()> {
+    args.run.mode = idle::BenchMode::Full;
+    args.run.calibrate = true;
+    args.run.calibration = None;
+    run_command(args.run)
+}
+
+fn ab_command(args: &AbArgs) -> Result<()> {
+    let toolchain = args.toolchain.resolve()?;
+    let suite = programs::Suite::parse(&args.suite)?;
+    let a_config = args
+        .a_config
+        .clone()
+        .unwrap_or_else(|| "default".to_owned());
+    let b_config = args
+        .b_config
+        .clone()
+        .unwrap_or_else(|| "default".to_owned());
+    let label = |config: &str, rustc: &Option<PathBuf>| {
+        rustc.as_ref().map_or_else(
+            || config.to_owned(),
+            |path| format!("{config} ({})", path.display()),
+        )
+    };
+    let options = ab::AbOptions {
+        suite,
+        programs: args.program.clone(),
+        a: ab::AbSide {
+            label: label(&a_config, &args.a_rustc),
+            config: build::Config::parse(&a_config)?,
+            rustc: args.a_rustc.clone(),
+        },
+        b: ab::AbSide {
+            label: label(&b_config, &args.b_rustc),
+            config: build::Config::parse(&b_config)?,
+            rustc: args.b_rustc.clone(),
+        },
+        rounds: args.runs,
+        out_dir: args.out.clone().unwrap_or_else(|| {
+            toolchain
+                .work_root
+                .join("bench")
+                .join(format!("ab-{}", util::utc_timestamp()))
+        }),
+        idle_threshold_fraction: args.idle_threshold,
+    };
+    let path = ab::run(&toolchain, &options)?;
+    println!("wrote {}", path.display());
+    let document: ab::AbDocument = serde_json::from_slice(&std::fs::read(&path)?)?;
+    if document.definitive {
+        println!("definitive: every A/B round was idle-qualified");
+    } else {
+        eprintln!(
+            "[cogwasm-bench] A/B is NOT definitive: at least one round was not idle-qualified"
+        );
+    }
+    Ok(())
+}
+
 fn compare_command(args: &CompareArgs) -> Result<()> {
     let baseline = result::load_result(&args.baseline)?;
     let current = result::load_result(&args.current)?;
-    let comparison = compare::compare(&baseline, &current);
+    let comparison = compare::compare_with_tolerance(&baseline, &current, args.counter_tolerance);
     print!(
         "{}",
-        compare::render(
+        compare::render_with_results(
             &comparison,
             &args.baseline.display().to_string(),
-            &args.current.display().to_string()
+            &args.current.display().to_string(),
+            Some(&baseline),
+            Some(&current),
         )
     );
     if args.fail_on_regression && comparison.has_regressions() {
