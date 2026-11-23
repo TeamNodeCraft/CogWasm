@@ -35,7 +35,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -301,7 +300,7 @@ def parse_profile(stem: Path) -> tuple[dict[str, float], dict[str, float]]:
         parts = line.split(None, 3)
         if len(parts) < 4:
             continue
-        nanos, _count, kind, rest = parts
+        nanos, _count, _kind, rest = parts
         match = re.match(r'^(\S+)(?: \["([^"]*)"\])?$', rest)
         if not match:
             continue
