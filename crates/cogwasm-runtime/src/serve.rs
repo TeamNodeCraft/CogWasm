@@ -196,12 +196,9 @@ pub fn add_serve_imports<R: SpawnRecorder>(linker: &mut Linker<HostState<R>>) ->
                         NextRequest::Write(bytes) => bytes.to_vec(),
                     }
                 };
-                let length = match i32::try_from(request.len()) {
-                    Ok(length) => length,
-                    Err(_) => {
-                        eprintln!("[cogwasm-runtime] request is larger than 2 GiB");
-                        return 0;
-                    }
+                let Ok(length) = i32::try_from(request.len()) else {
+                    eprintln!("[cogwasm-runtime] request is larger than 2 GiB");
+                    return 0;
                 };
                 let memory = match guest_memory(&mut caller) {
                     Ok(memory) => memory,
