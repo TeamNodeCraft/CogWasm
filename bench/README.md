@@ -109,6 +109,75 @@ BENCH_LLVM_RUSTC=/path/to/old/.../rustup/toolchains/nightly-2026-10-19-.../bin/r
 bench/run.sh --full --out bench/history/<machine>-<commit>.json
 ```
 
+## Rust benchmark tool (`cogwasm-bench`)
+
+The V2 benchmark driver is a Rust binary in
+[`crates/cogwasm-bench`](../crates/cogwasm-bench). It needs no Python: it
+prepares the suite sources, builds the ~100k-line `large` program with a Rust
+port of `gen_large.py`, and writes the machine-readable result and Markdown
+report itself. Toolchain paths default to `toolchain/` and every one can be
+overridden (`--toolchain`, `--rustc`, `--precompiled`, `--sysroot`, `--wild`,
+`--native-rustc`, `--cache-dir`, `--work-root`, `--deps-root`).
+
+```sh
+# CI-sized run with the default and capture configs side by side
+cargo run -p cogwasm-bench -- run --suite quick --runs 3 \
+    --config default --config capture
+
+# All bench/programs, or only the four plugin-sized medium programs
+cargo run -p cogwasm-bench -- run --suite full --runs 5
+cargo run -p cogwasm-bench -- run --suite plugin --runs 5
+
+# Generate and measure the ~100k-line (98k-line) program
+cargo run -p cogwasm-bench -- run --suite large --runs 3
+
+# Spread-aware comparison; exit 1 only with --fail-on-regression
+cargo run -p cogwasm-bench -- compare baseline.json current.json
+cargo run -p cogwasm-bench -- compare --fail-on-regression base.json new.json
+
+# Re-render the Markdown, or measure the toolchain footprint only (fast)
+cargo run -p cogwasm-bench -- report result.json
+cargo run -p cogwasm-bench -- toolchain
+```
+
+`run` writes `result.json` and `report.md` under
+`toolchain/work/bench/<timestamp>/` by default (git-ignored; use `--out` to
+choose another directory). The JSON has a versioned schema (`schema: 1`) with
+the machine and load average, compiler identity (rustc.wasm SHA-256 and git
+commit), the toolchain footprint, and per program x config measurements. Every
+numeric measurement carries `min`, `median`, `max`, `runs` and a `deterministic`
+flag; instruction counts, compiler fuel and sizes are exact, wall-clock
+metrics are not. The report has one table per section, suite geomeans and the
+V2 target table from [`agents/plans/v2.md`](../agents/plans/v2.md), filled only
+where the run collected a value.
+
+Configs are `default`, `inline` (`-Zmir-inline-wasm`), `capture`
+(`-Zmir-inline-wasm -Zmir-capture-hoist`) and `cgu-per-fn`
+(`-Zcogwasm-cgu-per-fn`, incremental only). `--runs N` is both the execution
+samples per seed and the number of measured edits. Compiler fuel uses a
+separate fuel-enabled engine and is measured twice per program x config; the
+run fails if the two samples differ. The edit loop verifies every warm edit
+against a fresh cold compile byte for byte, using the same artifact basename so
+Wild's module-name byte cannot create a false mismatch.
+
+Builds run in one fixed directory, `toolchain/work/bench/.work/`, cleared at
+the start of each run, because rustc's fuel depends on the length of the paths
+it handles: with a fixed path, fuel is exact across runs and output
+directories. Run one benchmark at a time. Edit-loop swaps use the supervisor's
+swap engine (parallel compilation and the in-memory incremental cache), so
+`edit swap ms` matches `cogwasm-supervisor edit-loop`. `compare` treats a
+single-sample reading (host RSS, peak memory) as changed only beyond 5%;
+`--runs 5` or more gives tighter timing spreads on a shared machine.
+
+The tool intentionally does not read or call the Python scripts or write into
+`bench/results` or `bench/gap/results`; all of its own output lives under
+`toolchain/work/`. Local unit tests need no toolchain
+(`cargo test -p cogwasm-bench`). The end-to-end test is opt-in:
+
+```sh
+COGWASM_REQUIRE_TOOLCHAIN=1 cargo test -p cogwasm-bench --test toolchain
+```
+
 ## Correctness gate
 
 Before a timing is recorded, the suite runs the Cranelift module and both LLVM

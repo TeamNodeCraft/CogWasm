@@ -50,7 +50,8 @@ pub struct WasmtimeRuntime {
 ///   [`InMemoryCacheStore`] behind
 ///   [`Config::enable_incremental_compilation`], so every function is compiled
 ///   again on every swap.
-fn build_engine() -> Engine {
+#[must_use]
+pub fn build_engine() -> Engine {
     let mut config = Config::new();
     config.parallel_compilation(env_enabled("COGWASM_SWAP_PARALLEL"));
     if env_enabled("COGWASM_SWAP_INCREMENTAL") {

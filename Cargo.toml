@@ -11,6 +11,7 @@ members = [
     "crates/cogwasm-runtime",
     "crates/cogwasm-host",
     "crates/cogwasm-supervisor",
+    "crates/cogwasm-bench",
     "crates/difftest-host",
     "bench/host",
     "bench/gap",
