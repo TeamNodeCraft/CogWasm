@@ -17,6 +17,15 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Instant;
 use wasmtime::{Caller, Linker};
 
+/// Native counters read from a child process just before it is reaped.
+#[derive(Serialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ChildCounters {
+    /// Instructions retired by the child, when the platform reports them.
+    pub instructions: Option<u64>,
+    /// CPU cycles, informational.
+    pub cycles: Option<u64>,
+}
+
 /// One `playground.spawn` invocation, as reported in host JSON output.
 #[derive(Serialize, Clone, Debug)]
 pub struct SpawnSummary {
@@ -28,13 +37,32 @@ pub struct SpawnSummary {
     pub ms: f64,
     /// Exit status, or -1 when the linker could not be started.
     pub status: i32,
+    /// Instructions retired by the child, when the platform reports them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<u64>,
+    /// CPU cycles, informational.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cycles: Option<u64>,
 }
 
 /// Policy hook called after every completed spawn.
 pub trait SpawnRecorder: Send + 'static {
     /// Record one invocation. `argv` is the complete argument vector,
     /// including the program name the guest supplied first.
-    fn record(&self, argv: &[String], ms: f64, status: i32);
+    fn record(&self, argv: &[String], ms: f64, status: i32, counters: ChildCounters);
+
+    /// A child process was started. The default opens the Linux perf events
+    /// that must exist before the child exits; macOS needs no setup.
+    fn child_started(&self, pid: u32) {
+        observe_child(pid);
+    }
+
+    /// Read a child's native counters. Called after the child has exited but
+    /// before it is reaped, so `proc_pid_rusage` can still see it, or so the
+    /// Linux perf descriptors can be read and closed.
+    fn child_counters(&self, pid: u32) -> ChildCounters {
+        read_child(pid)
+    }
 
     /// Whether [`add_playground_spawn`] should print the one-line per-spawn
     /// summary. The product host does; the benchmark host keeps its stderr
@@ -62,6 +90,8 @@ pub struct ArgvRecord {
     pub ms: f64,
     /// Exit status, or -1 when the linker could not be started.
     pub status: i32,
+    /// Native counters sampled from the child before it was reaped.
+    pub counters: ChildCounters,
 }
 
 /// The product host's recorder: keeps the full argv of every spawn.
@@ -78,11 +108,12 @@ impl ArgvRecorder {
 }
 
 impl SpawnRecorder for ArgvRecorder {
-    fn record(&self, argv: &[String], ms: f64, status: i32) {
+    fn record(&self, argv: &[String], ms: f64, status: i32, counters: ChildCounters) {
         locked(&self.records).push(ArgvRecord {
             argv: argv.to_vec(),
             ms,
             status,
+            counters,
         });
     }
 
@@ -102,6 +133,8 @@ impl SpawnRecorder for ArgvRecorder {
                 args: record.argv.len().saturating_sub(1),
                 ms: record.ms,
                 status: record.status,
+                instructions: record.counters.instructions,
+                cycles: record.counters.cycles,
             })
             .collect()
     }
@@ -121,12 +154,14 @@ impl SummaryRecorder {
 }
 
 impl SpawnRecorder for SummaryRecorder {
-    fn record(&self, argv: &[String], ms: f64, status: i32) {
+    fn record(&self, argv: &[String], ms: f64, status: i32, counters: ChildCounters) {
         locked(&self.summaries).push(SpawnSummary {
             program: argv.first().cloned().unwrap_or_default(),
             args: argv.len().saturating_sub(1),
             ms,
             status,
+            instructions: counters.instructions,
+            cycles: counters.cycles,
         });
     }
 
@@ -206,20 +241,39 @@ fn spawn_impl<R: SpawnRecorder>(
     // The rustc patch puts the linker program name first. Run native Wild on
     // the remaining arguments, inheriting stdio and the filesystem view.
     let started = Instant::now();
-    let status = Command::new(linker)
+    let mut counters = ChildCounters::default();
+    let status = match Command::new(linker)
         .args(args.iter().skip(1))
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
-        .status();
+        .spawn()
+    {
+        Ok(mut child) => {
+            let pid = child.id();
+            let recorder = caller.data().recorder();
+            recorder.child_started(pid);
+            // Wait for the child to exit without reaping it, so its rusage
+            // (instructions and cycles) can still be read. If `waitid` is not
+            // available, `child.wait` below still reaps it and the counters
+            // stay unavailable rather than becoming invented values.
+            let waited = wait_without_reaping(pid);
+            counters = recorder.child_counters(pid);
+            if let Err(error) = waited {
+                eprintln!("{log_prefix} cannot wait for the linker without reaping it: {error}");
+            }
+            child.wait()
+        }
+        Err(error) => {
+            eprintln!("{log_prefix} cannot run {}: {error}", linker.display());
+            Err(error)
+        }
+    };
     let ms = started.elapsed().as_secs_f64() * 1e3;
     let code = match status {
         Ok(status) if status.success() => 0,
         Ok(status) => status.code().unwrap_or(-1),
-        Err(error) => {
-            eprintln!("{log_prefix} cannot run {}: {error}", linker.display());
-            -1
-        }
+        Err(_) => -1,
     };
     let recorder = caller.data().recorder();
     if recorder.log_summary() {
@@ -229,8 +283,187 @@ fn spawn_impl<R: SpawnRecorder>(
             args.len().saturating_sub(1)
         );
     }
-    recorder.record(&args, ms, code);
+    recorder.record(&args, ms, code, counters);
     Ok(code)
+}
+
+/// Wait for `pid` to exit without reaping it.
+#[cfg(unix)]
+fn wait_without_reaping(pid: u32) -> std::io::Result<()> {
+    let mut info = std::mem::MaybeUninit::<libc::siginfo_t>::zeroed();
+    let id = pid as libc::id_t;
+    // SAFETY: `info` is a writable `siginfo_t`; `waitid` initialises it and
+    // does not retain it. `WNOWAIT` leaves the child waitable for the later
+    // `Child::wait` that reaps it.
+    let status = unsafe {
+        libc::waitid(
+            libc::P_PID,
+            id,
+            info.as_mut_ptr(),
+            libc::WEXITED | libc::WNOWAIT,
+        )
+    };
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(not(unix))]
+fn wait_without_reaping(_pid: u32) -> std::io::Result<()> {
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn observe_child(_pid: u32) {}
+
+/// Read `ri_instructions`/`ri_cycles` from a child that has exited but not yet
+/// been reaped.
+#[cfg(target_os = "macos")]
+fn read_child(pid: u32) -> ChildCounters {
+    let pid = pid as libc::pid_t;
+    let mut info = std::mem::MaybeUninit::<libc::rusage_info_v4>::zeroed();
+    // SAFETY: `info` is a writable, correctly sized `rusage_info_v4` buffer.
+    // `proc_pid_rusage` writes at most `sizeof(rusage_info_v4)` bytes for
+    // `RUSAGE_INFO_V4`, does not retain the pointer, and returns a non-zero
+    // status instead of filling the buffer on failure.
+    let status = unsafe {
+        libc::proc_pid_rusage(
+            pid,
+            libc::RUSAGE_INFO_V4,
+            info.as_mut_ptr().cast::<libc::rusage_info_t>(),
+        )
+    };
+    if status != 0 {
+        return ChildCounters::default();
+    }
+    // SAFETY: a zero status means the buffer was initialised.
+    let info = unsafe { info.assume_init() };
+    ChildCounters {
+        instructions: Some(info.ri_instructions),
+        cycles: Some(info.ri_cycles),
+    }
+}
+
+#[cfg(target_os = "linux")]
+static PERF_FDS: Mutex<Vec<(u32, i32)>> = Mutex::new(Vec::new());
+
+#[cfg(target_os = "linux")]
+#[repr(C)]
+struct PerfEventAttr {
+    type_: u32,
+    size: u32,
+    config: u64,
+    sample_period: u64,
+    sample_type: u64,
+    read_format: u64,
+    flags: u64,
+    wakeup_events: u32,
+    bp_type: u32,
+    config1: u64,
+    config2: u64,
+}
+
+#[cfg(target_os = "linux")]
+fn perf_open(pid: u32, config: u64) -> Option<i32> {
+    const TYPE_HARDWARE: u32 = 0;
+    // inherit (bit 1), exclude_hv (bit 6).
+    const FLAGS: u64 = (1 << 1) | (1 << 6);
+    let mut attr = PerfEventAttr {
+        type_: TYPE_HARDWARE,
+        size: u32::try_from(std::mem::size_of::<PerfEventAttr>()).ok()?,
+        config,
+        sample_period: 0,
+        sample_type: 0,
+        read_format: 0,
+        flags: FLAGS,
+        wakeup_events: 0,
+        bp_type: 0,
+        config1: 0,
+        config2: 0,
+    };
+    #[expect(
+        clippy::cast_possible_wrap,
+        reason = "perf_event_open takes a pid_t and Linux process ids fit"
+    )]
+    let raw_pid = pid as libc::pid_t;
+    // SAFETY: `attr` is a valid `perf_event_attr` whose `size` is its own byte
+    // length; the other arguments are integers. A negative return is an error
+    // reported through errno.
+    let fd = unsafe {
+        libc::syscall(
+            libc::SYS_perf_event_open,
+            &raw mut attr,
+            raw_pid,
+            -1_i32,
+            -1_i32,
+            0_u64,
+        )
+    };
+    i32::try_from(fd).ok().filter(|fd| *fd >= 0)
+}
+
+#[cfg(target_os = "linux")]
+fn observe_child(pid: u32) {
+    for config in [1_u64, 0_u64] {
+        if let Some(fd) = perf_open(pid, config) {
+            locked(&PERF_FDS).push((pid, fd));
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn read_child(pid: u32) -> ChildCounters {
+    let mut fds = Vec::new();
+    {
+        let mut observed = locked(&PERF_FDS);
+        let mut index = 0;
+        while index < observed.len() {
+            if observed[index].0 == pid {
+                fds.push(observed.swap_remove(index).1);
+            } else {
+                index += 1;
+            }
+        }
+    }
+    let mut instructions = None;
+    let mut cycles = None;
+    for fd in fds {
+        let mut value = 0_u64;
+        // SAFETY: `value` is a writable u64 and `read` writes at most its size.
+        let count = unsafe {
+            libc::read(
+                fd,
+                (&raw mut value).cast::<libc::c_void>(),
+                std::mem::size_of::<u64>(),
+            )
+        };
+        // SAFETY: the descriptor came from `perf_event_open` above and is
+        // closed exactly once here.
+        unsafe { libc::close(fd) };
+        if count == i64::try_from(std::mem::size_of::<u64>()).unwrap_or(0) {
+            // The first descriptor is instructions, the second cycles; the
+            // order comes from `observe_child`.
+            if instructions.is_none() {
+                instructions = Some(value);
+            } else {
+                cycles = Some(value);
+            }
+        }
+    }
+    ChildCounters {
+        instructions,
+        cycles,
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn observe_child(_pid: u32) {}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn read_child(_pid: u32) -> ChildCounters {
+    ChildCounters::default()
 }
 
 #[cfg(test)]
@@ -240,7 +473,12 @@ mod tests {
     #[test]
     fn argv_recorder_keeps_every_argument() {
         let recorder = ArgvRecorder::default();
-        recorder.record(&["wild".to_owned(), "-o".to_owned()], 1.5, 0);
+        recorder.record(
+            &["wild".to_owned(), "-o".to_owned()],
+            1.5,
+            0,
+            ChildCounters::default(),
+        );
         let records = recorder.records();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].argv, ["wild", "-o"]);
@@ -252,7 +490,12 @@ mod tests {
     #[test]
     fn summary_recorder_keeps_program_and_count() {
         let recorder = SummaryRecorder::default();
-        recorder.record(&["wild".to_owned(), "-o".to_owned()], 1.5, 0);
+        recorder.record(
+            &["wild".to_owned(), "-o".to_owned()],
+            1.5,
+            0,
+            ChildCounters::default(),
+        );
         let summaries = recorder.summaries();
         assert_eq!(summaries.len(), 1);
         assert_eq!(summaries[0].program, "wild");
@@ -260,6 +503,29 @@ mod tests {
         assert_eq!(summaries[0].ms, 1.5);
         assert_eq!(summaries[0].status, 0);
         assert!(!recorder.log_summary());
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn child_counters_are_read_before_the_child_is_reaped() {
+        let recorder = SummaryRecorder::default();
+        let mut child = std::process::Command::new("/bin/sh")
+            .args(["-c", "for i in $(seq 1 2000); do :; done"])
+            .spawn()
+            .expect("spawn a child");
+        let pid = child.id();
+        recorder.child_started(pid);
+        wait_without_reaping(pid).expect("waitid WNOWAIT");
+        let counters = recorder.child_counters(pid);
+        assert!(child.wait().expect("reap").success());
+        if cfg!(target_os = "macos") {
+            assert!(
+                counters.instructions.is_some(),
+                "child instructions missing"
+            );
+        }
+        // Linux may deny perf_event_open; both fields are then None, which is
+        // the documented "unavailable" case rather than a zero.
     }
 
     #[test]
@@ -270,7 +536,7 @@ mod tests {
             panic!("poison the spawn log");
         }));
         assert!(poisoned.is_err());
-        recorder.record(&["wild".to_owned()], 0.0, 0);
+        recorder.record(&["wild".to_owned()], 0.0, 0, ChildCounters::default());
         assert_eq!(recorder.records().len(), 1);
     }
 }

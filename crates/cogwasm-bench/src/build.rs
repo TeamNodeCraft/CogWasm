@@ -1,13 +1,15 @@
 //! Build-speed measurements: cold and resident warm compiles, the edit loop,
 //! rustc's `-Ztime-passes` breakdown and deterministic compiler fuel.
 
+use crate::counters::{self, CounterReading};
 use crate::exec::BenchRuntime;
+use crate::idle::{IdleMonitor, IdleSample};
 use crate::programs::{DependencySet, Program, externs_for, search_paths};
-use crate::stats::Metric;
+use crate::stats::{Metric, MetricClass};
 use crate::toolchain::Toolchain;
 use crate::util;
 use anyhow::{Context, Result, anyhow, bail};
-use cogwasm_host::{Compiler, ServeSession};
+use cogwasm_host::{CompileOutcome, Compiler, ServeSession};
 use cogwasm_runtime::{Limits, StoreOptions, SummaryRecorder, prepare_instance};
 use cogwasm_supervisor::{
     Artifact, ArtifactMeta, CompileOptions, CrateKind, Swapper, apply_edit, probe_value,
@@ -110,6 +112,21 @@ pub struct EditRow {
     pub swap_ms: f64,
     pub call_ms: f64,
     pub edit_to_result_ms: f64,
+    /// Instructions retired by the Wild child during this edit's link.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link_instructions: Option<u64>,
+    /// CPU cycles for this edit's link, informational.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link_cycles: Option<u64>,
+    /// Instructions retired compiling and instantiating the swapped module.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub swap_instructions: Option<u64>,
+    /// CPU cycles for the Wasmtime swap compile, informational.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub swap_cycles: Option<u64>,
+    /// Compiler fuel for this edit, from the separate untimed fuel pass.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fuel: Option<u64>,
 }
 
 /// The edit-to-result summary, including the p50/p90 the V2 plan asks for.
@@ -124,6 +141,21 @@ pub struct EditSummary {
     pub build_no_link_ms: Metric,
     pub swap_ms: Metric,
     pub call_ms: Metric,
+    /// Instructions retired by every Wild link in the edit loop.
+    #[serde(default)]
+    pub link_instructions: Metric,
+    /// CPU cycles for those links, informational.
+    #[serde(default)]
+    pub link_cycles: Metric,
+    /// Instructions retired compiling and instantiating the swapped modules.
+    #[serde(default)]
+    pub swap_instructions: Metric,
+    /// CPU cycles for those Wasmtime compiles, informational.
+    #[serde(default)]
+    pub swap_cycles: Metric,
+    /// Deterministic fuel per edit, from the untimed fuel pass.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fuel: Option<FuelMeasurement>,
     pub edits: Vec<EditRow>,
     pub byte_identical_to_cold: bool,
 }
@@ -162,10 +194,62 @@ pub struct BuildMeasurement {
     pub phases: PhaseBreakdown,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fuel: Option<FuelMeasurement>,
+    /// Fuel for the resident warm compile, from the untimed fuel pass.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warm_fuel: Option<FuelMeasurement>,
+    /// Native CPU counters for the Wild link and the host process.
+    #[serde(default)]
+    pub native: NativeMeasurement,
     pub incremental_dir_bytes: u64,
     pub incremental_files: u64,
     pub intermediate_object_files: u64,
     pub intermediate_objects_bytes: u64,
+}
+
+/// Native CPU counters for one build. Every field is a [`MetricClass::Counter`]
+/// metric, or an unavailable metric when the platform refused the counter.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NativeMeasurement {
+    /// Instructions retired by this host process over the whole build.
+    pub host_instructions: Metric,
+    /// CPU cycles for the host process, informational.
+    pub host_cycles: Metric,
+    /// Instructions retired by the Wild child in the cold compile.
+    pub cold_link_instructions: Metric,
+    /// CPU cycles for the cold Wild link.
+    pub cold_link_cycles: Metric,
+    /// Instructions retired by the Wild children in the warm compiles.
+    pub warm_link_instructions: Metric,
+    /// CPU cycles for the warm Wild links.
+    pub warm_link_cycles: Metric,
+}
+
+impl Default for NativeMeasurement {
+    fn default() -> Self {
+        let reason = format!("{} unavailable", counters::method());
+        Self {
+            host_instructions: Metric::unavailable(MetricClass::Counter, reason.clone()),
+            host_cycles: Metric::unavailable(MetricClass::Counter, reason.clone()),
+            cold_link_instructions: Metric::unavailable(MetricClass::Counter, reason.clone()),
+            cold_link_cycles: Metric::unavailable(MetricClass::Counter, reason.clone()),
+            warm_link_instructions: Metric::unavailable(MetricClass::Counter, reason.clone()),
+            warm_link_cycles: Metric::unavailable(MetricClass::Counter, reason),
+        }
+    }
+}
+
+impl NativeMeasurement {
+    /// The native *instruction* counters, the ones that drive comparisons.
+    /// Cycles are informational and are stored but never decide a regression:
+    /// CPU frequency and scheduling move them even when the work is identical.
+    #[must_use]
+    pub fn iter(&self) -> [(&'static str, &Metric); 3] {
+        [
+            ("host_instructions", &self.host_instructions),
+            ("cold_link_instructions", &self.cold_link_instructions),
+            ("warm_link_instructions", &self.warm_link_instructions),
+        ]
+    }
 }
 
 /// The build measurement plus the output module execution and size consume.
@@ -187,6 +271,11 @@ pub struct BuildRequest<'a> {
     pub work: PathBuf,
     pub runs: usize,
     pub seeds: &'a [u64],
+    /// Idle monitor for wall-clock windows; never used for fuel or counters.
+    pub idle: &'a IdleMonitor,
+    /// False in counters mode: skip the extra wall-clock repeats and the
+    /// `-Ztime-passes` runs, and mark the remaining wall metrics unqualified.
+    pub timed: bool,
 }
 
 /// Build the rustc argv for one compile.
@@ -255,6 +344,8 @@ struct FreshResult {
     peak_bytes: u64,
     stderr: String,
     fuel_used: Option<u64>,
+    /// Native counters summed over every Wild child this compile spawned.
+    link_counters: CounterReading,
 }
 
 #[expect(
@@ -310,6 +401,15 @@ fn run_fresh(
         .transpose()?;
     let spawns = store.data().recorder().summaries();
     let link_ms: f64 = spawns.iter().map(|spawn| spawn.ms).sum();
+    let link_counters = CounterReading::sum(
+        &spawns
+            .iter()
+            .map(|spawn| CounterReading {
+                instructions: spawn.instructions,
+                cycles: spawn.cycles,
+            })
+            .collect::<Vec<_>>(),
+    );
     let peak_pages = instance
         .get_memory(&mut store, "memory")
         .map_or(0, |memory| memory.size(&store))
@@ -339,6 +439,9 @@ fn run_fresh(
     if spawns.iter().any(|spawn| spawn.status != 0) {
         bail!("linker failed: {spawns:?}");
     }
+    // Release the guest's WASI file table (including any incremental-compile
+    // session lock) before the next fresh compile starts.
+    drop(store);
     Ok(FreshResult {
         instantiate_ms,
         rustc_total_ms,
@@ -346,6 +449,7 @@ fn run_fresh(
         peak_bytes: peak_pages.saturating_mul(cogwasm_runtime::PAGE_SIZE),
         stderr: stderr.unwrap_or_default(),
         fuel_used,
+        link_counters,
     })
 }
 
@@ -372,8 +476,24 @@ impl ServeCompiler {
         linker: &Path,
         preopens: Vec<PathBuf>,
     ) -> Result<Self> {
+        Self::new_with_fuel(engine, module, linker, preopens, None)
+    }
+
+    /// A serving guest on a fuel-enabled engine. Each request reports the fuel
+    /// it consumed; the timed pass never uses this session.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the guest cannot start.
+    pub fn new_with_fuel(
+        engine: &Engine,
+        module: &Module,
+        linker: &Path,
+        preopens: Vec<PathBuf>,
+        fuel: Option<u64>,
+    ) -> Result<Self> {
         let started = Instant::now();
-        let session = ServeSession::new(engine, module, linker, &preopens)
+        let session = ServeSession::new_with_fuel(engine, module, linker, &preopens, fuel)
             .context("starting the rustc.wasm serve session")?;
         Ok(Self {
             engine: engine.clone(),
@@ -392,7 +512,7 @@ impl ServeCompiler {
     ///
     /// Returns an error when the guest rejects the compile; a dead session is
     /// replaced before the next request.
-    pub fn compile(&mut self, args: &[String]) -> Result<cogwasm_host::CompileOutcome> {
+    pub fn compile(&mut self, args: &[String]) -> Result<CompileOutcome> {
         if self.session.as_ref().is_none_or(ServeSession::is_dead) {
             self.session = Some(
                 ServeSession::new(&self.engine, &self.module, &self.linker, &self.preopens)
@@ -419,6 +539,23 @@ pub struct FuelCompiler {
 }
 
 impl FuelCompiler {
+    /// A fuel-enabled serving guest for an edit-fuel pass. One guest serves
+    /// the whole edit sequence so rustc's incremental session is reused; the
+    /// timed pass still uses its own resident guest.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the guest cannot start.
+    pub fn serve(&self, linker: &Path, preopens: Vec<PathBuf>) -> Result<ServeCompiler> {
+        ServeCompiler::new_with_fuel(
+            &self.engine,
+            &self.module,
+            linker,
+            preopens,
+            Some(FUEL_LIMIT),
+        )
+    }
+
     /// Create the fuel engine and load rustc.wasm. The first call is slow
     /// because fuel instrumentation changes the compiled code.
     ///
@@ -450,6 +587,7 @@ impl FuelCompiler {
     reason = "guest memory and host RSS are far below 2^53 bytes"
 )]
 pub fn measure_build(request: &mut BuildRequest<'_>) -> Result<BuildResult> {
+    let host_counter = counters::ProcessCounter::start();
     let config = request.config.clone();
     let name = request.program.def.name.clone();
     let dir = request.work.join("build").join(&name).join(&config.name);
@@ -477,6 +615,7 @@ pub fn measure_build(request: &mut BuildRequest<'_>) -> Result<BuildResult> {
         false,
         &config.flags,
     );
+    let cold_sample = request.timed.then(|| request.idle.window("cold"));
     let cold = run_fresh(
         request.compiler.engine(),
         request.compiler.module(),
@@ -489,6 +628,7 @@ pub fn measure_build(request: &mut BuildRequest<'_>) -> Result<BuildResult> {
             deterministic: false,
         },
     )?;
+    let cold_sample = cold_sample.map(|window| request.idle.finish(window));
     if !cold_out.is_file() {
         bail!(
             "cold compile of {name} reported success but wrote no {}",
@@ -496,28 +636,40 @@ pub fn measure_build(request: &mut BuildRequest<'_>) -> Result<BuildResult> {
         );
     }
 
-    let (warm_compile, warm_wall, warm_out) = measure_warm(request, &dir, &externs, &search)?;
+    let (warm_compile, warm_wall, warm_out, _warm_sample, warm_link_counters) =
+        measure_warm(request, &dir, &externs, &search)?;
 
-    let (edit, edit_wasm) = measure_edit_loop(request, &dir, &externs, &search)?;
+    let (mut edit, edit_wasm, edit_sample) = measure_edit_loop(request, &dir, &externs, &search)?;
     let incremental_dir = dir.join("incremental");
     let (incremental_files, incremental_dir_bytes) = count_files(&incremental_dir)?;
     let (intermediate_object_files, intermediate_objects_bytes) =
         util::files_with_extensions(&incremental_dir, &["o", "obj", "rlib", "rmeta"])?;
 
-    let (phases, peak_bytes) = measure_phases(request, &dir, &externs, &search)?;
-    let fuel = match request.fuel {
-        Some(fuel) => Some(measure_fuel(
-            fuel,
-            request.toolchain,
-            &source,
-            &name,
-            &externs,
-            &search,
-            &config,
-            &dir,
-        )?),
-        None => None,
+    let (phases, peak_bytes, phase_sample) = measure_phases(request, &dir, &externs, &search)?;
+    let (cold_fuel, warm_fuel, edit_fuel) = match request.fuel {
+        Some(fuel) => {
+            let cold = measure_cold_fuel(
+                fuel,
+                request.toolchain,
+                &source,
+                &name,
+                &externs,
+                &search,
+                &config,
+                &dir,
+            )?;
+            let warm = measure_warm_fuel(request, fuel, &dir, &externs, &search)?;
+            let edit = measure_edit_fuel(request, fuel, &dir, &externs, &search)?;
+            (Some(cold), Some(warm), Some(edit))
+        }
+        None => (None, None, None),
     };
+    if let Some(edit_fuel) = &edit_fuel {
+        edit.fuel = Some(edit_fuel.clone());
+        for (row, sample) in edit.edits.iter_mut().zip(&edit_fuel.samples) {
+            row.fuel = Some(*sample);
+        }
+    }
     let final_wasm = if config.incremental {
         edit_wasm
     } else {
@@ -532,26 +684,99 @@ pub fn measure_build(request: &mut BuildRequest<'_>) -> Result<BuildResult> {
         )
     })?;
 
+    let host = host_counter.finish();
+    if !host.is_available() {
+        eprintln!(
+            "[cogwasm-bench] native CPU counters unavailable ({}); counter metrics will be reported as unavailable",
+            counters::method()
+        );
+    }
+    let native = NativeMeasurement {
+        host_instructions: counter_metric(host.instructions, "host process"),
+        host_cycles: counter_metric(host.cycles, "host process"),
+        cold_link_instructions: counter_metric(cold.link_counters.instructions, "cold Wild link"),
+        cold_link_cycles: counter_metric(cold.link_counters.cycles, "cold Wild link"),
+        warm_link_instructions: counter_metric(warm_link_counters.instructions, "warm Wild link"),
+        warm_link_cycles: counter_metric(warm_link_counters.cycles, "warm Wild link"),
+    };
+
+    let cold_qualified = cold_sample.as_ref().is_some_and(|sample| sample.qualified);
     let measurement = BuildMeasurement {
-        cold_compile_ms: Metric::one(cold.compile_ms, false)?,
-        cold_wall_ms: Metric::one(cold.instantiate_ms + cold.rustc_total_ms, false)?,
+        cold_compile_ms: wall_metric(cold.compile_ms, cold_sample.as_ref())?,
+        cold_wall_ms: wall_metric(
+            cold.instantiate_ms + cold.rustc_total_ms,
+            cold_sample.as_ref(),
+        )?,
         warm_compile_ms: warm_compile,
         warm_wall_ms: warm_wall,
-        peak_guest_memory_bytes: Metric::one(peak_bytes.max(cold.peak_bytes) as f64, false)?,
+        peak_guest_memory_bytes: Metric::one(
+            peak_bytes.max(cold.peak_bytes) as f64,
+            MetricClass::Exact,
+        )?,
+        // Host RSS is a process high-water mark, not a per-build measurement:
+        // keep it in the noisy class so two runs are compared with the
+        // single-sample noise floor rather than exactly.
         host_rss_peak_bytes: util::peak_rss_bytes()
-            .map(|bytes| Metric::one(bytes as f64, false))
+            .map(|bytes| {
+                Metric::one(bytes as f64, MetricClass::Wall)
+                    .map(|metric| metric.with_idle_qualified(cold_qualified))
+            })
             .transpose()?,
         edit,
         phases,
-        fuel,
+        fuel: cold_fuel,
+        warm_fuel,
+        native,
         incremental_dir_bytes,
         incremental_files,
         intermediate_object_files,
         intermediate_objects_bytes,
     };
+    let _ = edit_sample;
+    let _ = phase_sample;
     Ok(BuildResult {
         measurement,
         wasm: final_path,
+    })
+}
+
+/// Build a wall metric and record whether its timed window was idle.
+fn wall_metric(value: f64, sample: Option<&IdleSample>) -> Result<Metric> {
+    Ok(Metric::one(value, MetricClass::Wall)?
+        .with_idle_qualified(sample.is_some_and(|sample| sample.qualified)))
+}
+
+/// A counter metric, or an explicit "unavailable" when the kernel refused it.
+fn counter_metric(value: Option<u64>, label: &str) -> Metric {
+    match value {
+        Some(value) => Metric::one(value as f64, MetricClass::Counter)
+            .unwrap_or_else(|_| Metric::unavailable(MetricClass::Counter, label)),
+        None => Metric::unavailable(
+            MetricClass::Counter,
+            format!("{label}: {} unavailable", counters::method()),
+        ),
+    }
+}
+
+/// A counter metric from per-edit samples; unavailable when any sample is.
+fn optional_counter_metric(values: &[Option<u64>], label: &str) -> Metric {
+    if values.is_empty() || values.iter().any(Option::is_none) {
+        return Metric::unavailable(
+            MetricClass::Counter,
+            format!("{label}: {} unavailable", counters::method()),
+        );
+    }
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "instruction counts are far below 2^53"
+    )]
+    let samples: Vec<f64> = values
+        .iter()
+        .filter_map(|value| *value)
+        .map(|v| v as f64)
+        .collect();
+    Metric::new(&samples, MetricClass::Counter).unwrap_or_else(|_| {
+        Metric::unavailable(MetricClass::Counter, format!("{label}: no samples"))
     })
 }
 
@@ -560,7 +785,7 @@ fn measure_warm(
     dir: &Path,
     externs: &[String],
     search: &[String],
-) -> Result<(Metric, Metric, PathBuf)> {
+) -> Result<(Metric, Metric, PathBuf, Option<IdleSample>, CounterReading)> {
     let name = &request.program.def.name;
     let config = request.config;
     let warm_incremental = config.incremental.then(|| dir.join("warm-incremental"));
@@ -606,10 +831,15 @@ fn measure_warm(
         &config.flags,
     );
     request.serve.compile(&warmup_args)?;
-    let mut compile_values = Vec::with_capacity(request.runs);
-    let mut wall_values = Vec::with_capacity(request.runs);
+    // Counters mode still needs one warm output, but it does not repeat the
+    // compile for a timing distribution. The wall value stays unqualified.
+    let samples = if request.timed { request.runs } else { 1 };
+    let window = request.timed.then(|| request.idle.window("warm"));
+    let mut compile_values = Vec::with_capacity(samples);
+    let mut wall_values = Vec::with_capacity(samples);
+    let mut links = Vec::with_capacity(samples);
     let mut final_out = warmup;
-    for index in 0..request.runs {
+    for index in 0..samples {
         let out = dir.join(format!("warm-{index}.wasm"));
         remove_file_if_exists(&out)?;
         let args = rustc_args(
@@ -629,13 +859,32 @@ fn measure_warm(
             .with_context(|| format!("warm compile {index} of {name}"))?;
         compile_values.push(outcome.compile_ms);
         wall_values.push(outcome.rustc_total_ms);
+        links.push(spawn_counters(&outcome));
         final_out = out;
     }
+    let sample = window.map(|window| request.idle.finish(window));
+    let qualified = sample.as_ref().is_some_and(|sample| sample.qualified);
     Ok((
-        Metric::new(&compile_values, false)?,
-        Metric::new(&wall_values, false)?,
+        Metric::new(&compile_values, MetricClass::Wall)?.with_idle_qualified(qualified),
+        Metric::new(&wall_values, MetricClass::Wall)?.with_idle_qualified(qualified),
         final_out,
+        sample,
+        CounterReading::sum(&links),
     ))
+}
+
+/// Native counters summed over one compile's Wild spawns.
+fn spawn_counters(outcome: &CompileOutcome) -> CounterReading {
+    CounterReading::sum(
+        &outcome
+            .spawns
+            .iter()
+            .map(|spawn| CounterReading {
+                instructions: spawn.instructions,
+                cycles: spawn.cycles,
+            })
+            .collect::<Vec<_>>(),
+    )
 }
 
 #[expect(
@@ -647,7 +896,7 @@ fn measure_edit_loop(
     dir: &Path,
     externs: &[String],
     search: &[String],
-) -> Result<(EditSummary, PathBuf)> {
+) -> Result<(EditSummary, PathBuf, Option<IdleSample>)> {
     let name = request.program.def.name.clone();
     let config = request.config;
     let incremental = dir.join("incremental");
@@ -684,7 +933,7 @@ fn measure_edit_loop(
         .compile(&cold_args)
         .with_context(|| format!("the edit loop's cold build of {name}"))?;
     let runtime = Arc::new(BenchRuntime::for_swaps()?);
-    let mut swapper = Swapper::new(runtime);
+    let mut swapper = Swapper::new(runtime.clone());
     let cold_artifact = artifact_from_file(&cold_out, &name)?;
     swapper.install(&cold_artifact)?;
     let seed = request.seeds.first().copied().unwrap_or(0);
@@ -695,6 +944,7 @@ fn measure_edit_loop(
     let mut rows = Vec::with_capacity(request.runs);
     let mut totals = Vec::with_capacity(request.runs);
     let mut final_wasm = cold_out;
+    let window = request.timed.then(|| request.idle.window("edit"));
     for offset in 0..request.runs {
         let index = offset + 1;
         let probe = u64::from(offset % 2 != 0);
@@ -742,7 +992,15 @@ fn measure_edit_loop(
         )]
         let link_rounded = outcome.link_ms.round() as u64;
         let artifact = artifact_from_bytes(bytes, &name, Some(link_rounded))?;
+        // Compile the swapped module explicitly so its counters can be read
+        // separately from instantiation. The timed `swap_ms` still includes the
+        // compile: it is the same work as before, just split into two calls.
+        let swap_counter = counters::ProcessCounter::start();
         let started = Instant::now();
+        runtime
+            .compile_swapped(&artifact)
+            .with_context(|| format!("compiling the edit {index} swap module"))?;
+        let swap_reading = swap_counter.finish();
         swapper.install(&artifact)?;
         let swap_ms = started.elapsed().as_secs_f64() * 1e3;
         let started = Instant::now();
@@ -758,6 +1016,7 @@ fn measure_edit_loop(
             expected.insert(probe, result);
         }
         let link_ms = outcome.link_ms;
+        let link_reading = spawn_counters(&outcome);
         let edit_to_result_ms = build_ms + swap_ms + call_ms;
         totals.push(edit_to_result_ms);
         rows.push(EditRow {
@@ -769,46 +1028,57 @@ fn measure_edit_loop(
             swap_ms,
             call_ms,
             edit_to_result_ms,
+            link_instructions: link_reading.instructions,
+            link_cycles: link_reading.cycles,
+            swap_instructions: swap_reading.instructions,
+            swap_cycles: swap_reading.cycles,
+            fuel: None,
         });
         final_wasm = out;
     }
+    let sample = window.map(|window| request.idle.finish(window));
+    let qualified = sample.as_ref().is_some_and(|sample| sample.qualified);
     let p50 = Metric::percentile(&totals, 0.5)?;
     let p90 = Metric::percentile(&totals, 0.9)?;
     let min = totals.iter().copied().fold(f64::INFINITY, f64::min);
     let max = totals.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let wall = |values: Vec<f64>| -> Result<Metric> {
+        Ok(Metric::new(&values, MetricClass::Wall)?.with_idle_qualified(qualified))
+    };
+    let edit_link_instructions = rows
+        .iter()
+        .map(|row| row.link_instructions)
+        .collect::<Vec<_>>();
+    let edit_link_cycles = rows.iter().map(|row| row.link_cycles).collect::<Vec<_>>();
+    let edit_swap_instructions = rows
+        .iter()
+        .map(|row| row.swap_instructions)
+        .collect::<Vec<_>>();
+    let edit_swap_cycles = rows.iter().map(|row| row.swap_cycles).collect::<Vec<_>>();
     Ok((
         EditSummary {
             p50_ms: p50,
             p90_ms: p90,
             min_ms: min,
             max_ms: max,
-            build_ms: Metric::new(
-                &rows.iter().map(|row| row.build_ms).collect::<Vec<_>>(),
-                false,
-            )?,
-            link_ms: Metric::new(
-                &rows.iter().map(|row| row.link_ms).collect::<Vec<_>>(),
-                false,
-            )?,
-            build_no_link_ms: Metric::new(
-                &rows
-                    .iter()
-                    .map(|row| row.build_no_link_ms)
-                    .collect::<Vec<_>>(),
-                false,
-            )?,
-            swap_ms: Metric::new(
-                &rows.iter().map(|row| row.swap_ms).collect::<Vec<_>>(),
-                false,
-            )?,
-            call_ms: Metric::new(
-                &rows.iter().map(|row| row.call_ms).collect::<Vec<_>>(),
-                false,
-            )?,
+            build_ms: wall(rows.iter().map(|row| row.build_ms).collect())?,
+            link_ms: wall(rows.iter().map(|row| row.link_ms).collect())?,
+            build_no_link_ms: wall(rows.iter().map(|row| row.build_no_link_ms).collect())?,
+            swap_ms: wall(rows.iter().map(|row| row.swap_ms).collect())?,
+            call_ms: wall(rows.iter().map(|row| row.call_ms).collect())?,
+            link_instructions: optional_counter_metric(&edit_link_instructions, "edit Wild links"),
+            link_cycles: optional_counter_metric(&edit_link_cycles, "edit Wild links"),
+            swap_instructions: optional_counter_metric(
+                &edit_swap_instructions,
+                "Wasmtime swap compiles",
+            ),
+            swap_cycles: optional_counter_metric(&edit_swap_cycles, "Wasmtime swap compiles"),
+            fuel: None,
             edits: rows,
             byte_identical_to_cold: true,
         },
         final_wasm,
+        sample,
     ))
 }
 
@@ -873,9 +1143,13 @@ fn measure_phases(
     dir: &Path,
     externs: &[String],
     search: &[String],
-) -> Result<(PhaseBreakdown, u64)> {
+) -> Result<(PhaseBreakdown, u64, Option<IdleSample>)> {
     let name = &request.program.def.name;
     let config = request.config;
+    if !request.timed {
+        return Ok((phase_breakdown_unavailable(), 0, None));
+    }
+    let window = request.idle.window("phases");
     // The cold phase run has every top-level timer (parse, expansion, type
     // check, codegen, link); an incremental run often reports only the queries
     // that actually re-executed, so it is used only for the incremental
@@ -941,14 +1215,20 @@ fn measure_phases(
     .with_context(|| format!("incremental phase run for {name}"))?;
     let incremental_phases = phase_breakdown(&parse_time_passes(&fresh.stderr))?;
     phases.incremental = incremental_phases.incremental;
-    Ok((phases, fresh.peak_bytes.max(cold.peak_bytes)))
+    let sample = request.idle.finish(window);
+    let qualified = sample.qualified;
+    Ok((
+        phases.with_idle_qualified(qualified),
+        fresh.peak_bytes.max(cold.peak_bytes),
+        Some(sample),
+    ))
 }
 #[expect(
     clippy::too_many_arguments,
     clippy::cast_precision_loss,
     reason = "a fuel sample needs the toolchain, source, config and work paths; fuel counts are far below 2^53"
 )]
-fn measure_fuel(
+fn measure_cold_fuel(
     fuel: &FuelCompiler,
     toolchain: &Toolchain,
     source: &Path,
@@ -1008,7 +1288,207 @@ fn measure_fuel(
                 .iter()
                 .map(|value| *value as f64)
                 .collect::<Vec<_>>(),
-            true,
+            MetricClass::Exact,
+        )?,
+        samples,
+    })
+}
+
+/// Fuel for the warm compile, measured on a separate fuel-enabled serving
+/// guest. The guest's clock and randomness are pinned, and two independent
+/// passes with the same paths must report identical fuel.
+fn measure_warm_fuel(
+    request: &mut BuildRequest<'_>,
+    fuel: &FuelCompiler,
+    dir: &Path,
+    externs: &[String],
+    search: &[String],
+) -> Result<FuelMeasurement> {
+    let name = &request.program.def.name;
+    let config = request.config;
+    let out = dir.join("fuel-warm.wasm");
+    let mut samples = Vec::with_capacity(2);
+    for pass in 0..2 {
+        let warm_incremental = config
+            .incremental
+            .then(|| dir.join("fuel-warm-incremental"));
+        if let Some(path) = &warm_incremental {
+            clear_directory(path)?;
+            std::fs::create_dir_all(path)?;
+        }
+        let mut serve = fuel.serve(
+            &request.toolchain.wild,
+            vec![request.work.clone(), request.toolchain.sysroot.clone()],
+        )?;
+        if let Some(path) = &warm_incremental {
+            let seed_out = dir.join("fuel-warm-seed.wasm");
+            remove_file_if_exists(&seed_out)?;
+            let seed_args = rustc_args(
+                request.toolchain,
+                &request.program.source,
+                &seed_out,
+                name,
+                externs,
+                search,
+                Some(path),
+                false,
+                &config.flags,
+            );
+            serve
+                .compile(&seed_args)
+                .with_context(|| format!("seeding the warm fuel state for {name}, pass {pass}"))?;
+        }
+        remove_file_if_exists(&out)?;
+        let args = rustc_args(
+            request.toolchain,
+            &request.program.source,
+            &out,
+            name,
+            externs,
+            search,
+            warm_incremental.as_deref(),
+            false,
+            &config.flags,
+        );
+        let outcome = serve
+            .compile(&args)
+            .with_context(|| format!("warm fuel sample {pass} for {name}"))?;
+        samples.push(
+            outcome
+                .fuel_used
+                .context("a fuel-enabled warm compile reported no fuel")?,
+        );
+        drop(serve);
+    }
+    if samples[0] != samples[1] {
+        bail!(
+            "warm compiler fuel is not deterministic for {name}: {:?} then {:?}",
+            samples[0],
+            samples[1]
+        );
+    }
+    Ok(FuelMeasurement {
+        fuel: Metric::new(
+            &samples
+                .iter()
+                .map(|value| *value as f64)
+                .collect::<Vec<_>>(),
+            MetricClass::Exact,
+        )?,
+        samples,
+    })
+}
+
+/// Fuel for every edit-loop compile. The edit sequence is replayed twice with
+/// the same source, incremental directory and internal output path; the
+/// per-edit fuel must match exactly. The harness's fixed build directory is
+/// what makes the top-level `--out` directory irrelevant to rustc.
+///
+/// Each pass uses one fuel-enabled serving guest, matching the timed edit
+/// loop's resident compiler: a fresh guest per edit cannot reuse rustc's
+/// incremental session lock. The two passes are independent guests.
+fn measure_edit_fuel(
+    request: &mut BuildRequest<'_>,
+    fuel: &FuelCompiler,
+    dir: &Path,
+    externs: &[String],
+    search: &[String],
+) -> Result<FuelMeasurement> {
+    let name = request.program.def.name.clone();
+    let config = request.config;
+    let original = std::fs::read_to_string(&request.program.source)
+        .with_context(|| format!("reading {}", request.program.source.display()))?;
+    if !original.contains(PROBE_DECL) {
+        bail!(
+            "{} has no {PROBE_DECL} benchmark edit probe",
+            request.program.source.display()
+        );
+    }
+    let copy = dir.join("source").join(format!("{name}.rs"));
+    let mut passes: Vec<Vec<u64>> = Vec::with_capacity(2);
+    for pass in 0..2 {
+        std::fs::write(&copy, &original)
+            .with_context(|| format!("writing {} for fuel pass {pass}", copy.display()))?;
+        // Same incremental path in both passes so the only thing that changes
+        // between them is the output directory, which is what this check is
+        // about. The guest is dropped below before the next pass clears it.
+        let incremental = dir.join("fuel-edit-incremental");
+        clear_directory(&incremental)?;
+        std::fs::create_dir_all(&incremental)?;
+        let mut serve = fuel.serve(
+            &request.toolchain.wild,
+            vec![request.work.clone(), request.toolchain.sysroot.clone()],
+        )?;
+        let cold_out = dir.join("fuel-edit-cold.wasm");
+        remove_file_if_exists(&cold_out)?;
+        let cold_args = rustc_args(
+            request.toolchain,
+            &copy,
+            &cold_out,
+            &name,
+            externs,
+            search,
+            Some(&incremental),
+            false,
+            &config.flags,
+        );
+        serve
+            .compile(&cold_args)
+            .with_context(|| format!("fuel edit pass {pass} cold build of {name}"))?;
+        let mut text = original.clone();
+        let mut samples = Vec::with_capacity(request.runs);
+        for offset in 0..request.runs {
+            let index = offset + 1;
+            let probe = u64::from(offset % 2 != 0);
+            text = apply_edit(&text, index, probe)?;
+            std::fs::write(&copy, &text)
+                .with_context(|| format!("writing {} for fuel edit {index}", copy.display()))?;
+            // Same internal output path in both passes, so the only thing
+            // that changes between runs is the top-level result directory,
+            // which the fixed build directory already hides from rustc.
+            let out_dir = dir.join("fuel-edit");
+            std::fs::create_dir_all(&out_dir)?;
+            let out = out_dir.join("artifact.wasm");
+            remove_file_if_exists(&out)?;
+            let args = rustc_args(
+                request.toolchain,
+                &copy,
+                &out,
+                &name,
+                externs,
+                search,
+                Some(&incremental),
+                false,
+                &config.flags,
+            );
+            let outcome = serve
+                .compile(&args)
+                .with_context(|| format!("fuel edit {index} of {name}, pass {pass}"))?;
+            samples.push(
+                outcome
+                    .fuel_used
+                    .context("a fuel-enabled edit compile reported no fuel")?,
+            );
+        }
+        passes.push(samples);
+        drop(serve);
+    }
+    if passes[0] != passes[1] {
+        bail!(
+            "edit compiler fuel is not deterministic for {name}: pass 1 {:?}, pass 2 {:?}; \
+             repeated runs in different output directories must agree exactly",
+            passes[0],
+            passes[1]
+        );
+    }
+    let samples = passes.remove(0);
+    Ok(FuelMeasurement {
+        fuel: Metric::new(
+            &samples
+                .iter()
+                .map(|value| *value as f64)
+                .collect::<Vec<_>>(),
+            MetricClass::Exact,
         )?,
         samples,
     })
@@ -1100,17 +1580,55 @@ pub fn phase_breakdown(raw: &BTreeMap<String, f64>) -> Result<PhaseBreakdown> {
     let front_end =
         (total - expansion - type_borrow - mono - codegen - incremental - link).max(0.0);
     Ok(PhaseBreakdown {
-        front_end: Metric::one(front_end, false)?,
-        expansion: Metric::one(expansion, false)?,
-        type_borrow_check: Metric::one(type_borrow, false)?,
-        monomorphisation: Metric::one(mono, false)?,
-        codegen: Metric::one(codegen, false)?,
-        incremental: Metric::one(incremental, false)?,
-        link: Metric::one(link, false)?,
-        total: Metric::one(total, false)?,
+        front_end: Metric::one(front_end, MetricClass::Wall)?,
+        expansion: Metric::one(expansion, MetricClass::Wall)?,
+        type_borrow_check: Metric::one(type_borrow, MetricClass::Wall)?,
+        monomorphisation: Metric::one(mono, MetricClass::Wall)?,
+        codegen: Metric::one(codegen, MetricClass::Wall)?,
+        incremental: Metric::one(incremental, MetricClass::Wall)?,
+        link: Metric::one(link, MetricClass::Wall)?,
+        total: Metric::one(total, MetricClass::Wall)?,
         raw: raw.clone(),
     })
 }
+impl PhaseBreakdown {
+    /// Mark every wall-clock bucket with the idle qualification of the window
+    /// that produced it.
+    #[must_use]
+    fn with_idle_qualified(mut self, qualified: bool) -> Self {
+        for metric in [
+            &mut self.front_end,
+            &mut self.expansion,
+            &mut self.type_borrow_check,
+            &mut self.monomorphisation,
+            &mut self.codegen,
+            &mut self.incremental,
+            &mut self.link,
+            &mut self.total,
+        ] {
+            *metric = metric.clone().with_idle_qualified(qualified);
+        }
+        self
+    }
+}
+
+/// Phase timings that counters mode deliberately does not collect.
+fn phase_breakdown_unavailable() -> PhaseBreakdown {
+    let unavailable =
+        || Metric::unavailable(MetricClass::Wall, "phase timing skipped in counters mode");
+    PhaseBreakdown {
+        front_end: unavailable(),
+        expansion: unavailable(),
+        type_borrow_check: unavailable(),
+        monomorphisation: unavailable(),
+        codegen: unavailable(),
+        incremental: unavailable(),
+        link: unavailable(),
+        total: unavailable(),
+        raw: BTreeMap::new(),
+    }
+}
+
 fn artifact_from_file(path: &Path, name: &str) -> Result<Artifact> {
     let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
     artifact_from_bytes(bytes, name, None)

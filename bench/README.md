@@ -135,6 +135,21 @@ cargo run -p cogwasm-bench -- run --suite large --runs 3
 cargo run -p cogwasm-bench -- compare baseline.json current.json
 cargo run -p cogwasm-bench -- compare --fail-on-regression base.json new.json
 
+# Busy machine or the tandem pipeline: exact + native-counter metrics only
+cargo run -p cogwasm-bench -- run --suite quick --runs 3 --mode counters
+
+# On an idle machine, fit wall time against fuel and instructions
+cargo run -p cogwasm-bench -- calibrate --suite quick --runs 3
+# Then a counters run can label an estimated wall time (estimates, not measurements)
+cargo run -p cogwasm-bench -- run --suite quick --mode counters \
+    --calibration toolchain/work/bench/<calibration>/result.json
+
+# Interleaved A/B: two configs, or two rustc.wasm builds, alternating A, B, A, B
+cargo run -p cogwasm-bench -- ab --suite quick --runs 3 \
+    --a-config default --b-config capture
+cargo run -p cogwasm-bench -- ab --suite quick --runs 3 \
+    --a-rustc old/rustc.wasm --b-rustc new/rustc.wasm
+
 # Re-render the Markdown, or measure the toolchain footprint only (fast)
 cargo run -p cogwasm-bench -- report result.json
 cargo run -p cogwasm-bench -- toolchain
@@ -142,26 +157,97 @@ cargo run -p cogwasm-bench -- toolchain
 
 `run` writes `result.json` and `report.md` under
 `toolchain/work/bench/<timestamp>/` by default (git-ignored; use `--out` to
-choose another directory). The JSON has a versioned schema (`schema: 1`) with
-the machine and load average, compiler identity (rustc.wasm SHA-256 and git
-commit), the toolchain footprint, and per program x config measurements. Every
-numeric measurement carries `min`, `median`, `max`, `runs` and a `deterministic`
-flag; instruction counts, compiler fuel and sizes are exact, wall-clock
-metrics are not. The report has one table per section, suite geomeans and the
-V2 target table from [`agents/plans/v2.md`](../agents/plans/v2.md), filled only
-where the run collected a value.
+choose another directory). The JSON has a versioned schema (`schema: 2`;
+schema-1 results still load and compare) with the machine and load average,
+compiler identity (rustc.wasm SHA-256 and git commit), the toolchain footprint,
+the regime and its idle evidence, and per program x config measurements. Every
+numeric measurement carries `min`, `median`, `max`, `runs` and a `class`:
+`exact` (compiler fuel, executed wasm instructions, sizes), `counter` (native
+instructions retired and cycles) or `wall` (milliseconds). Wall metrics also
+carry `idle_qualified`. A measurement the platform cannot read is stored with
+`runs: 0` and an `unavailable` reason, never as a zero. The report has one table
+per section, suite geomeans and the V2 target table from
+[`agents/plans/v2.md`](../agents/plans/v2.md), filled only where the run
+collected a value.
+
+### Measurement regimes, metric classes and idle gating
+
+A busy machine makes wall-clock time useless as a regression signal, so the
+tool has two regimes. `--mode counters` skips the extra timing repeats and the
+`-Ztime-passes` runs and records wall metrics as unqualified; it decides
+regressions from exact counts and native counters only. `--mode full` always
+times and marks each wall metric with the idle evidence. `--mode auto` (the
+default) probes the machine at start, waits up to `--wait-idle SECONDS` for it
+to become idle, then picks full mode if idle and counters mode if still busy.
+The short summary says which regime ran and why.
+
+Idle detection measures the CPU time used by every process outside this tool's
+own process tree (macOS `proc_listpids` + `proc_pid_rusage`; Linux `/proc`), and
+the load average, around every timed window. A run is idle-qualified only when
+other processes used less than `--idle-threshold` (default `0.10`, i.e. 10% of
+one core) in every window. The evidence is stored per program and per run in
+`result.json` and shown by `report`, `compare` and the stdout summary.
+
+Native counters come from `proc_pid_rusage` with `RUSAGE_INFO_V4` on macOS
+(`ri_instructions`, `ri_cycles`) and `perf_event_open` with `inherit = 1` on
+Linux. The Wild linker runs as a child process, so `cogwasm-runtime` waits for
+it with `waitid(WNOWAIT)`, reads its counters, then reaps it with `waitpid`.
+The Wasmtime compile of each swapped module and the host process overall per
+build are counted separately. A platform or kernel that refuses a counter
+stores `unavailable`; nothing is invented.
+
+`compare` applies one rule per class: exact metrics must match exactly; counter
+metrics use the *minimum of N repeats* and a relative tolerance
+(`--counter-tolerance`, default 5%, set from the measured busy-machine spread
+of up to 3.5% for links and 1.3% for swap-compile minima across two quick runs); wall metrics use the run-to-run spread rule
+and only when **both** runs are idle-qualified. A busy wall metric is reported
+as `not comparable: busy run` and can never be a regression.
+`--fail-on-regression` therefore fails on exact and counter regressions always,
+and on wall regressions only for two idle-qualified runs.
+
+For the tandem pipeline and any other busy-machine CI, call
+`cogwasm-bench run --mode counters` and compare with `--fail-on-regression`;
+its wall metrics are explicitly unqualified, so only exact and counter changes
+can fail the build. On an idle machine `cogwasm-bench calibrate` fits wall
+milliseconds against fuel and instructions per compile kind and program class
+(at least three observations are needed for the three-coefficient fit),
+stores the fit in `result.json`, and a later `--mode counters --calibration`
+run prints estimated times with their RMSE band. A fit made on a busy machine
+is stored with `idle_qualified: false` and the summary warns; the estimates are
+labelled estimates, never measured wall time.
+
+Measured spread on the busy development machine (two `quick` counters runs,
+12 programs, `--runs 3`): host instructions moved by at most 1.56%, the cold
+Wild link by 3.44% (`nbody`), the warm Wild link by 1.25%, the edit-link
+minima by 2.70%, and the swap-compile minima by 1.29%; the median across all
+counter comparisons was 0.50%. That is why the default counter tolerance is
+5%, and why counters compare the minimum of N repeats rather than their
+median: parallel Wasmtime compilation spin-waits differently under load, so a
+single swap-compile median can move by tens of percent while its cheapest
+compile stays within about 1%. Under heavier load even that minimum moved by
+8.8% (`nbody`, two runs of two edits), so the swap's instructions retired are
+reported but `compare` does not judge them; edit fuel and the link counters
+cover the edit's work.
+
+`cogwasm-bench ab` compares two configs or two rustc.wasm builds by alternating
+A, B, A, B per program so drift hits both sides equally. It reports the
+minimum of N rounds and the A/B ratio with its per-round spread, and marks a
+run non-definitive when it was not idle-qualified.
 
 Configs are `default`, `inline` (`-Zmir-inline-wasm`), `capture`
 (`-Zmir-inline-wasm -Zmir-capture-hoist`), `incremental` (`-Cincremental`
 only), `incremental-memory` (`-Zcogwasm-incremental-memory`, incremental
 only), `cgu-per-fn` (`-Zcogwasm-cgu-per-fn`, incremental only) and
 `cgu-local` (`-Zcogwasm-cgu-local`, incremental only). `--runs N` is both
-the execution samples per seed and the number of measured edits. Compiler
-fuel uses a
-separate fuel-enabled engine and is measured twice per program x config; the
-run fails if the two samples differ. The edit loop verifies every warm edit
-against a fresh cold compile byte for byte, using the same artifact basename so
-Wild's module-name byte cannot create a false mismatch.
+the execution samples per seed and the number of measured edits. Compiler fuel
+uses a separate fuel-enabled engine and is measured for the cold compile, the
+warm compile and every edit-loop compile. The timed passes keep their current
+engines; fuel passes run on the fuel engine and are never timed. Cold and warm
+fuel are each sampled twice (and must agree); edit fuel replays the edit
+sequence twice and fails loudly if the per-edit samples differ. The edit loop
+verifies every warm edit against a fresh cold compile byte for byte, using the
+same artifact basename so Wild's module-name byte cannot create a false
+mismatch.
 
 Builds run in one fixed directory, `toolchain/work/bench/.work/`, cleared at
 the start of each run, because rustc's fuel depends on the length of the paths

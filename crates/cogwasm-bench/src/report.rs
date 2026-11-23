@@ -1,6 +1,6 @@
 //! Markdown rendering for a benchmark result.
 
-use crate::result::{BenchResult, ConfigResult, GeomeanSet, ProgramResult};
+use crate::result::{BenchResult, ConfigResult};
 use crate::stats::Metric;
 use std::fmt::Write as _;
 
@@ -50,6 +50,29 @@ fn header(result: &BenchResult, out: &mut String) {
             .map(ToString::to_string)
             .collect::<Vec<_>>()
             .join(", ")
+    );
+    let _ = writeln!(
+        out,
+        "- regime: **{}** ({}); requested mode {}",
+        result.regime.as_str(),
+        result.regime_reason,
+        result.settings.mode.as_str()
+    );
+    let worst = result.idle.worst_fraction().map_or_else(
+        || "no timed windows".to_owned(),
+        |fraction| format!("{:.1}% of one core at the busiest window", fraction * 100.0),
+    );
+    let _ = writeln!(
+        out,
+        "- idle: **{}** ({worst}; threshold {:.1}%, {} sample(s), method `{}`)",
+        if result.idle.qualified() {
+            "qualified"
+        } else {
+            "not qualified"
+        },
+        result.idle.threshold_fraction * 100.0,
+        result.idle.samples.len(),
+        result.idle.method
     );
     let _ = writeln!(
         out,
@@ -153,6 +176,26 @@ fn build_speed(result: &BenchResult, out: &mut String) {
             ("edit link ms", MetricKind::EditLink),
             ("edit swap ms", MetricKind::EditSwap),
             ("compiler fuel", MetricKind::Fuel),
+            ("warm fuel", MetricKind::WarmFuel),
+            ("edit fuel", MetricKind::EditFuel),
+            ("host instructions", MetricKind::HostInstructions),
+            ("host cycles", MetricKind::HostCycles),
+            (
+                "cold Wild link instructions",
+                MetricKind::ColdLinkInstructions,
+            ),
+            (
+                "warm Wild link instructions",
+                MetricKind::WarmLinkInstructions,
+            ),
+            (
+                "edit Wild link instructions",
+                MetricKind::EditLinkInstructions,
+            ),
+            (
+                "edit swap compile instructions",
+                MetricKind::EditSwapInstructions,
+            ),
             ("peak guest MiB", MetricKind::PeakGuest),
             ("host RSS MiB", MetricKind::HostRss),
         ];
@@ -189,6 +232,14 @@ enum MetricKind {
     EditLink,
     EditSwap,
     Fuel,
+    WarmFuel,
+    EditFuel,
+    HostInstructions,
+    HostCycles,
+    ColdLinkInstructions,
+    WarmLinkInstructions,
+    EditLinkInstructions,
+    EditSwapInstructions,
     PeakGuest,
     HostRss,
 }
@@ -208,6 +259,23 @@ impl MetricKind {
                 .fuel
                 .as_ref()
                 .map_or_else(|| "—".to_owned(), |fuel| format!("{:.0}", fuel.fuel.median)),
+            Self::WarmFuel => result
+                .build
+                .warm_fuel
+                .as_ref()
+                .map_or_else(|| "—".to_owned(), |fuel| format!("{:.0}", fuel.fuel.median)),
+            Self::EditFuel => result
+                .build
+                .edit
+                .fuel
+                .as_ref()
+                .map_or_else(|| "—".to_owned(), |fuel| format!("{:.0}", fuel.fuel.median)),
+            Self::HostInstructions => counter_cell(&result.build.native.host_instructions),
+            Self::HostCycles => counter_cell(&result.build.native.host_cycles),
+            Self::ColdLinkInstructions => counter_cell(&result.build.native.cold_link_instructions),
+            Self::WarmLinkInstructions => counter_cell(&result.build.native.warm_link_instructions),
+            Self::EditLinkInstructions => counter_cell(&result.build.edit.link_instructions),
+            Self::EditSwapInstructions => counter_cell(&result.build.edit.swap_instructions),
             Self::PeakGuest => format!(
                 "{:.1}",
                 mib_f64(result.build.peak_guest_memory_bytes.median)
@@ -225,18 +293,18 @@ fn edit_samples(result: &BenchResult, out: &mut String) {
     let _ = writeln!(out);
     let _ = writeln!(
         out,
-        "| program | config | edit | probe | build ms | link ms | swap ms | call ms | edit-to-result ms | byte-identical |"
+        "| program | config | edit | probe | build ms | link ms | swap ms | call ms | edit-to-result ms | fuel | link instr | swap instr | byte-identical |"
     );
     let _ = writeln!(
         out,
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :---: |"
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :---: |"
     );
     for program in result.programs.values() {
         for (config, measurement) in &program.configs {
             for row in &measurement.build.edit.edits {
                 let _ = writeln!(
                     out,
-                    "| {} | {config} | {} | {} | {:.2} | {:.2} | {:.2} | {:.3} | {:.2} | {} |",
+                    "| {} | {config} | {} | {} | {:.2} | {:.2} | {:.2} | {:.3} | {:.2} | {} | {} | {} | {} |",
                     program.name,
                     row.edit,
                     row.probe,
@@ -245,6 +313,9 @@ fn edit_samples(result: &BenchResult, out: &mut String) {
                     row.swap_ms,
                     row.call_ms,
                     row.edit_to_result_ms,
+                    fmt_opt(row.fuel.map(|value| value as f64), 0),
+                    fmt_opt(row.link_instructions.map(|value| value as f64), 0),
+                    fmt_opt(row.swap_instructions.map(|value| value as f64), 0),
                     if measurement.build.edit.byte_identical_to_cold {
                         "yes"
                     } else {
@@ -483,8 +554,15 @@ fn notes(result: &BenchResult, out: &mut String) {
     );
     let _ = writeln!(
         out,
-        "- Wall-clock rows are noisy on shared machines. The deterministic metrics (instructions, \
-         fuel, sizes) are the ones to compare exactly."
+        "- Wall-clock rows are noisy on shared machines. In counters mode they are unqualified by \
+         construction; in full mode each row carries the idle evidence above and only an \
+         idle-qualified run may call a wall-clock change a regression."
+    );
+    let _ = writeln!(
+        out,
+        "- Metric classes: exact (fuel, executed wasm instructions, bytes) compare exactly; \
+         counter (native instructions retired, cycles) compare with a relative tolerance; wall \
+         (milliseconds) compare only when both runs are idle-qualified and outside the spread."
     );
     let _ = writeln!(
         out,
@@ -495,6 +573,14 @@ fn notes(result: &BenchResult, out: &mut String) {
         let _ = writeln!(out, "- Compiler fuel was not collected (`--no-fuel`).");
     }
     let _ = writeln!(out);
+}
+
+fn counter_cell(metric: &Metric) -> String {
+    if metric.is_available() {
+        format!("{:.0}", metric.median)
+    } else {
+        "unavailable".to_owned()
+    }
 }
 
 fn fmt_metric(metric: &Metric, digits: usize) -> String {
@@ -543,11 +629,6 @@ fn mib(bytes: u64) -> f64 {
 fn mib_f64(bytes: f64) -> f64 {
     bytes / (1024.0 * 1024.0)
 }
-
-// Keep the compiler honest about the imports the helpers above need even when
-// a future section stops using one of them.
-#[allow(dead_code)]
-fn _uses(_: &ProgramResult, _: &GeomeanSet) {}
 
 #[cfg(test)]
 mod tests {

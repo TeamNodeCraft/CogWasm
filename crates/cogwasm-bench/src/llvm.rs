@@ -6,9 +6,10 @@
 //! `CogWasm` artifact is compared against it before any timing is accepted.
 
 use crate::exec::{BenchRuntime, ExecMeasurement};
+use crate::idle::IdleMonitor;
 use crate::programs::{DependencySet, Program, externs_for, search_paths};
 use crate::size::{SizeBreakdown, analyze_module};
-use crate::stats::Metric;
+use crate::stats::{Metric, MetricClass};
 use crate::toolchain::Toolchain;
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -39,6 +40,10 @@ pub struct LlvmMeasurement {
 ///
 /// Returns an error when the native rustc cannot compile the program, writes
 /// no module, or a module cannot be executed.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the LLVM driver needs the toolchain, program, dependencies, work path, sample count, seeds, runtime and idle gate"
+)]
 pub fn measure_llvm(
     toolchain: &Toolchain,
     program: &Program,
@@ -47,11 +52,15 @@ pub fn measure_llvm(
     runs: usize,
     seeds: &[u64],
     runtime: &BenchRuntime,
+    idle: &IdleMonitor,
+    timed: bool,
 ) -> Result<LlvmMeasurement> {
     let externs = externs_for(&program.def, dependencies, "llvm")?;
     let search = search_paths(&dependencies.llvm);
     let mut builds = BTreeMap::new();
     let mut outputs = BTreeMap::new();
+    let samples = if timed { runs } else { 1 };
+    let window = timed.then(|| idle.window("llvm"));
     for (name, level) in [("o0", "0"), ("o2", "2"), ("oz", "z")] {
         let out = work
             .join("llvm")
@@ -60,11 +69,16 @@ pub fn measure_llvm(
         if let Some(parent) = out.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let compile_ms = compile_llvm(toolchain, program, &externs, &search, level, &out, runs)?;
+        let compile_ms = compile_llvm(toolchain, program, &externs, &search, level, &out, samples)?;
         let bytes = std::fs::read(&out).with_context(|| format!("reading {}", out.display()))?;
         let size = analyze_module(&bytes)?;
         builds.insert(name.to_owned(), LlvmBuild { compile_ms, size });
         outputs.insert(name.to_owned(), out);
+    }
+    let sample = window.map(|window| idle.finish(window));
+    let qualified = sample.as_ref().is_some_and(|sample| sample.qualified);
+    for build in builds.values_mut() {
+        build.compile_ms = build.compile_ms.clone().with_idle_qualified(qualified);
     }
     let mut exec = BTreeMap::new();
     for name in ["o0", "o2"] {
@@ -75,7 +89,7 @@ pub fn measure_llvm(
         exec.insert(
             name.to_owned(),
             runtime
-                .execute(&bytes, seeds, runs)
+                .execute(&bytes, seeds, samples, idle, timed)
                 .with_context(|| format!("executing the LLVM {name} build"))?,
         );
     }
@@ -113,7 +127,7 @@ fn compile_llvm(
             out.display()
         );
     }
-    Metric::new(&values, false)
+    Metric::new(&values, MetricClass::Wall)
 }
 
 fn llvm_command(

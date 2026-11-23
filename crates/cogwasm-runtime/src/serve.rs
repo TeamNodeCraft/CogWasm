@@ -31,6 +31,8 @@ pub struct ServeFinish {
     pub spawns: Vec<SpawnSummary>,
     /// Current linear-memory size, so the host can bound per-request growth.
     pub memory_bytes: usize,
+    /// Wasmtime fuel the request consumed, when the store has fuel enabled.
+    pub fuel_used: Option<u64>,
 }
 
 /// What the host observes from one session.
@@ -53,6 +55,8 @@ pub struct ServeHooks {
     finished: Sender<ServeEvent>,
     pending: Option<Vec<u8>>,
     started: Instant,
+    /// Remaining fuel when the current request was handed to the guest.
+    fuel_start: Option<u64>,
 }
 
 impl ServeHooks {
@@ -64,6 +68,7 @@ impl ServeHooks {
             finished,
             pending: None,
             started: Instant::now(),
+            fuel_start: None,
         }
     }
 
@@ -94,13 +99,31 @@ impl ServeHooks {
         self.pending = None;
     }
 
+    /// Record the fuel reading taken when the request started.
+    pub fn set_fuel_start(&mut self, fuel: Option<u64>) {
+        self.fuel_start = fuel;
+    }
+
+    /// The fuel this request consumed, when both readings exist.
+    #[must_use]
+    pub fn fuel_used(&self, fuel_end: Option<u64>) -> Option<u64> {
+        self.fuel_start?.checked_sub(fuel_end?)
+    }
+
     /// Report a finished request to the host.
-    pub fn finish(&self, code: i32, spawns: Vec<SpawnSummary>, memory_bytes: usize) {
+    pub fn finish(
+        &self,
+        code: i32,
+        spawns: Vec<SpawnSummary>,
+        memory_bytes: usize,
+        fuel_used: Option<u64>,
+    ) {
         let _ = self.finished.send(ServeEvent::Finished(ServeFinish {
             code,
             elapsed: self.started.elapsed(),
             spawns,
             memory_bytes,
+            fuel_used,
         }));
     }
 
@@ -173,12 +196,9 @@ pub fn add_serve_imports<R: SpawnRecorder>(linker: &mut Linker<HostState<R>>) ->
                         NextRequest::Write(bytes) => bytes.to_vec(),
                     }
                 };
-                let length = match i32::try_from(request.len()) {
-                    Ok(length) => length,
-                    Err(_) => {
-                        eprintln!("[cogwasm-runtime] request is larger than 2 GiB");
-                        return 0;
-                    }
+                let Ok(length) = i32::try_from(request.len()) else {
+                    eprintln!("[cogwasm-runtime] request is larger than 2 GiB");
+                    return 0;
                 };
                 let memory = match guest_memory(&mut caller) {
                     Ok(memory) => memory,
@@ -195,8 +215,10 @@ pub fn add_serve_imports<R: SpawnRecorder>(linker: &mut Linker<HostState<R>>) ->
                     eprintln!("[cogwasm-runtime] next_request: {error:#}");
                     return 0;
                 }
+                let fuel = caller.get_fuel().ok();
                 if let Some(serve) = caller.data_mut().serve.as_mut() {
                     serve.request_written();
+                    serve.set_fuel_start(fuel);
                 }
                 length
             },
@@ -216,8 +238,10 @@ pub fn add_serve_imports<R: SpawnRecorder>(linker: &mut Linker<HostState<R>>) ->
                     _ => 0,
                 };
                 let spawns = caller.data().recorder().summaries();
+                let fuel_end = caller.get_fuel().ok();
                 if let Some(serve) = caller.data().serve.as_ref() {
-                    serve.finish(code, spawns, memory_bytes);
+                    let fuel_used = serve.fuel_used(fuel_end);
+                    serve.finish(code, spawns, memory_bytes, fuel_used);
                 }
             },
         )

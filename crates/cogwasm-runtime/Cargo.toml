@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 anyhow = "1"
+libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 # The store builder needs the runtime API and WASI; the engine configuration
 # and the precompiled loader stay in `cogwasm-host`.
