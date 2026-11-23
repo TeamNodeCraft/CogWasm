@@ -219,8 +219,8 @@ labelled estimates, never measured wall time.
 Measured spread on the busy development machine (two `quick` counters runs,
 12 programs, `--runs 3`): host instructions moved by at most 1.56%, the cold
 Wild link by 3.44% (`nbody`), the warm Wild link by 1.25%, the edit-link
-minima by 0.73%, and the swap-compile minima by 1.29%; the median across all
-counter comparisons was 0.55%. That is why the default counter tolerance is
+minima by 2.70%, and the swap-compile minima by 1.29%; the median across all
+counter comparisons was 0.50%. That is why the default counter tolerance is
 5%, and why counters compare the minimum of N repeats rather than their
 median: parallel Wasmtime compilation spin-waits differently under load, so a
 single swap-compile median can move by tens of percent while its cheapest
