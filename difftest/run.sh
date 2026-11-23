@@ -196,6 +196,14 @@ compile_clif() {
         extra+=(-Cincremental="$WORK/incremental-memory/$name")
         rm -rf "$WORK/incremental-memory/$name"
     fi
+    if [ "${DIFFTEST_CGU_LOCAL:-0}" = "1" ]; then
+        # V2 phase 1 local-function split. The flag only takes effect in
+        # incremental mode, so give each program a fresh incremental directory.
+        mkdir -p "$WORK/incremental-local"
+        extra+=(-Zcogwasm-cgu-local)
+        extra+=(-Cincremental="$WORK/incremental-local/$name")
+        rm -rf "$WORK/incremental-local/$name"
+    fi
     if [ "${DIFFTEST_CGU_PER_FN:-0}" = "1" ]; then
         # V2 phase 1 experiment. The flag only takes effect in incremental
         # mode, so give each program a fresh incremental directory; this is a

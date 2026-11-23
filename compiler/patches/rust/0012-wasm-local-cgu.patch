@@ -1,0 +1,101 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CogWasm <cogwasm@example.invalid>
+Date: Mon, 23 Nov 2026 18:00:00 +1030
+Subject: [PATCH] wasm: split local functions into capped codegen units
+
+`-Zcogwasm-cgu-per-fn` (0009) gave every GloballyShared function its own
+CGU. That showed the codegen win but paid for 7,661 work products and a link
+that the large program's argument limit could not accept. This adds the
+phase-0 recommendation's narrower form: `-Zcogwasm-cgu-local` splits only
+functions whose DefId is in the local crate, leaves shared generic instances
+in their characteristic CGUs, and keeps inlined (LocalCopy) bodies attached
+to their roots. `-Zcogwasm-cgu-local-cap` caps the total through rustc's
+existing merge pass, defaulting to `-Ccodegen-units`, so there is not one
+object per function for the linker.
+
+Both options are off by default and only act in incremental builds. The full
+per-function experiment is unchanged. This is a local CogWasm experiment, not
+an upstream contribution; the code, comments and message are LLM-generated
+under the Rust project's personal-use exemption, and a human must review and
+own it before it goes anywhere else.
+
+---
+diff --git a/compiler/rustc_monomorphize/src/partitioning.rs b/compiler/rustc_monomorphize/src/partitioning.rs
+index 3e3b5a9..98de8b1 100644
+--- a/compiler/rustc_monomorphize/src/partitioning.rs
++++ b/compiler/rustc_monomorphize/src/partitioning.rs
+@@ -204,8 +204,12 @@ fn place_mono_items<'tcx, I>(cx: &PartitioningCx<'_, 'tcx>, mono_items: I) -> Pl
+ {
+     let mut codegen_units = UnordMap::default();
+     let is_incremental_build = cx.tcx.sess.opts.incremental.is_some();
+-    let per_fn_cgu =
+-        cx.tcx.sess.opts.unstable_opts.cogwasm_cgu_per_fn && is_incremental_build;
++    let per_fn_cgu = cx.tcx.sess.opts.unstable_opts.cogwasm_cgu_per_fn && is_incremental_build;
++    // V2 phase 1, second form: split only local user functions. Instances of
++    // shared generics stay in their characteristic CGU, so the split is not
++    // one copy per monomorphisation of `core`/`alloc`.
++    let local_cgu =
++        !per_fn_cgu && cx.tcx.sess.opts.unstable_opts.cogwasm_cgu_local && is_incremental_build;
+     let mut internalization_candidates = UnordSet::default();
+ 
+     // Determine if monomorphizations instantiated in this crate will be made
+@@ -231,7 +235,11 @@ fn place_mono_items<'tcx, I>(cx: &PartitioningCx<'_, 'tcx>, mono_items: I) -> Pl
+         let characteristic_def_id = characteristic_def_id_of_mono_item(cx.tcx, mono_item);
+         let is_volatile = is_incremental_build && mono_item.is_generic_fn();
+ 
+-        let cgu_name = if per_fn_cgu && matches!(mono_item, MonoItem::Fn(_)) {
++        let split_fn = (per_fn_cgu && matches!(mono_item, MonoItem::Fn(_)))
++            || (local_cgu
++                && matches!(mono_item, MonoItem::Fn(_))
++                && mono_item.def_id().krate == LOCAL_CRATE);
++        let cgu_name = if split_fn {
+             // V2 phase 1 experiment: one codegen unit per monomorphised
+             // function. The mangled symbol is unique per instance, so two
+             // instantiations of the same generic definition do not collide.
+@@ -352,11 +360,27 @@ fn merge_codegen_units<'tcx>(
+     // getting any bigger, if we can avoid it. When we have more than N CGUs
+     // then at least one of the biggest N will have to grow. codegen_units[N-1]
+     // is the smallest of those, and so has the most room to grow.
+-    let max_codegen_units = cx.tcx.sess.codegen_units().as_usize();
+-    // The per-function CGU experiment deliberately ignores the `-Ccodegen-units`
+-    // cap: merging would put the functions back together and defeat the point.
+-    let per_fn_cgu = cx.tcx.sess.opts.unstable_opts.cogwasm_cgu_per_fn
++    // The full per-function experiment deliberately ignores the
++    // `-Ccodegen-units` cap: merging would put the functions back together and
++    // defeat the point. The local-only form keeps merging, with its own cap
++    // (defaulting to `-Ccodegen-units`), so the linker does not see one object
++    // per function.
++    let per_fn_cgu =
++        cx.tcx.sess.opts.unstable_opts.cogwasm_cgu_per_fn && cx.tcx.sess.opts.incremental.is_some();
++    let local_cgu = !per_fn_cgu
++        && cx.tcx.sess.opts.unstable_opts.cogwasm_cgu_local
+         && cx.tcx.sess.opts.incremental.is_some();
++    let max_codegen_units = if local_cgu {
++        cx.tcx
++            .sess
++            .opts
++            .unstable_opts
++            .cogwasm_cgu_local_cap
++            .unwrap_or_else(|| cx.tcx.sess.codegen_units().as_usize())
++            .max(1)
++    } else {
++        cx.tcx.sess.codegen_units().as_usize()
++    };
+     while !per_fn_cgu && codegen_units.len() > max_codegen_units {
+         // Sort small CGUs to the back.
+         codegen_units.sort_by_key(|cgu| cmp::Reverse(cgu.size_estimate()));
+diff --git a/compiler/rustc_session/src/options.rs b/compiler/rustc_session/src/options.rs
+index 3b4b0ec..416b3a9 100644
+--- a/compiler/rustc_session/src/options.rs
++++ b/compiler/rustc_session/src/options.rs
+@@ -2449,6 +2449,10 @@ pub(crate) fn parse_rust_version(slot: &mut Option<RustcVersion>, v: Option<&str
+         "put every monomorphised function in its own codegen unit in incremental builds; CogWasm V2 phase 1 experiment (default: no)"),
+     cogwasm_incremental_memory: bool = (false, parse_bool, [UNTRACKED],
+         "keep incremental dep-graph, query-cache and work-product-index artifacts in the serving guest's memory; CogWasm V2 phase 2 experiment (default: no)"),
++    cogwasm_cgu_local: bool = (false, parse_bool, [TRACKED],
++        "put each local user function in its own codegen unit in incremental builds, keeping shared generics coarser; CogWasm V2 phase 1 experiment (default: no)"),
++    cogwasm_cgu_local_cap: Option<usize> = (None, parse_opt_number, [TRACKED],
++        "cap the number of codegen units for -Zcogwasm-cgu-local (default: -Ccodegen-units)"),
+     contract_checks: Option<bool> = (None, parse_opt_bool, [TRACKED],
+         "emit runtime checks for contract pre- and post-conditions (default: no)"),
+     coverage_options: CoverageOptions = (CoverageOptions::default(), parse_coverage_options, [TRACKED],

@@ -218,6 +218,13 @@ enum Command {
         /// guest's memory (`-Zcogwasm-incremental-memory`). Off by default.
         #[arg(long)]
         incremental_memory: bool,
+        /// V2 phase 1: split local user functions into their own CGUs and
+        /// keep shared generics coarser (`-Zcogwasm-cgu-local`).
+        #[arg(long)]
+        cgu_local: bool,
+        /// Optional cap for --cgu-local (`-Zcogwasm-cgu-local-cap`).
+        #[arg(long)]
+        cgu_local_cap: Option<usize>,
     },
     /// Build a multi-crate workspace in dependency order.
     Workspace {
@@ -440,6 +447,8 @@ fn main() -> Result<()> {
             verify_cold,
             cgu_per_fn,
             incremental_memory,
+            cgu_local,
+            cgu_local_cap,
         } => {
             let config = RealCompilerConfig {
                 host,
@@ -465,6 +474,8 @@ fn main() -> Result<()> {
                 verify_cold,
                 cgu_per_fn,
                 incremental_memory,
+                cgu_local,
+                cgu_local_cap,
             )?;
         }
         Command::Workspace {
@@ -773,6 +784,8 @@ fn edit_loop(
     verify_cold: bool,
     cgu_per_fn: bool,
     incremental_memory: bool,
+    cgu_local: bool,
+    cgu_local_cap: Option<usize>,
 ) -> Result<()> {
     if edits == 0 {
         bail!("--edits must be at least 1");
@@ -834,6 +847,8 @@ fn edit_loop(
         let mut options = options;
         options.cgu_per_fn = cgu_per_fn;
         options.incremental_memory = incremental_memory;
+        options.cgu_local = cgu_local;
+        options.cgu_local_cap = cgu_local_cap;
         let mut job = JobSpec::new(SourceSpec::new(copy.clone(), name.clone()), options);
         if job.options.incremental {
             let key = ArtifactStore::incremental_key_for(&job, &config.compiler_id)?;

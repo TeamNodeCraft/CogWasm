@@ -154,9 +154,10 @@ where the run collected a value.
 Configs are `default`, `inline` (`-Zmir-inline-wasm`), `capture`
 (`-Zmir-inline-wasm -Zmir-capture-hoist`), `incremental` (`-Cincremental`
 only), `incremental-memory` (`-Zcogwasm-incremental-memory`, incremental
-only) and `cgu-per-fn` (`-Zcogwasm-cgu-per-fn`, incremental only). `--runs N`
-is both the execution samples per seed and the number of measured edits.
-Compiler fuel uses a
+only), `cgu-per-fn` (`-Zcogwasm-cgu-per-fn`, incremental only) and
+`cgu-local` (`-Zcogwasm-cgu-local`, incremental only). `--runs N` is both
+the execution samples per seed and the number of measured edits. Compiler
+fuel uses a
 separate fuel-enabled engine and is measured twice per program x config; the
 run fails if the two samples differ. The edit loop verifies every warm edit
 against a fresh cold compile byte for byte, using the same artifact basename so

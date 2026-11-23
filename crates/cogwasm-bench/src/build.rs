@@ -87,8 +87,13 @@ impl Config {
                 flags: vec!["-Zcogwasm-incremental-memory".to_owned()],
                 incremental: true,
             }),
+            "cgu-local" => Ok(Self {
+                name: name.to_owned(),
+                flags: vec!["-Zcogwasm-cgu-local".to_owned()],
+                incremental: true,
+            }),
             other => bail!(
-                "unknown config {other:?} (default, inline, capture, cgu-per-fn, incremental or incremental-memory)"
+                "unknown config {other:?} (default, inline, capture, cgu-per-fn, cgu-local, incremental or incremental-memory)"
             ),
         }
     }
@@ -1255,6 +1260,7 @@ mod tests {
                 .expect("incremental-memory")
                 .incremental
         );
+        assert!(Config::parse("cgu-local").expect("cgu-local").incremental);
         assert!(Config::parse("fast").is_err());
     }
 

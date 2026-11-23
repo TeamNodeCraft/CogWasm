@@ -133,6 +133,13 @@ pub struct CompileOptions {
     /// guest's memory (`-Zcogwasm-incremental-memory`). Off by default.
     #[serde(default, skip_serializing_if = "is_false")]
     pub incremental_memory: bool,
+    /// V2 phase 1: split local user functions, keep shared generics coarser
+    /// (`-Zcogwasm-cgu-local`). Off by default.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub cgu_local: bool,
+    /// Optional cap for `cgu_local` (`-Zcogwasm-cgu-local-cap`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cgu_local_cap: Option<usize>,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -152,6 +159,8 @@ impl Default for CompileOptions {
             debug: false,
             cgu_per_fn: false,
             incremental_memory: false,
+            cgu_local: false,
+            cgu_local_cap: None,
         }
     }
 }
@@ -212,6 +221,12 @@ impl CompileOptions {
         if self.incremental_memory {
             flags.push("-Zcogwasm-incremental-memory".to_owned());
         }
+        if self.cgu_local {
+            flags.push("-Zcogwasm-cgu-local".to_owned());
+            if let Some(cap) = self.cgu_local_cap {
+                flags.push(format!("-Zcogwasm-cgu-local-cap={cap}"));
+            }
+        }
         flags
     }
 
@@ -237,6 +252,12 @@ impl CompileOptions {
         }
         if self.incremental_memory {
             parts.push("incremental-memory=yes".to_owned());
+        }
+        if self.cgu_local {
+            parts.push("cgu-local=yes".to_owned());
+        }
+        if let Some(cap) = self.cgu_local_cap {
+            parts.push(format!("cgu-local-cap={cap}"));
         }
         parts.join(",")
     }
@@ -284,6 +305,13 @@ impl CompileOptions {
                 "debug" => options.debug = parse_bool(value)?,
                 "cgu-per-fn" => options.cgu_per_fn = parse_bool(value)?,
                 "incremental-memory" => options.incremental_memory = parse_bool(value)?,
+                "cgu-local" => options.cgu_local = parse_bool(value)?,
+                "cgu-local-cap" => {
+                    options.cgu_local_cap =
+                        Some(value.parse().map_err(|_| {
+                            format!("cgu-local-cap must be a number, got {value:?}")
+                        })?);
+                }
                 other => return Err(format!("unknown option {other:?}")),
             }
         }
