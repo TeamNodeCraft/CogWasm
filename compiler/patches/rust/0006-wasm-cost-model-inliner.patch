@@ -93,8 +93,7 @@ threshold.
 
 The pass is opt-in through `-Zmir-inline-wasm`; the compiler, the sysroot and
 the default benchmark builds do not pass it. This is a local CogWasm
-experiment, not an upstream contribution; its code and comments are
-LLM-generated and a human must review and own it.
+experiment, not an upstream contribution.
 
 ---
 diff --git a/compiler/rustc_mir_transform/src/inline.rs b/compiler/rustc_mir_transform/src/inline.rs

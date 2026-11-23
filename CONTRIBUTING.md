@@ -48,7 +48,11 @@ AI tools are allowed here, with a human in charge:
   pass after it.
 - Never weaken or delete a test, or mark it ignored, just to make CI pass.
 - Commits made with substantial AI help say so in a trailer (this repository
-  uses `Co-Authored-By:` lines naming the tool).
+  uses `Co-Authored-By:` lines naming the tool). That trailer is the only AI
+  disclosure in this repository: notes, patch files, patch headers, code
+  comments and commit messages carry no LLM-provenance disclaimers. The
+  upstream AI policies below apply only to changes we send upstream, and we
+  are not upstreaming.
 
 ## If we do contribute upstream later
 

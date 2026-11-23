@@ -18,9 +18,7 @@ functions back together would defeat the experiment. Statics and global
 assembly keep their module-based CGUs.
 
 The default pipeline, compiler build and sysroot do not pass the flag. This is
-a local CogWasm experiment, not an upstream contribution; the code, comments
-and this message are LLM-generated under the Rust project's personal-use
-exemption, and a human must review and own it before it goes anywhere else.
+a local CogWasm experiment, not an upstream contribution.
 
 ---
 diff --git a/compiler/rustc_session/src/options.rs b/compiler/rustc_session/src/options.rs
