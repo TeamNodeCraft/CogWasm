@@ -442,7 +442,7 @@ fn read_child(pid: u32) -> ChildCounters {
         // SAFETY: the descriptor came from `perf_event_open` above and is
         // closed exactly once here.
         unsafe { libc::close(fd) };
-        if count == i64::try_from(std::mem::size_of::<u64>()).unwrap_or(0) {
+        if count == isize::try_from(std::mem::size_of::<u64>()).unwrap_or(0) {
             // The first descriptor is instructions, the second cycles; the
             // order comes from `observe_child`.
             if instructions.is_none() {
