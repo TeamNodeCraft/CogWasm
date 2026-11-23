@@ -10,11 +10,6 @@ Measurements are from a local macOS arm64 machine (14 cores, shared; the
 baseline run recorded load average 7.51), 23 November 2026. The generated
 program is not checked in; `cogwasm-bench` regenerates it.
 
-> The profiler, its summary and this note are LLM-generated under the Rust
-> project's personal-use exemption. This is a local CogWasm experiment, not an
-> upstream contribution; a human must review and own it before it goes
-> anywhere else.
-
 ## Method
 
 `cogwasm-bench profile --suite large` does what the edit loop does: an

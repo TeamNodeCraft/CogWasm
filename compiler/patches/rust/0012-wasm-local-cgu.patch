@@ -15,9 +15,7 @@ object per function for the linker.
 
 Both options are off by default and only act in incremental builds. The full
 per-function experiment is unchanged. This is a local CogWasm experiment, not
-an upstream contribution; the code, comments and message are LLM-generated
-under the Rust project's personal-use exemption, and a human must review and
-own it before it goes anywhere else.
+an upstream contribution.
 
 ---
 diff --git a/compiler/rustc_monomorphize/src/partitioning.rs b/compiler/rustc_monomorphize/src/partitioning.rs

@@ -17,9 +17,7 @@ which measureme writes as `{crate}-{pid}.mm_profdata`.
 
 Default compiler behaviour is unchanged: the wasm branch only runs when a
 caller asks for a process id. This is a local CogWasm experiment, not an
-upstream contribution; the code, comment and message are LLM-generated under
-the Rust project's personal-use exemption, and a human must review and own it
-before it goes anywhere else.
+upstream contribution.
 
 ---
 diff --git a/library/std/src/sys/process/unsupported.rs b/library/std/src/sys/process/unsupported.rs

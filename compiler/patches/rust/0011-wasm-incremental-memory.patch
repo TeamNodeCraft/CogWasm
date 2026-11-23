@@ -19,9 +19,7 @@ The flag is off by default, untracked, and only has an effect on wasm32. A
 one-shot process still compiles correctly: it publishes state and then exits
 without a reader, which is the same fallback as a cold incremental start.
 
-This is a local CogWasm experiment, not an upstream contribution; the code,
-comments and message are LLM-generated under the Rust project's personal-use
-exemption, and a human must review and own it before it goes anywhere else.
+This is a local CogWasm experiment, not an upstream contribution.
 
 ---
 diff --git a/compiler/rustc_data_structures/src/memmap.rs b/compiler/rustc_data_structures/src/memmap.rs
