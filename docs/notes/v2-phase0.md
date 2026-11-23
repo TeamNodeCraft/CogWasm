@@ -7,11 +7,6 @@ generated program, the measurement scripts and the opt-in `0009` patch are in
 the tree; the default compiler build and pipeline do not pass the flag, and
 flag-off behaviour is unchanged.
 
-> The generator, measurement script, this note and the `0009` patch are
-> LLM-generated under the Rust project's personal-use exemption. This is a
-> local CogWasm experiment, not an upstream contribution; a human must review
-> and own it before it goes anywhere else.
-
 ## What phase 0 asked
 
 1. A large, realistic program that `rustc.wasm` can compile: about 100k lines,
