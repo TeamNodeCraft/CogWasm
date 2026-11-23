@@ -7,6 +7,7 @@ mod exec;
 mod generator;
 mod instrument;
 mod llvm;
+mod profile;
 mod programs;
 mod report;
 mod result;
@@ -44,6 +45,8 @@ enum Command {
     Toolchain(ToolchainCommand),
     /// Turn result documents into the site chart's data.json.
     Chart(ChartArgs),
+    /// Profile one warm edit in the resident serving guest with -Zself-profile.
+    Profile(ProfileArgs),
 }
 
 #[derive(Args, Clone, Default)]
@@ -163,6 +166,24 @@ struct ChartArgs {
 }
 
 #[derive(Args)]
+struct ProfileArgs {
+    #[command(flatten)]
+    toolchain: ToolchainArgs,
+    /// Suite whose first program is profiled (default large).
+    #[arg(long)]
+    suite: Option<String>,
+    /// Program name; overrides the suite's first program.
+    #[arg(long)]
+    program: Option<String>,
+    /// Output directory for profile.json, profile.md and the raw profile data.
+    #[arg(long)]
+    out: Option<PathBuf>,
+    /// Seed passed to the installed module's run.
+    #[arg(long, default_value_t = 42)]
+    seed: u64,
+}
+
+#[derive(Args)]
 struct CompareArgs {
     baseline: PathBuf,
     current: PathBuf,
@@ -198,6 +219,7 @@ fn main() -> Result<()> {
         Command::Report(args) => report_command(args),
         Command::Toolchain(args) => toolchain_command(&args),
         Command::Chart(args) => chart_command(&args),
+        Command::Profile(args) => profile_command(args),
     }
 }
 
@@ -400,6 +422,38 @@ fn toolchain_command(args: &ToolchainCommand) -> Result<()> {
     } else {
         print!("{markdown}");
     }
+    Ok(())
+}
+
+fn profile_command(args: ProfileArgs) -> Result<()> {
+    let toolchain = args.toolchain.resolve()?;
+    let suite = programs::Suite::parse(args.suite.as_deref().unwrap_or("large"))?;
+    let names: Vec<String> = args.program.into_iter().collect();
+    let programs = programs::prepare_programs(&toolchain, suite, &names)?;
+    let program = programs
+        .first()
+        .context("the selected suite has no program to profile")?;
+    let dependencies = programs::ensure_dependencies(&toolchain, std::slice::from_ref(program))?;
+    let out_dir = util::absolute(&args.out.unwrap_or_else(|| {
+        toolchain
+            .work_root
+            .join("profile")
+            .join(util::utc_timestamp())
+    }))?;
+    let report = profile::run(&profile::ProfileRequest {
+        toolchain: &toolchain,
+        program,
+        dependencies: &dependencies,
+        out_dir: out_dir.clone(),
+        seed: args.seed,
+    })?;
+    profile::write(&report, &out_dir)?;
+    println!("{}", profile::render_summary(&report));
+    eprintln!(
+        "[cogwasm-bench] wrote {} and {}",
+        out_dir.join("profile.json").display(),
+        out_dir.join("profile.md").display()
+    );
     Ok(())
 }
 
