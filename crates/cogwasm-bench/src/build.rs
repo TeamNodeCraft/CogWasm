@@ -77,7 +77,19 @@ impl Config {
                 flags: vec!["-Zcogwasm-cgu-per-fn".to_owned()],
                 incremental: true,
             }),
-            other => bail!("unknown config {other:?} (default, inline, capture or cgu-per-fn)"),
+            "incremental" => Ok(Self {
+                name: name.to_owned(),
+                flags: Vec::new(),
+                incremental: true,
+            }),
+            "incremental-memory" => Ok(Self {
+                name: name.to_owned(),
+                flags: vec!["-Zcogwasm-incremental-memory".to_owned()],
+                incremental: true,
+            }),
+            other => bail!(
+                "unknown config {other:?} (default, inline, capture, cgu-per-fn, incremental or incremental-memory)"
+            ),
         }
     }
 }
@@ -1233,6 +1245,16 @@ mod tests {
             vec!["-Zmir-inline-wasm", "-Zmir-capture-hoist"]
         );
         assert!(Config::parse("cgu-per-fn").expect("cgu").incremental);
+        assert!(
+            Config::parse("incremental")
+                .expect("incremental")
+                .incremental
+        );
+        assert!(
+            Config::parse("incremental-memory")
+                .expect("incremental-memory")
+                .incremental
+        );
         assert!(Config::parse("fast").is_err());
     }
 

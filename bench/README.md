@@ -152,9 +152,11 @@ V2 target table from [`agents/plans/v2.md`](../agents/plans/v2.md), filled only
 where the run collected a value.
 
 Configs are `default`, `inline` (`-Zmir-inline-wasm`), `capture`
-(`-Zmir-inline-wasm -Zmir-capture-hoist`) and `cgu-per-fn`
-(`-Zcogwasm-cgu-per-fn`, incremental only). `--runs N` is both the execution
-samples per seed and the number of measured edits. Compiler fuel uses a
+(`-Zmir-inline-wasm -Zmir-capture-hoist`), `incremental` (`-Cincremental`
+only), `incremental-memory` (`-Zcogwasm-incremental-memory`, incremental
+only) and `cgu-per-fn` (`-Zcogwasm-cgu-per-fn`, incremental only). `--runs N`
+is both the execution samples per seed and the number of measured edits.
+Compiler fuel uses a
 separate fuel-enabled engine and is measured twice per program x config; the
 run fails if the two samples differ. The edit loop verifies every warm edit
 against a fresh cold compile byte for byte, using the same artifact basename so

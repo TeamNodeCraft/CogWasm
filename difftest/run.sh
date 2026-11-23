@@ -188,6 +188,14 @@ compile_clif() {
     if [ "${DIFFTEST_CAPTURE_HOIST:-0}" = "1" ]; then
         extra+=(-Zmir-capture-hoist)
     fi
+    if [ "${DIFFTEST_INCREMENTAL_MEMORY:-0}" = "1" ]; then
+        # V2 phase 2 experiment. A one-shot compile exercises the in-memory
+        # encoder path; the edit loop is what exercises reuse across requests.
+        mkdir -p "$WORK/incremental-memory"
+        extra+=(-Zcogwasm-incremental-memory)
+        extra+=(-Cincremental="$WORK/incremental-memory/$name")
+        rm -rf "$WORK/incremental-memory/$name"
+    fi
     if [ "${DIFFTEST_CGU_PER_FN:-0}" = "1" ]; then
         # V2 phase 1 experiment. The flag only takes effect in incremental
         # mode, so give each program a fresh incremental directory; this is a

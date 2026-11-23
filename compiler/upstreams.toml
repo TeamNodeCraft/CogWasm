@@ -29,6 +29,7 @@ patches = [
     "0008-capture-aware-loop-field-hoist.patch",
     "0009-cgu-per-function.patch",
     "0010-wasm-placeholder-process-id.patch",
+    "0011-wasm-incremental-memory.patch",
 ]
 
 [upstream.playground]

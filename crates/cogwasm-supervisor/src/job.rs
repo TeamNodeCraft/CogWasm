@@ -129,6 +129,10 @@ pub struct CompileOptions {
     /// incremental builds (`-Zcogwasm-cgu-per-fn`). Off by default.
     #[serde(default, skip_serializing_if = "is_false")]
     pub cgu_per_fn: bool,
+    /// V2 phase 2 experiment: keep incremental artifacts in the serving
+    /// guest's memory (`-Zcogwasm-incremental-memory`). Off by default.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub incremental_memory: bool,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -147,6 +151,7 @@ impl Default for CompileOptions {
             codegen_units: None,
             debug: false,
             cgu_per_fn: false,
+            incremental_memory: false,
         }
     }
 }
@@ -204,6 +209,9 @@ impl CompileOptions {
         if self.cgu_per_fn {
             flags.push("-Zcogwasm-cgu-per-fn".to_owned());
         }
+        if self.incremental_memory {
+            flags.push("-Zcogwasm-incremental-memory".to_owned());
+        }
         flags
     }
 
@@ -226,6 +234,9 @@ impl CompileOptions {
         parts.push(format!("debug={}", yes_no(self.debug)));
         if self.cgu_per_fn {
             parts.push("cgu-per-fn=yes".to_owned());
+        }
+        if self.incremental_memory {
+            parts.push("incremental-memory=yes".to_owned());
         }
         parts.join(",")
     }
@@ -272,6 +283,7 @@ impl CompileOptions {
                 }
                 "debug" => options.debug = parse_bool(value)?,
                 "cgu-per-fn" => options.cgu_per_fn = parse_bool(value)?,
+                "incremental-memory" => options.incremental_memory = parse_bool(value)?,
                 other => return Err(format!("unknown option {other:?}")),
             }
         }

@@ -1,0 +1,394 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CogWasm <cogwasm@example.invalid>
+Date: Mon, 23 Nov 2026 17:20:00 +1030
+Subject: [PATCH] wasm: keep incremental artifacts in the serving guest
+
+A serving rustc rebuilds and re-reads its incremental dep graph, query
+cache and work-product index from disk on every edit. `-Zcogwasm-
+incremental-memory` keeps those three artifacts in a process-local map
+instead: a memory-backed FileEncoder publishes its finished bytes under a
+stable key (the incremental crate directory plus the file name), and
+`open_incremental_file` takes them before falling back to the file path.
+
+The dep graph is renamed from its staging path before the encoder finishes,
+so a rename of bytes that do not exist yet is recorded and applied when the
+encoder publishes. Work-product object files stay on disk; only their index
+is in memory.
+
+The flag is off by default, untracked, and only has an effect on wasm32. A
+one-shot process still compiles correctly: it publishes state and then exits
+without a reader, which is the same fallback as a cold incremental start.
+
+This is a local CogWasm experiment, not an upstream contribution; the code,
+comments and message are LLM-generated under the Rust project's personal-use
+exemption, and a human must review and own it before it goes anywhere else.
+
+---
+diff --git a/compiler/rustc_data_structures/src/memmap.rs b/compiler/rustc_data_structures/src/memmap.rs
+index d64a586..f12f4d0 100644
+--- a/compiler/rustc_data_structures/src/memmap.rs
++++ b/compiler/rustc_data_structures/src/memmap.rs
+@@ -39,6 +39,12 @@ pub unsafe fn map(mut file: File) -> io::Result<Self> {
+         file.read_to_end(&mut data)?;
+         Ok(Mmap(data))
+     }
++
++    /// Wrap bytes that were already read or encoded in memory.
++    #[inline]
++    pub fn from_vec(data: Vec<u8>) -> Self {
++        Mmap(data)
++    }
+ }
+ 
+ impl Deref for Mmap {
+diff --git a/compiler/rustc_incremental/src/persist/file_format.rs b/compiler/rustc_incremental/src/persist/file_format.rs
+index 853a5c9..b9347f3 100644
+--- a/compiler/rustc_incremental/src/persist/file_format.rs
++++ b/compiler/rustc_incremental/src/persist/file_format.rs
+@@ -60,9 +60,19 @@ pub(crate) fn save_in<F>(sess: &Session, path_buf: PathBuf, name: &str, encode:
+         Err(err) => sess.dcx().emit_fatal(diagnostics::DeleteOld { name, path: path_buf, err }),
+     }
+ 
+-    let mut encoder = match FileEncoder::new(&path_buf) {
+-        Ok(encoder) => encoder,
+-        Err(err) => sess.dcx().emit_fatal(diagnostics::CreateNew { name, path: path_buf, err }),
++    let memory = cfg!(target_arch = "wasm32") && sess.opts.unstable_opts.cogwasm_incremental_memory;
++    if memory {
++        rustc_serialize::memory_files::remove(&path_buf);
++    }
++    let mut encoder = if memory {
++        FileEncoder::new_memory(&path_buf)
++    } else {
++        match FileEncoder::new(&path_buf) {
++            Ok(encoder) => encoder,
++            Err(err) => {
++                sess.dcx().emit_fatal(diagnostics::CreateNew { name, path: path_buf, err });
++            }
++        }
+     };
+ 
+     write_file_header(&mut encoder, sess);
+@@ -113,6 +123,13 @@ pub(crate) fn open_incremental_file(
+     sess: &Session,
+     path: &Path,
+ ) -> Result<OpenFile, OpenFileError> {
++    #[cfg(target_arch = "wasm32")]
++    if sess.opts.unstable_opts.cogwasm_incremental_memory
++        && let Some(bytes) = rustc_serialize::memory_files::take(path)
++    {
++        return parse_open_file(sess, path, Mmap::from_vec(bytes));
++    }
++
+     let file = fs::File::open(path).map_err(|err| {
+         if err.kind() == io::ErrorKind::NotFound {
+             OpenFileError::NotFoundOrHeaderMismatch
+@@ -128,7 +145,10 @@ pub(crate) fn open_incremental_file(
+     //
+     // There is no way to prevent another process from modifying this file.
+     let mmap = unsafe { Mmap::map(file) }?;
++    parse_open_file(sess, path, mmap)
++}
+ 
++fn parse_open_file(sess: &Session, path: &Path, mmap: Mmap) -> Result<OpenFile, OpenFileError> {
+     let mut file = io::Cursor::new(&*mmap);
+ 
+     // Check FILE_MAGIC
+diff --git a/compiler/rustc_incremental/src/persist/load.rs b/compiler/rustc_incremental/src/persist/load.rs
+index 76e0bf9..66e554f 100644
+--- a/compiler/rustc_incremental/src/persist/load.rs
++++ b/compiler/rustc_incremental/src/persist/load.rs
+@@ -219,11 +219,19 @@ pub fn setup_dep_graph(
+     // Stream the dep-graph to an alternate file, to avoid overwriting anything in case of errors.
+     let path_buf = staging_dep_graph_path(&incr_comp_session);
+ 
+-    let mut encoder = FileEncoder::new(&path_buf).unwrap_or_else(|err| {
+-        // We're in incremental mode but couldn't set up streaming output of the dep graph.
+-        // Exit immediately instead of continuing in an inconsistent and untested state.
+-        sess.dcx().emit_fatal(diagnostics::CreateDepGraph { path: &path_buf, err })
+-    });
++    let memory = cfg!(target_arch = "wasm32") && sess.opts.unstable_opts.cogwasm_incremental_memory;
++    if memory {
++        rustc_serialize::memory_files::remove(&path_buf);
++    }
++    let mut encoder = if memory {
++        FileEncoder::new_memory(&path_buf)
++    } else {
++        FileEncoder::new(&path_buf).unwrap_or_else(|err| {
++            // We're in incremental mode but couldn't set up streaming output of the dep graph.
++            // Exit immediately instead of continuing in an inconsistent and untested state.
++            sess.dcx().emit_fatal(diagnostics::CreateDepGraph { path: &path_buf, err })
++        })
++    };
+ 
+     file_format::write_file_header(&mut encoder, sess);
+ 
+diff --git a/compiler/rustc_incremental/src/persist/save.rs b/compiler/rustc_incremental/src/persist/save.rs
+index 46f47d6..2bc74c1 100644
+--- a/compiler/rustc_incremental/src/persist/save.rs
++++ b/compiler/rustc_incremental/src/persist/save.rs
+@@ -45,7 +45,14 @@ pub(crate) fn save_dep_graph(tcx: TyCtxt<'_>) {
+         par_join(
+             move || {
+                 sess.time("incr_comp_persist_dep_graph", || {
+-                    if let Err(err) = fs::rename(&staging_dep_graph_path, &dep_graph_path) {
++                    if cfg!(target_arch = "wasm32")
++                        && sess.opts.unstable_opts.cogwasm_incremental_memory
++                    {
++                        rustc_serialize::memory_files::rename(
++                            &staging_dep_graph_path,
++                            &dep_graph_path,
++                        );
++                    } else if let Err(err) = fs::rename(&staging_dep_graph_path, &dep_graph_path) {
+                         sess.dcx().emit_err(diagnostics::MoveDepGraph {
+                             from: &staging_dep_graph_path,
+                             to: &dep_graph_path,
+diff --git a/compiler/rustc_serialize/src/lib.rs b/compiler/rustc_serialize/src/lib.rs
+index 364ae2a..fb7eacf 100644
+--- a/compiler/rustc_serialize/src/lib.rs
++++ b/compiler/rustc_serialize/src/lib.rs
+@@ -20,4 +20,5 @@
+ 
+ pub mod int_overflow;
+ pub mod leb128;
++pub mod memory_files;
+ pub mod opaque;
+diff --git a/compiler/rustc_serialize/src/memory_files.rs b/compiler/rustc_serialize/src/memory_files.rs
+new file mode 100644
+index 0000000..dbe323e
+--- /dev/null
++++ b/compiler/rustc_serialize/src/memory_files.rs
+@@ -0,0 +1,101 @@
++//! Process-local storage for incremental artifacts encoded into memory.
++//!
++//! A serving rustc can keep its incremental state alive between compile
++//! requests instead of writing it to disk and reading it back. Only encoders
++//! created with `FileEncoder::new_memory` publish here, and only the
++//! incremental machinery asks for them; the default file-backed path does not
++//! touch this map.
++
++use std::collections::BTreeMap;
++use std::path::{Path, PathBuf};
++use std::sync::{Mutex, MutexGuard};
++
++/// rustc renames a session directory at the end of a compile, and names the
++/// next session differently. The artifacts therefore live under a stable
++/// key: the incremental crate directory plus the file name, without the
++/// per-session directory between them.
++fn key(path: &Path) -> PathBuf {
++    let Some(file_name) = path.file_name() else {
++        return path.to_owned();
++    };
++    let Some(crate_dir) = path.parent().and_then(Path::parent) else {
++        return path.to_owned();
++    };
++    crate_dir.join(file_name)
++}
++
++/// Bytes published by a finished in-memory encoder, keyed by their path.
++static FILES: Mutex<BTreeMap<PathBuf, Vec<u8>>> = Mutex::new(BTreeMap::new());
++
++/// Renames requested before the encoder that writes `from` has finished.
++///
++/// The dep graph is renamed from its staging path in `save_dep_graph`, but the
++/// encoder only finishes (and publishes) afterwards. Record the destination
++/// so the publish lands at the final path.
++static PENDING_RENAMES: Mutex<BTreeMap<PathBuf, PathBuf>> = Mutex::new(BTreeMap::new());
++
++fn pending_renames() -> MutexGuard<'static, BTreeMap<PathBuf, PathBuf>> {
++    PENDING_RENAMES.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
++}
++
++fn files() -> MutexGuard<'static, BTreeMap<PathBuf, Vec<u8>>> {
++    // The map only holds finished encoded artifacts. A panic elsewhere must
++    // not disable the cache for the rest of the serving session.
++    FILES.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
++}
++
++/// Publish `bytes` under `path`, replacing any previous value.
++pub fn insert(path: PathBuf, bytes: Vec<u8>) {
++    let key = key(&path);
++    let mut files = files();
++    let destination = pending_renames().remove(&key).unwrap_or(key);
++    files.insert(destination, bytes);
++}
++
++/// Remove and return the bytes stored under `path`.
++pub fn take(path: &Path) -> Option<Vec<u8>> {
++    files().remove(&key(path))
++}
++
++/// Move the bytes stored under `from` to `to`.
++pub fn rename(from: &Path, to: &Path) {
++    let from = key(from);
++    let to = key(to);
++    let mut files = files();
++    if let Some(bytes) = files.remove(&from) {
++        files.insert(to, bytes);
++    } else {
++        pending_renames().insert(from, to);
++    }
++}
++
++/// Remove the bytes stored under `path`, if any.
++pub fn remove(path: &Path) {
++    let key = key(path);
++    files().remove(&key);
++    pending_renames().remove(&key);
++}
++
++#[cfg(test)]
++mod tests {
++    use std::path::PathBuf;
++
++    use super::{insert, rename, take};
++
++    fn path(file: &str, session: &str) -> PathBuf {
++        PathBuf::from("/incremental/cratehash").join(session).join(file)
++    }
++
++    #[test]
++    fn a_new_session_directory_finds_the_previous_artifact() {
++        insert(path("query-cache.bin", "s-old"), vec![1, 2]);
++        assert_eq!(take(&path("query-cache.bin", "s-new")), Some(vec![1, 2]));
++    }
++
++    #[test]
++    fn a_rename_before_the_encoder_finishes_lands_at_the_destination() {
++        rename(&path("dep-graph.part.bin", "s-new"), &path("dep-graph.bin", "s-new"));
++        insert(path("dep-graph.part.bin", "s-new"), vec![3]);
++        assert_eq!(take(&path("dep-graph.bin", "s-next")), Some(vec![3]));
++    }
++}
+diff --git a/compiler/rustc_serialize/src/opaque.rs b/compiler/rustc_serialize/src/opaque.rs
+index 4a644d3..7ae7fba 100644
+--- a/compiler/rustc_serialize/src/opaque.rs
++++ b/compiler/rustc_serialize/src/opaque.rs
+@@ -41,7 +41,7 @@ pub struct FileEncoder<'a> {
+     buf: Box<[u8; BUF_SIZE]>,
+     buffered: usize,
+     flushed: usize,
+-    file: File,
++    output: Output,
+     // This is used to implement delayed error handling, as described in the
+     // comment on `trait Encoder`.
+     res: Result<(), io::Error>,
+@@ -51,6 +51,11 @@ pub struct FileEncoder<'a> {
+     finished: bool,
+ }
+ 
++enum Output {
++    File(File),
++    Memory(Vec<u8>),
++}
++
+ impl<'a> FileEncoder<'a> {
+     pub fn new<P: AsRef<Path>>(path: P) -> io::Result<Self> {
+         // File::create opens the file for writing only. When -Zmeta-stats is enabled, the metadata
+@@ -64,7 +69,7 @@ pub fn new<P: AsRef<Path>>(path: P) -> io::Result<Self> {
+             path: path.as_ref().into(),
+             buffered: 0,
+             flushed: 0,
+-            file,
++            output: Output::File(file),
+             res: Ok(()),
+             flush_strategy: None,
+             #[cfg(debug_assertions)]
+@@ -72,6 +77,22 @@ pub fn new<P: AsRef<Path>>(path: P) -> io::Result<Self> {
+         })
+     }
+ 
++    /// An encoder that keeps its bytes in memory until [`FileEncoder::finish`]
++    /// publishes them in [`crate::memory_files`].
++    pub fn new_memory<P: AsRef<Path>>(path: P) -> Self {
++        FileEncoder {
++            buf: vec![0u8; BUF_SIZE].into_boxed_slice().try_into().unwrap(),
++            path: path.as_ref().into(),
++            buffered: 0,
++            flushed: 0,
++            output: Output::Memory(Vec::new()),
++            res: Ok(()),
++            flush_strategy: None,
++            #[cfg(debug_assertions)]
++            finished: false,
++        }
++    }
++
+     pub fn with_flush_strategy<P: AsRef<Path>>(
+         path: P,
+         strategy: &'a mut (dyn FnMut(&[u8]) + Send),
+@@ -97,7 +118,13 @@ pub fn flush(&mut self) {
+             self.finished = false;
+         }
+         if self.res.is_ok() {
+-            self.res = self.file.write_all(&self.buf[..self.buffered]);
++            self.res = match &mut self.output {
++                Output::File(file) => file.write_all(&self.buf[..self.buffered]),
++                Output::Memory(bytes) => {
++                    bytes.extend_from_slice(&self.buf[..self.buffered]);
++                    Ok(())
++                }
++            };
+         }
+         self.flushed += self.buffered;
+         if let Some(f) = &mut self.flush_strategy {
+@@ -108,7 +135,12 @@ pub fn flush(&mut self) {
+ 
+     #[inline]
+     pub fn file(&self) -> &File {
+-        &self.file
++        match &self.output {
++            Output::File(file) => file,
++            // Only metadata encoding asks for the file handle; it never runs
++            // on an in-memory encoder.
++            Output::Memory(_) => panic!("FileEncoder::file on an in-memory encoder"),
++        }
+     }
+ 
+     #[inline]
+@@ -131,7 +163,13 @@ fn write_all_cold_path(&mut self, buf: &[u8]) {
+             self.buffered += buf.len();
+         } else {
+             if self.res.is_ok() {
+-                self.res = self.file.write_all(buf);
++                self.res = match &mut self.output {
++                    Output::File(file) => file.write_all(buf),
++                    Output::Memory(bytes) => {
++                        bytes.extend_from_slice(buf);
++                        Ok(())
++                    }
++                };
+                 if let Some(f) = &mut self.flush_strategy {
+                     f(buf);
+                 }
+@@ -212,10 +250,17 @@ pub fn finish(&mut self) -> FileEncodeResult {
+         {
+             self.finished = true;
+         }
+-        match std::mem::replace(&mut self.res, Ok(())) {
++        let result = match std::mem::replace(&mut self.res, Ok(())) {
+             Ok(()) => Ok(self.position()),
+             Err(e) => Err((self.path.clone(), e)),
++        };
++        if result.is_ok()
++            && let Output::Memory(bytes) = &mut self.output
++        {
++            let bytes = std::mem::take(bytes);
++            crate::memory_files::insert(self.path.clone(), bytes);
+         }
++        result
+     }
+ }
+ 
+diff --git a/compiler/rustc_session/src/options.rs b/compiler/rustc_session/src/options.rs
+index f8aa256..3b4b0ec 100644
+--- a/compiler/rustc_session/src/options.rs
++++ b/compiler/rustc_session/src/options.rs
+@@ -2447,6 +2447,8 @@ pub(crate) fn parse_rust_version(slot: &mut Option<RustcVersion>, v: Option<&str
+         "emit mono items in the order of spans in source files (default: no)"),
+     cogwasm_cgu_per_fn: bool = (false, parse_bool, [TRACKED],
+         "put every monomorphised function in its own codegen unit in incremental builds; CogWasm V2 phase 1 experiment (default: no)"),
++    cogwasm_incremental_memory: bool = (false, parse_bool, [UNTRACKED],
++        "keep incremental dep-graph, query-cache and work-product-index artifacts in the serving guest's memory; CogWasm V2 phase 2 experiment (default: no)"),
+     contract_checks: Option<bool> = (None, parse_opt_bool, [TRACKED],
+         "emit runtime checks for contract pre- and post-conditions (default: no)"),
+     coverage_options: CoverageOptions = (CoverageOptions::default(), parse_coverage_options, [TRACKED],

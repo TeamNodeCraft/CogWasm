@@ -160,3 +160,88 @@ Raw profile data is under `toolchain/work/v2/m1/profile-large2/work/self-profile
 - `toolchain/rust/library/std/src/sys/process/unsupported.rs` (the wasm
   placeholder).
 - `docs/notes/v2-fixed-cost.md` (this note).
+
+## M2 result: in-memory incremental artifacts (negative)
+
+Status: **implemented behind `-Zcogwasm-incremental-memory`, correct, but a
+negative result for the fixed-cost target.** The flag keeps the dep graph,
+query cache and work-product index in the serving guest's memory instead of
+writing and re-reading them under the incremental directory. It removes the
+file I/O but not the work the profile actually found: rustc still hashes every
+query result and still encodes the dep graph and the query cache. The measured
+win is about 2-3%, below the 5% this milestone wanted, so the flag stays
+opt-in and nothing about the default pipeline changes.
+
+### What the flag does
+
+- `rustc_serialize` gains a memory-backed `FileEncoder`. It publishes its
+  finished bytes in a process-local map keyed by the incremental crate
+  directory and file name, not by the per-session directory rustc renames
+  after every compile.
+- `rustc_incremental` asks for a memory encoder for the dep graph, query
+  cache and work-product index when the flag is on. `open_incremental_file`
+  takes those bytes instead of opening the file; if there is no memory entry
+  it falls back to the normal file path.
+- The dep graph's staging-to-final rename happens before its encoder finishes.
+  `memory_files` records that pending rename and publishes the bytes at the
+  final key.
+- Work-product object files stay on disk. Only the index is in memory.
+- The flag is `[UNTRACKED]` and is never passed by the default pipeline, the
+  large/plugin benchmark defaults, the sysroot build or difftest.
+
+### Gates
+
+- `cogwasm-supervisor edit-loop --verify-cold --incremental-memory`: passed
+  on all four plugin programs and on the large program; every warm edit was
+  byte-identical to a fresh cold compile of the same source.
+- `difftest/run.sh --quick`: **PASS** flag off (60 s) and **PASS** with
+  `DIFFTEST_INCREMENTAL_MEMORY=1` (68 s), 56 handwritten + 8 generated
+  programs, zero mismatches.
+- Default pipeline unchanged: the large program still emits **7,092,923 B**
+  and executes **318,573,438** instructions in the default config, exactly
+  the M1 baseline numbers.
+- The `toolchain/sysroot` was not rebuilt or changed.
+
+### Measured effect
+
+`cogwasm-bench run`, 5 edits per program for the plugin suite and 3 for the
+large program, flag off vs on. The machine was heavily loaded (load average
+20-32 on 14 cores), so these are p50s with spread, not a quiet-machine claim.
+
+| program | edit p50 off | edit p50 on | change |
+| --- | ---: | ---: | ---: |
+| `collections` | 111.6 ms | 107.9 ms | -3.4% |
+| `expr` | 76.3 ms | 75.3 ms | -1.4% |
+| `json` | 91.8 ms | 89.5 ms | -2.5% |
+| `scene` | 76.7 ms | 75.1 ms | -2.1% |
+| plugin geomean | 84.3 ms | 82.4 ms | **-2.2%** |
+| large | 2,215.0 ms | 2,152.3 ms | **-2.8%** |
+
+The profile predicted that an in-memory serialization/load path could recover
+the encode/load half of the 1.28 s incremental bucket, roughly 0.4-0.6 s. The
+measurement says the file I/O itself was only about 60 ms of that on the large
+program; the hashing (`lower_to_hir`, `typeck_root`, `<unknown>`, about 0.50 s)
+and encoding (`incr_comp_encode_dep_graph`, `encode_query_results_for`, about
+0.33 s) dominate and remain. Removing those needs a different design: retain
+the previous session's `OnDiskCache`/`SerializedDepGraph` objects rather than
+re-encode them, which is a query-system change, not a file-backend change.
+
+### Decision
+
+Keep the flag as a measurement tool. Do not make it default. The next lever
+with a measurable payoff on this program is phase 1's CGU/link work (M3), not
+another incremental file backend.
+
+### Files changed in M2
+
+- `compiler/rustc_serialize/src/{lib,opaque,memory_files}.rs`,
+  `compiler/rustc_data_structures/src/memmap.rs`,
+  `compiler/rustc_incremental/src/persist/{file_format,load,save}.rs`,
+  `compiler/rustc_session/src/options.rs`.
+- `compiler/patches/rust/0011-wasm-incremental-memory.patch` (new),
+  `compiler/upstreams.toml` (lists it after `0010`),
+  `toolchain/rust/.cogwasm-applied-patches`.
+- `crates/cogwasm-supervisor/src/{job,main}.rs` (the opt-in flag),
+  `crates/cogwasm-bench/src/build.rs` (`incremental` and
+  `incremental-memory` configs), `difftest/run.sh` (the opt-in
+  `DIFFTEST_INCREMENTAL_MEMORY` path).
