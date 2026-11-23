@@ -84,6 +84,8 @@ pub struct CompileOutcome {
     pub compile_ms: f64,
     /// One entry per `playground.spawn` call the guest made.
     pub spawns: Vec<SpawnSummary>,
+    /// Wasmtime fuel the job consumed, when the store has fuel enabled.
+    pub fuel_used: Option<u64>,
 }
 
 /// What to do with a guest store after a successful job.
@@ -146,6 +148,8 @@ pub fn compile_args(
             args: record.argv.len().saturating_sub(1),
             ms: record.ms,
             status: record.status,
+            instructions: record.counters.instructions,
+            cycles: record.counters.cycles,
         })
         .collect::<Vec<_>>();
     let link_ms: f64 = spawns.iter().map(|s| s.ms).sum();
@@ -167,6 +171,9 @@ pub fn compile_args(
         link_ms,
         compile_ms: (rustc_total_ms - link_ms).max(0.0),
         spawns,
+        // The one-shot host does not enable fuel; the benchmark reads fuel
+        // from its own `run_fresh` stores.
+        fuel_used: None,
     })
 }
 

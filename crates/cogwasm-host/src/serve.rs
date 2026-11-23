@@ -67,12 +67,37 @@ impl ServeSession {
         linker: &Path,
         preopens: &[PathBuf],
     ) -> Result<Self> {
+        Self::new_with_fuel(engine, module, linker, preopens, None)
+    }
+
+    /// Like [`ServeSession::new`], but optionally cap the store's fuel so each
+    /// request's compiler work can be read back deterministically. The engine
+    /// must have been created with `consume_fuel(true)`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the worker cannot be spawned, the guest cannot be
+    /// instantiated, or its `_start` exits before the first request.
+    pub fn new_with_fuel(
+        engine: &Engine,
+        module: &Module,
+        linker: &Path,
+        preopens: &[PathBuf],
+        fuel: Option<u64>,
+    ) -> Result<Self> {
         let (request_tx, request_rx) = channel();
         let (event_tx, event_rx) = channel();
+        // Fuel samples need every guest input identical: pin the clock and
+        // randomness, as the one-shot fuel path does. Timed sessions leave
+        // these unset and keep the product's real entropy and clock.
+        let fuel_run = fuel.is_some();
         let options = StoreOptions {
             env: vec![("COGWASM_SERVE".to_owned(), "1".to_owned())],
             serve: Some(ServeHooks::new(request_rx, event_tx.clone())),
             preopens: preopens.to_vec(),
+            fuel,
+            deterministic_random: fuel_run.then_some(0),
+            deterministic_clock: fuel_run,
             ..StoreOptions::default()
         };
         let worker_engine = engine.clone();
@@ -182,6 +207,7 @@ impl ServeSession {
                         link_ms,
                         compile_ms: (rustc_total_ms - link_ms).max(0.0),
                         spawns,
+                        fuel_used: finish.fuel_used,
                     });
                 }
                 Ok(ServeEvent::Ended(message)) => {
