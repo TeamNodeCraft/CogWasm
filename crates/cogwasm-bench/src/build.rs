@@ -79,7 +79,24 @@ impl Config {
                 flags: vec!["-Zcogwasm-cgu-per-fn".to_owned()],
                 incremental: true,
             }),
-            other => bail!("unknown config {other:?} (default, inline, capture or cgu-per-fn)"),
+            "incremental" => Ok(Self {
+                name: name.to_owned(),
+                flags: Vec::new(),
+                incremental: true,
+            }),
+            "incremental-memory" => Ok(Self {
+                name: name.to_owned(),
+                flags: vec!["-Zcogwasm-incremental-memory".to_owned()],
+                incremental: true,
+            }),
+            "cgu-local" => Ok(Self {
+                name: name.to_owned(),
+                flags: vec!["-Zcogwasm-cgu-local".to_owned()],
+                incremental: true,
+            }),
+            other => bail!(
+                "unknown config {other:?} (default, inline, capture, cgu-per-fn, cgu-local, incremental or incremental-memory)"
+            ),
         }
     }
 }
@@ -1617,7 +1634,11 @@ fn artifact_from_file(path: &Path, name: &str) -> Result<Artifact> {
     artifact_from_bytes(bytes, name, None)
 }
 
-fn artifact_from_bytes(bytes: Vec<u8>, name: &str, link_ms: Option<u64>) -> Result<Artifact> {
+pub(crate) fn artifact_from_bytes(
+    bytes: Vec<u8>,
+    name: &str,
+    link_ms: Option<u64>,
+) -> Result<Artifact> {
     let key = util::sha256_hex(&bytes);
     let length = u64::try_from(bytes.len()).context("artifact length")?;
     Ok(Artifact {
@@ -1747,6 +1768,17 @@ mod tests {
             vec!["-Zmir-inline-wasm", "-Zmir-capture-hoist"]
         );
         assert!(Config::parse("cgu-per-fn").expect("cgu").incremental);
+        assert!(
+            Config::parse("incremental")
+                .expect("incremental")
+                .incremental
+        );
+        assert!(
+            Config::parse("incremental-memory")
+                .expect("incremental-memory")
+                .incremental
+        );
+        assert!(Config::parse("cgu-local").expect("cgu-local").incremental);
         assert!(Config::parse("fast").is_err());
     }
 

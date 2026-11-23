@@ -95,7 +95,11 @@ project's** style and lints instead (see [CONTRIBUTING.md](../CONTRIBUTING.md)).
 - One logical change per commit. The message says what changed and why; a bug
   fix also says the root cause and how it was verified.
 - Commits made with substantial AI help say so in a trailer
-  (`Co-Authored-By:` naming the tool).
+  (`Co-Authored-By:` naming the tool). That is the only AI disclosure: don't
+  add LLM-provenance disclaimers (for example "LLM-generated under the Rust
+  project's personal-use exemption") to notes, patches, code comments or
+  commit messages. Upstream AI policies in CONTRIBUTING.md apply only to work
+  sent upstream, and we are not upstreaming.
 - Don't commit build outputs, toolchains or large binaries.
 - Experiments that only touch docs can use `[skip ci]`; anything that changes
   the build or tests must let CI run.

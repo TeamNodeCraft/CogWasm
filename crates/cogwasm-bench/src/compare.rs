@@ -445,12 +445,12 @@ fn collect(result: &BenchResult) -> BTreeMap<String, Point> {
                 &measurement.build.edit.link_instructions,
                 true,
             );
-            insert_metric(
-                &mut points,
-                &format!("{base}.build.edit.swap_instructions"),
-                &measurement.build.edit.swap_instructions,
-                true,
-            );
+            // The swap's instructions retired are reported but not compared:
+            // Wasmtime compiles the module on parallel threads whose
+            // spin-waits depend on machine load, so even the minimum of N
+            // moved by 8.8% between two identical busy runs, beyond any
+            // useful tolerance. Edit fuel and link instructions cover the
+            // edit's work deterministically.
             for (label, metric) in measurement.build.native.iter() {
                 insert_metric(
                     &mut points,

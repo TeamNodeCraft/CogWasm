@@ -200,6 +200,32 @@ jobs:
           bash bench/run.sh --quick --runs 3 --fuel \
             --out "bench/results/quick-${GITHUB_RUN_ID}.json"
 
+      # V2 numbers in CI: cogwasm-bench's own quick suite next to the Python
+      # one above. Non-blocking, because the Python run remains the gate and
+      # the point publish-history records; this step only publishes a second
+      # result document to compare against it.
+      - name: cogwasm-bench quick numbers
+        if: success()
+        continue-on-error: true
+        run: |
+          export PATH="$PWD/toolchain/cargo/bin:$PATH"
+          export CARGO_HOME="$PWD/toolchain/cargo"
+          export RUSTUP_HOME="$PWD/toolchain/rustup"
+          cargo run --release -p cogwasm-bench -- run --suite quick --runs 3 \
+            --out toolchain/work/bench/ci-quick
+
+      - name: upload cogwasm-bench quick numbers
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cogwasm-bench-quick-${{ github.run_id }}
+          path: |
+            toolchain/work/bench/ci-quick/result.json
+            toolchain/work/bench/ci-quick/report.md
+          if-no-files-found: warn
+          retention-days: 30
+          compression-level: 6
+
       # Exact executed wasm instructions for the same quick modules, plus the
       # compiler-work median already in the JSON. Two measurements per module
       # are compared inside count.py, so a drifting count stops the run.

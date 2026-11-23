@@ -224,7 +224,10 @@ counter comparisons was 0.50%. That is why the default counter tolerance is
 5%, and why counters compare the minimum of N repeats rather than their
 median: parallel Wasmtime compilation spin-waits differently under load, so a
 single swap-compile median can move by tens of percent while its cheapest
-compile stays within about 1%.
+compile stays within about 1%. Under heavier load even that minimum moved by
+8.8% (`nbody`, two runs of two edits), so the swap's instructions retired are
+reported but `compare` does not judge them; edit fuel and the link counters
+cover the edit's work.
 
 `cogwasm-bench ab` compares two configs or two rustc.wasm builds by alternating
 A, B, A, B per program so drift hits both sides equally. It reports the
@@ -232,11 +235,13 @@ minimum of N rounds and the A/B ratio with its per-round spread, and marks a
 run non-definitive when it was not idle-qualified.
 
 Configs are `default`, `inline` (`-Zmir-inline-wasm`), `capture`
-(`-Zmir-inline-wasm -Zmir-capture-hoist`) and `cgu-per-fn`
-(`-Zcogwasm-cgu-per-fn`, incremental only). `--runs N` is both the execution
-samples per seed and the number of measured edits. Compiler fuel uses a
-separate fuel-enabled engine and is measured for the cold compile, the warm
-compile and every edit-loop compile. The timed passes keep their current
+(`-Zmir-inline-wasm -Zmir-capture-hoist`), `incremental` (`-Cincremental`
+only), `incremental-memory` (`-Zcogwasm-incremental-memory`, incremental
+only), `cgu-per-fn` (`-Zcogwasm-cgu-per-fn`, incremental only) and
+`cgu-local` (`-Zcogwasm-cgu-local`, incremental only). `--runs N` is both
+the execution samples per seed and the number of measured edits. Compiler fuel
+uses a separate fuel-enabled engine and is measured for the cold compile, the
+warm compile and every edit-loop compile. The timed passes keep their current
 engines; fuel passes run on the fuel engine and are never timed. Cold and warm
 fuel are each sampled twice (and must agree); edit fuel replays the edit
 sequence twice and fails loudly if the per-edit samples differ. The edit loop

@@ -11,11 +11,6 @@ and the hoist stay opt-in. B, C and D are met; A is not (`strings` 2.98x,
 `collections` 4.50x, `sort` 1.99x, `json` 3.68x of LLVM `-O2`). The default,
 fast and pure sysroot builds are unchanged.
 
-> The pass code, patch header and this note are LLM-generated under the Rust
-> project's personal-use exemption. This is a local CogWasm experiment, not an
-> upstream contribution; a human must review and own it before it goes
-> anywhere else.
-
 ## What landed
 
 > Historical: the `0005` pass described in this section was dropped in the

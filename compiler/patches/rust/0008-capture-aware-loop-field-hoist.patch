@@ -30,9 +30,7 @@ non-capturing and no borrow of it is used inside the loop.
 
 The pass is opt-in through `-Zmir-capture-hoist`; the compiler, the sysroot
 and the default benchmark builds do not pass it. It is a local CogWasm
-experiment, not an upstream contribution; the code, comments and this message
-are LLM-generated under the Rust project's personal-use exemption, and a human
-must review and own it before it goes anywhere else.
+experiment, not an upstream contribution.
 
 ---
 diff --git a/compiler/rustc_mir_transform/src/lib.rs b/compiler/rustc_mir_transform/src/lib.rs
@@ -112,9 +110,9 @@ new file mode 100644
 +//! - inline asm with a tainted operand, pointer-to-integer casts, yields and
 +//!   unwind edges capture it.
 +//!
-+//! This is a local CogWasm experiment, not an upstream contribution. The code
-+//! is LLM-generated under the Rust project's personal-use exemption and a
-+//! human must review and own it.
++//! This is a local CogWasm experiment, not an upstream contribution. It is
++//! opt-in through `-Zmir-capture-hoist`; the compiler, the sysroot and the
++//! default benchmark builds do not pass it.
 +
 +use std::cell::RefCell;
 +
@@ -930,9 +928,9 @@ new file mode 100644
 +//! not been validated with it on, and the flag is the boundary between the
 +//! measured experiment and the shipped pipeline.
 +//!
-+//! This is a local CogWasm experiment, not an upstream contribution. The code
-+//! and comments are LLM-generated under the Rust project's personal-use
-+//! exemption and a human must review and own it before it goes anywhere else.
++//! This is a local CogWasm experiment, not an upstream contribution. It is
++//! opt-in through `-Zmir-capture-hoist`; the compiler, the sysroot and the
++//! default benchmark builds do not pass it.
 +
 +use rustc_data_structures::fx::FxHashMap;
 +use rustc_data_structures::graph::dominators::Dominators;
