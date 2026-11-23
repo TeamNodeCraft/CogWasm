@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: CogWasm <cogwasm@example.invalid>
+Date: Mon, 23 Nov 2026 16:30:00 +1030
+Subject: [PATCH] wasm: give std a placeholder process id
+
+rustc's self-profiler calls `std::process::id()` to make its output file
+name unique. On wasm32-wasip1 that reaches `sys::process::unsupported` and
+panics before the front end runs, so a warm edit with `-Zself-profile`
+cannot be profiled inside the serving guest at all. The panic also happens
+inside measureme's `Profiler::with_counter`, so avoiding the call in rustc
+alone is not enough.
+
+A serving guest runs one profiled session at a time, so return the constant 1
+on wasm and keep the explicit panic on every other unsupported platform. The
+profile file name keeps its existing shape, `{crate}-{pid}.rustc_profile`,
+which measureme writes as `{crate}-{pid}.mm_profdata`.
+
+Default compiler behaviour is unchanged: the wasm branch only runs when a
+caller asks for a process id. This is a local CogWasm experiment, not an
+upstream contribution; the code, comment and message are LLM-generated under
+the Rust project's personal-use exemption, and a human must review and own it
+before it goes anywhere else.
+
+---
+diff --git a/library/std/src/sys/process/unsupported.rs b/library/std/src/sys/process/unsupported.rs
+index f7d7f489e..255381bc4 100644
+--- a/library/std/src/sys/process/unsupported.rs
++++ b/library/std/src/sys/process/unsupported.rs
+@@ -332,5 +332,13 @@ pub fn read_output(
+ }
+ 
+ pub fn getpid() -> u32 {
+-    panic!("no pids on this platform")
++    // wasm32-wasip1 has no process id. The serving rustc uses it only to name
++    // self-profile output, and runs one profiled session at a time, so a
++    // stable placeholder lets that code path work without changing anything
++    // else; every other platform keeps the explicit panic.
++    if cfg!(target_family = "wasm") {
++        1
++    } else {
++        panic!("no pids on this platform")
++    }
+ }
+-- 
+2.43.0

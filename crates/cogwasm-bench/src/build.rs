@@ -1099,7 +1099,11 @@ fn artifact_from_file(path: &Path, name: &str) -> Result<Artifact> {
     artifact_from_bytes(bytes, name, None)
 }
 
-fn artifact_from_bytes(bytes: Vec<u8>, name: &str, link_ms: Option<u64>) -> Result<Artifact> {
+pub(crate) fn artifact_from_bytes(
+    bytes: Vec<u8>,
+    name: &str,
+    link_ms: Option<u64>,
+) -> Result<Artifact> {
     let key = util::sha256_hex(&bytes);
     let length = u64::try_from(bytes.len()).context("artifact length")?;
     Ok(Artifact {
